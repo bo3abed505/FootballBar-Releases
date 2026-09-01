@@ -23,4 +23,7 @@
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarInjection.cs" Link="TaskbarInjection.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\client\FootballTray.Core\FootballTray.Core.csproj" />
+  </ItemGroup>
 </Project>

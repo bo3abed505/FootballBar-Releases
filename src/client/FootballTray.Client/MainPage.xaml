@@ -26,25 +26,104 @@
         </StackPanel>
 
         <!-- Controls / Actions -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
-            <Button
-                x:Name="RepositionButton"
-                Click="OnRepositionClick"
-                Style="{ThemeResource AccentButtonStyle}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                    <TextBlock Text="Recalculate &amp; Reposition" />
-                </StackPanel>
-            </Button>
+        <StackPanel Grid.Row="1" Spacing="12">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button
+                    x:Name="RepositionButton"
+                    Click="OnRepositionClick"
+                    Style="{ThemeResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                        <TextBlock Text="Recalculate &amp; Reposition" />
+                    </StackPanel>
+                </Button>
 
-            <Button
-                x:Name="ToggleVisibilityButton"
-                Click="OnToggleVisibilityClick">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE7B3;" FontSize="14" />
-                    <TextBlock Text="Toggle Taskbar Visibility" />
+                <Button
+                    x:Name="ToggleVisibilityButton"
+                    Click="OnToggleVisibilityClick">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7B3;" FontSize="14" />
+                        <TextBlock Text="Toggle Taskbar Visibility" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <!-- Mock Match Simulation Card -->
+            <Border
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="16">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                        <TextBlock
+                            Text="Mock Match Engine (Milestone 3)"
+                            FontWeight="SemiBold"
+                            Style="{ThemeResource SubtitleTextBlockStyle}" />
+                    </StackPanel>
+
+                    <!-- Match Summary Banner -->
+                    <Border Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}" CornerRadius="6" Padding="12">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock
+                                Grid.Column="0"
+                                x:Name="HomeTeamText"
+                                Text="FC Barcelona"
+                                HorizontalAlignment="Right"
+                                FontWeight="Bold"
+                                VerticalAlignment="Center" />
+
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Name="MatchScoreText"
+                                    Text="0 - 0"
+                                    FontSize="20"
+                                    FontWeight="Bold"
+                                    HorizontalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="MatchStatusText"
+                                    Text="PREMATCH (00:00)"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    HorizontalAlignment="Center" />
+                            </StackPanel>
+
+                            <TextBlock
+                                Grid.Column="2"
+                                x:Name="AwayTeamText"
+                                Text="Real Madrid"
+                                HorizontalAlignment="Left"
+                                FontWeight="Bold"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Simulation Action Buttons -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="StepNextButton" Click="OnStepNextClick">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE768;" FontSize="12" />
+                                <TextBlock Text="Step Next Event" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="Advance17Button" Click="OnAdvance17Click" Content="Goal (17')" />
+                        <Button x:Name="AdvanceHtButton" Click="OnAdvanceHtClick" Content="Halftime (45')" />
+                        <Button x:Name="Advance72Button" Click="OnAdvance72Click" Content="Goal (72')" />
+                        <Button x:Name="AdvanceFtButton" Click="OnAdvanceFtClick" Content="Full Time (90+5')" />
+                        <Button x:Name="ResetSimButton" Click="OnResetSimClick" Content="Reset Simulation" />
+                    </StackPanel>
+
+                    <!-- Match Events Feed -->
+                    <TextBlock x:Name="RecentEventText" Text="Events: None yet" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
-            </Button>
+            </Border>
         </StackPanel>
 
         <!-- Diagnostic Log View -->
