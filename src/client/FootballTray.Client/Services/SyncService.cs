@@ -8,10 +8,12 @@ namespace FootballTray.Client.Services;
 public class TrayUpdateEventArgs : EventArgs
 {
     public TrayDataDto? TrayData { get; init; }
+    public DataFreshnessState FreshnessState { get; init; }
     public TickerConnectionState ConnectionState { get; init; }
     public string FormattedText { get; init; } = string.Empty;
     public int Version { get; init; }
     public string? ETag { get; init; }
+    public DateTimeOffset? LastValidatedAt { get; init; }
 }
 
 public class SyncService : IDisposable
@@ -19,20 +21,25 @@ public class SyncService : IDisposable
     private readonly FootballApiClient _apiClient;
     private readonly LocalCacheService _cacheService;
     private readonly TimeSpan _pollingInterval;
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private CancellationTokenSource? _cts;
     private Task? _pollingTask;
+    private Task<DataFreshnessState>? _inFlightPollTask;
 
     private string? _lastKnownEtag;
     private int _lastKnownVersion;
     private TrayDataDto? _currentTrayData;
-    private TickerConnectionState _currentState = TickerConnectionState.NoCacheOffline;
+    private DataFreshnessState _freshnessState = DataFreshnessState.Empty;
+    private DateTimeOffset? _lastValidatedAt;
 
     public event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
 
     public TrayDataDto? CurrentTrayData => _currentTrayData;
-    public TickerConnectionState CurrentState => _currentState;
+    public DataFreshnessState FreshnessState => _freshnessState;
+    public TickerConnectionState CurrentState => MapToConnectionState(_freshnessState);
     public int LastKnownVersion => _lastKnownVersion;
     public string? LastKnownETag => _lastKnownEtag;
+    public DateTimeOffset? LastValidatedAt => _lastValidatedAt;
 
     public SyncService(
         FootballApiClient apiClient,
@@ -45,28 +52,30 @@ public class SyncService : IDisposable
     }
 
     /// <summary>
-    /// Starts the initial sync and launches the background polling loop.
+    /// Starts the initial sync and launches the background periodic polling loop.
+    /// Immediately restores valid local cache to avoid blocking UI initialization.
     /// </summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         _cts?.Cancel();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        // 1. Load local cache immediately
+        // 1. Immediately restore local cache for instant UI presentation
         var cached = await _cacheService.LoadCacheAsync(_cts.Token);
         if (cached?.Envelope?.Data != null)
         {
             _currentTrayData = cached.Envelope.Data;
             _lastKnownVersion = cached.Envelope.Version;
             _lastKnownEtag = cached.ETag;
-            _currentState = TickerConnectionState.OnlineStale;
+            _lastValidatedAt = cached.LastValidatedAt != default ? cached.LastValidatedAt : cached.CachedAt;
+            _freshnessState = DataFreshnessState.Stale;
 
-            PublishUpdate(_currentTrayData, _currentState, _lastKnownVersion, _lastKnownEtag);
+            PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
         }
         else
         {
-            _currentState = TickerConnectionState.NoCacheOffline;
-            PublishUpdate(null, _currentState, 0, null);
+            _freshnessState = DataFreshnessState.Empty;
+            PublishUpdate(null, _freshnessState, 0, null, null);
         }
 
         // 2. Perform initial immediate network sync
@@ -77,23 +86,45 @@ public class SyncService : IDisposable
     }
 
     /// <summary>
-    /// Executes a single polling iteration against the backend API.
+    /// Executes a single polling iteration with single-flight concurrency protection.
+    /// Multiple concurrent callers share the same active in-flight request.
     /// </summary>
-    public async Task PollOnceAsync(CancellationToken cancellationToken = default)
+    public Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default)
     {
+        lock (_refreshLock)
+        {
+            if (_inFlightPollTask != null && !_inFlightPollTask.IsCompleted)
+            {
+                return _inFlightPollTask;
+            }
+
+            _inFlightPollTask = ExecutePollInternalAsync(cancellationToken);
+            return _inFlightPollTask;
+        }
+    }
+
+    private async Task<DataFreshnessState> ExecutePollInternalAsync(CancellationToken cancellationToken)
+    {
+        await _refreshLock.WaitAsync(cancellationToken);
         try
         {
             var response = await _apiClient.GetTrayAsync(_lastKnownEtag, cancellationToken);
 
             if (response.IsNotModified)
             {
-                // 304 Not Modified: Data is unchanged on server
-                if (_currentState != TickerConnectionState.OnlineFresh)
+                // 304 Not Modified: Server confirms cached representation is still current
+                _freshnessState = DataFreshnessState.NotModified;
+                _lastValidatedAt = DateTimeOffset.UtcNow;
+                if (!string.IsNullOrWhiteSpace(response.ETag))
                 {
-                    _currentState = TickerConnectionState.OnlineFresh;
-                    PublishUpdate(_currentTrayData, _currentState, _lastKnownVersion, _lastKnownEtag);
+                    _lastKnownEtag = response.ETag;
                 }
-                return;
+
+                // Update cache validation timestamp
+                await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
+
+                PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                return _freshnessState;
             }
 
             if (response.IsSuccess && response.Envelope?.Data != null)
@@ -107,48 +138,50 @@ public class SyncService : IDisposable
                     _currentTrayData = envelope.Data;
                     _lastKnownVersion = serverVersion;
                     _lastKnownEtag = response.ETag;
-                    _currentState = TickerConnectionState.OnlineFresh;
+                    _lastValidatedAt = DateTimeOffset.UtcNow;
+                    _freshnessState = DataFreshnessState.Fresh;
 
                     // Atomically persist to disk
                     await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
 
-                    PublishUpdate(_currentTrayData, _currentState, _lastKnownVersion, _lastKnownEtag);
+                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                    return _freshnessState;
                 }
-                return;
             }
 
-            // Server returned error or unreachable
-            HandleOfflineState();
+            // Server returned error (4xx/5xx), network failure, or malformed payload
+            return HandleOfflineFallback();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Graceful cancellation
+            return _freshnessState;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[SYNC] Poll error: {ex.Message}");
-            HandleOfflineState();
+            return HandleOfflineFallback();
+        }
+        finally
+        {
+            _refreshLock.Release();
         }
     }
 
-    private void HandleOfflineState()
+    private DataFreshnessState HandleOfflineFallback()
     {
         if (_currentTrayData != null)
         {
-            if (_currentState != TickerConnectionState.OfflineCached)
-            {
-                _currentState = TickerConnectionState.OfflineCached;
-                PublishUpdate(_currentTrayData, _currentState, _lastKnownVersion, _lastKnownEtag);
-            }
+            // Valid cached data exists: preserve payload and mark state STALE
+            _freshnessState = DataFreshnessState.Stale;
+            PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
         }
         else
         {
-            if (_currentState != TickerConnectionState.NoCacheOffline)
-            {
-                _currentState = TickerConnectionState.NoCacheOffline;
-                PublishUpdate(null, _currentState, 0, null);
-            }
+            // No valid cached data: mark EMPTY
+            _freshnessState = DataFreshnessState.Empty;
+            PublishUpdate(null, _freshnessState, 0, null, null);
         }
+        return _freshnessState;
     }
 
     private async Task PollingLoopAsync(CancellationToken cancellationToken)
@@ -169,23 +202,36 @@ public class SyncService : IDisposable
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[SYNC] Periodic loop error: {ex.Message}");
-                HandleOfflineState();
+                HandleOfflineFallback();
             }
         }
     }
 
-    private void PublishUpdate(TrayDataDto? data, TickerConnectionState state, int version, string? etag)
+    private void PublishUpdate(TrayDataDto? data, DataFreshnessState freshness, int version, string? etag, DateTimeOffset? lastValidated)
     {
-        var formatted = TrayTickerFormatter.FormatTicker(data, state);
+        var connectionState = MapToConnectionState(freshness);
+        var formatted = TrayTickerFormatter.FormatTicker(data, freshness);
         TrayUpdated?.Invoke(this, new TrayUpdateEventArgs
         {
             TrayData = data,
-            ConnectionState = state,
+            FreshnessState = freshness,
+            ConnectionState = connectionState,
             FormattedText = formatted,
             Version = version,
             ETag = etag,
+            LastValidatedAt = lastValidated,
         });
     }
+
+    private static TickerConnectionState MapToConnectionState(DataFreshnessState freshness) =>
+        freshness switch
+        {
+            DataFreshnessState.Fresh => TickerConnectionState.OnlineFresh,
+            DataFreshnessState.NotModified => TickerConnectionState.OnlineFresh,
+            DataFreshnessState.Stale => TickerConnectionState.OfflineCached,
+            DataFreshnessState.Empty => TickerConnectionState.NoCacheOffline,
+            _ => TickerConnectionState.NoCacheOffline,
+        };
 
     public void Stop()
     {
@@ -197,5 +243,7 @@ public class SyncService : IDisposable
     public void Dispose()
     {
         Stop();
+        _refreshLock.Dispose();
     }
 }
+

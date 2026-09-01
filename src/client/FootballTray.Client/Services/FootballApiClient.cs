@@ -107,9 +107,14 @@ public class FootballApiClient : IDisposable
                 var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 var envelope = await JsonSerializer.DeserializeAsync<ApiResponseEnvelope<TrayDataDto>>(contentStream, JsonOptions, cancellationToken);
 
-                if (envelope == null || envelope.Data == null)
+                if (envelope == null)
                 {
                     return TrayApiResponse.Error("Failed to deserialize tray response envelope.");
+                }
+
+                if (!TrayPayloadValidator.IsValid(envelope, out var validationError))
+                {
+                    return TrayApiResponse.Error($"Malformed tray response payload: {validationError}");
                 }
 
                 return TrayApiResponse.Success(envelope, newEtag);

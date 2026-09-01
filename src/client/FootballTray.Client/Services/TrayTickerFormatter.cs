@@ -57,6 +57,22 @@ public static class TrayTickerFormatter
     }
 
     /// <summary>
+    /// Formats the current TrayDataDto into a compact taskbar ticker string based on data freshness state.
+    /// </summary>
+    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState)
+    {
+        var connectionState = freshnessState switch
+        {
+            DataFreshnessState.Fresh => TickerConnectionState.OnlineFresh,
+            DataFreshnessState.NotModified => TickerConnectionState.OnlineFresh,
+            DataFreshnessState.Stale => TickerConnectionState.OfflineCached,
+            DataFreshnessState.Empty => TickerConnectionState.NoCacheOffline,
+            _ => TickerConnectionState.NoCacheOffline,
+        };
+        return FormatTicker(trayData, connectionState);
+    }
+
+    /// <summary>
     /// Formats the current TrayDataDto into a compact taskbar ticker string.
     /// </summary>
     public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState)
