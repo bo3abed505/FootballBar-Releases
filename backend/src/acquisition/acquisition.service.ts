@@ -1,4 +1,4 @@
-import { FootballProvider, ProviderFixture } from '../providers/football-provider.js';
+import { FootballProvider, ProviderFixture, FixtureFilter } from '../providers/football-provider.js';
 import {
   normalizeCompetition,
   normalizeSeason,
@@ -25,8 +25,8 @@ export class AcquisitionService {
   /**
    * Fetches data from provider and normalizes all entities into canonical format
    */
-  async acquireAll(): Promise<NormalizedAcquisitionBatch> {
-    const rawFixtures: ProviderFixture[] = await this.provider.getFixtures();
+  async acquireAll(filter?: FixtureFilter): Promise<NormalizedAcquisitionBatch> {
+    const rawFixtures: ProviderFixture[] = await this.provider.getFixtures(filter);
 
     const compMap = new Map<string, CanonicalCompetition>();
     const seasonMap = new Map<string, CanonicalSeason>();

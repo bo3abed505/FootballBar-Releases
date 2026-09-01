@@ -378,4 +378,175 @@ describe('ApiFootballClient & ApiFootballProvider (Mocked Network)', () => {
     // 999 was filtered out
     expect(discovered.some((d) => d.league.id === 999)).toBe(false);
   });
+
+  it('queries fixtures per competition ID when competitionIds is provided', async () => {
+    const requestedUrls: string[] = [];
+
+    const mockFetch = async (url: string) => {
+      requestedUrls.push(url);
+
+      const parsedUrl = new URL(url);
+      const leagueParam = parsedUrl.searchParams.get('league');
+
+      const fixtureId = leagueParam === '39' ? 3901 : 14001;
+      const leagueName = leagueParam === '39' ? 'Premier League' : 'La Liga';
+
+      return {
+        status: 200,
+        headers: new Headers({ 'x-ratelimit-requests-remaining': '90' }),
+        json: async () => ({
+          get: 'fixtures',
+          parameters: { league: leagueParam },
+          errors: [],
+          results: 1,
+          paging: { current: 1, total: 1 },
+          response: [
+            {
+              fixture: {
+                id: fixtureId,
+                referee: null,
+                timezone: 'UTC',
+                date: '2026-03-01T15:00:00Z',
+                timestamp: 1772463600,
+                periods: { first: null, second: null },
+                venue: { id: null, name: 'Stadium', city: 'City' },
+                status: { long: 'Not Started', short: 'NS', elapsed: 0, extra: 0 },
+              },
+              league: { id: Number(leagueParam), name: leagueName, country: 'Country', logo: '', flag: null, season: 2025, round: 'Round 1' },
+              teams: {
+                home: { id: 10, name: 'Home Team', logo: '', winner: null },
+                away: { id: 20, name: 'Away Team', logo: '', winner: null },
+              },
+              goals: { home: null, away: null },
+              score: {
+                halftime: { home: null, away: null },
+                fulltime: { home: null, away: null },
+                extratime: { home: null, away: null },
+                penalty: { home: null, away: null },
+              },
+              events: [],
+            },
+          ],
+        }),
+      };
+    };
+
+    const provider = new ApiFootballProvider({
+      apiKey: 'test_key',
+      gateway,
+      fetchFn: mockFetch as any,
+    });
+
+    const fixtures = await provider.getFixtures({ competitionIds: [39, 140] });
+
+    // Must make exactly 2 requests — one for league=39, one for league=140
+    expect(requestedUrls.length).toBe(2);
+    expect(requestedUrls.some((u) => u.includes('league=39'))).toBe(true);
+    expect(requestedUrls.some((u) => u.includes('league=140'))).toBe(true);
+
+    // Results aggregated from both competitions
+    expect(fixtures.length).toBe(2);
+    expect(fixtures.map((f) => f.id)).toEqual(['fix_3901', 'fix_14001']);
+    expect(fixtures.map((f) => f.competitionId)).toEqual(['comp_39', 'comp_140']);
+  });
+
+  it('uses live=all endpoint and post-filters to competitionIds in memory when liveOnly is true', async () => {
+    const requestedUrls: string[] = [];
+
+    const mockFetch = async (url: string) => {
+      requestedUrls.push(url);
+
+      return {
+        status: 200,
+        headers: new Headers({ 'x-ratelimit-requests-remaining': '90' }),
+        json: async () => ({
+          get: 'fixtures',
+          parameters: { live: 'all' },
+          errors: [],
+          results: 3,
+          paging: { current: 1, total: 1 },
+          response: [
+            {
+              fixture: {
+                id: 101,
+                referee: null,
+                timezone: 'UTC',
+                date: '2026-03-01T15:00:00Z',
+                timestamp: 1772463600,
+                periods: { first: null, second: null },
+                venue: { id: null, name: 'Stadium 1', city: 'London' },
+                status: { long: 'First Half', short: '1H', elapsed: 25, extra: 0 },
+              },
+              league: { id: 39, name: 'Premier League', country: 'England', logo: '', flag: null, season: 2025, round: 'Round 1' },
+              teams: {
+                home: { id: 1, name: 'Arsenal', logo: '', winner: null },
+                away: { id: 2, name: 'Chelsea', logo: '', winner: null },
+              },
+              goals: { home: 1, away: 0 },
+              score: { halftime: { home: null, away: null }, fulltime: { home: null, away: null }, extratime: { home: null, away: null }, penalty: { home: null, away: null } },
+              events: [],
+            },
+            {
+              fixture: {
+                id: 102,
+                referee: null,
+                timezone: 'UTC',
+                date: '2026-03-01T15:00:00Z',
+                timestamp: 1772463600,
+                periods: { first: null, second: null },
+                venue: { id: null, name: 'Stadium 2', city: 'Madrid' },
+                status: { long: 'First Half', short: '1H', elapsed: 10, extra: 0 },
+              },
+              league: { id: 140, name: 'La Liga', country: 'Spain', logo: '', flag: null, season: 2025, round: 'Round 1' },
+              teams: {
+                home: { id: 3, name: 'Atletico', logo: '', winner: null },
+                away: { id: 4, name: 'Sevilla', logo: '', winner: null },
+              },
+              goals: { home: 0, away: 0 },
+              score: { halftime: { home: null, away: null }, fulltime: { home: null, away: null }, extratime: { home: null, away: null }, penalty: { home: null, away: null } },
+              events: [],
+            },
+            {
+              fixture: {
+                id: 103,
+                referee: null,
+                timezone: 'UTC',
+                date: '2026-03-01T15:00:00Z',
+                timestamp: 1772463600,
+                periods: { first: null, second: null },
+                venue: { id: null, name: 'Stadium 3', city: 'Unrelated' },
+                status: { long: 'First Half', short: '1H', elapsed: 5, extra: 0 },
+              },
+              league: { id: 999, name: 'Unrelated League', country: 'Other', logo: '', flag: null, season: 2025, round: 'Round 1' },
+              teams: {
+                home: { id: 5, name: 'Team A', logo: '', winner: null },
+                away: { id: 6, name: 'Team B', logo: '', winner: null },
+              },
+              goals: { home: 0, away: 0 },
+              score: { halftime: { home: null, away: null }, fulltime: { home: null, away: null }, extratime: { home: null, away: null }, penalty: { home: null, away: null } },
+              events: [],
+            },
+          ],
+        }),
+      };
+    };
+
+    const provider = new ApiFootballProvider({
+      apiKey: 'test_key',
+      gateway,
+      fetchFn: mockFetch as any,
+    });
+
+    const fixtures = await provider.getFixtures({ liveOnly: true, competitionIds: [39] });
+
+    // Exactly 1 network request made to live=all
+    expect(requestedUrls.length).toBe(1);
+    expect(requestedUrls[0]).toContain('live=all');
+
+    // Filtered in-memory to only competition 39 (La Liga and Unrelated League removed)
+    expect(fixtures.length).toBe(1);
+    expect(fixtures[0].id).toBe('fix_101');
+    expect(fixtures[0].competitionId).toBe('comp_39');
+  });
 });
+

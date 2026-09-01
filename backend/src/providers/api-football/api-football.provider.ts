@@ -33,14 +33,54 @@ export class ApiFootballProvider implements FootballProvider {
   }
 
   async getFixtures(filter?: FixtureFilter): Promise<ProviderFixture[]> {
-    const leagueId = filter?.competitionId ? parseInt(filter.competitionId.replace(/^comp_/, ''), 10) : undefined;
+    // --- Path 1: liveOnly with an allowlist ---
+    // Use the single cheap "live=all" endpoint and post-filter in memory.
+    if (filter?.liveOnly) {
+      const response = await this.client.getFixtures({ live: 'all' });
+      if (!response.success || !response.data?.response) {
+        return [];
+      }
+      const all = response.data.response.map((item) => ApiFootballMapper.mapFixture(item));
+      // If a numeric allowlist was provided, narrow to it; otherwise return everything.
+      if (filter.competitionIds && filter.competitionIds.length > 0) {
+        const allowed = new Set(filter.competitionIds.map((id) => `comp_${id}`));
+        return all.filter((f) => allowed.has(f.competitionId));
+      }
+      return all;
+    }
+
+    // --- Path 2: multiple competition IDs (one request per ID) ---
+    // API-Football only supports one league parameter per request.
+    if (filter?.competitionIds && filter.competitionIds.length > 0) {
+      const dateStr = filter.date ? filter.date.slice(0, 10) : undefined;
+      const results: ProviderFixture[] = [];
+
+      for (const numericLeagueId of filter.competitionIds) {
+        const response = await this.client.getFixtures({
+          league: numericLeagueId,
+          date: dateStr,
+        });
+        if (!response.success || !response.data?.response) {
+          // Log and continue — a single competition failure should not abort all others.
+          continue;
+        }
+        for (const item of response.data.response) {
+          results.push(ApiFootballMapper.mapFixture(item));
+        }
+      }
+
+      return results;
+    }
+
+    // --- Path 3: legacy single competitionId (internal comp_* string) ---
+    const leagueId = filter?.competitionId
+      ? parseInt(filter.competitionId.replace(/^comp_/, ''), 10)
+      : undefined;
     const dateStr = filter?.date ? filter.date.slice(0, 10) : undefined;
-    const live = filter?.liveOnly ? 'all' : undefined;
 
     const response = await this.client.getFixtures({
       league: isNaN(leagueId as any) ? undefined : leagueId,
       date: dateStr,
-      live,
     });
 
     if (!response.success || !response.data?.response) {
@@ -49,6 +89,7 @@ export class ApiFootballProvider implements FootballProvider {
 
     return response.data.response.map((item) => ApiFootballMapper.mapFixture(item));
   }
+
 
   async getFixtureDetails(fixtureId: string): Promise<ProviderFixtureDetail | null> {
     const numericId = parseInt(fixtureId.replace(/^fix_/, ''), 10);

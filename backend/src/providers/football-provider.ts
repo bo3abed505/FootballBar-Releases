@@ -99,7 +99,14 @@ export interface ProviderStanding {
 }
 
 export interface FixtureFilter {
+  /** Internal comp_* ID for a single competition (legacy, kept for backward compat). */
   competitionId?: string;
+  /**
+   * Numeric provider-level competition IDs (e.g. 39, 140).
+   * Used by ApiFootballProvider to issue one request per competition ID.
+   * MockFootballProvider ignores this field — it always returns its full fixture set.
+   */
+  competitionIds?: number[];
   date?: string;
   liveOnly?: boolean;
 }

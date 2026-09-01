@@ -1,6 +1,6 @@
 import { inArray, eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import { FootballProvider } from '../providers/football-provider.js';
+import { FootballProvider, FixtureFilter } from '../providers/football-provider.js';
 import { AcquisitionService } from './acquisition.service.js';
 
 export interface SyncSummary {
@@ -23,8 +23,8 @@ export class SyncService {
   /**
    * Executes a full deterministic synchronization cycle against PostgreSQL
    */
-  async sync(): Promise<SyncSummary> {
-    const batch = await this.acquisitionService.acquireAll();
+  async sync(filter?: FixtureFilter): Promise<SyncSummary> {
+    const batch = await this.acquisitionService.acquireAll(filter);
 
     const summary: SyncSummary = {
       provider: this.provider.providerName,
