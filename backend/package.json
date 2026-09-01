@@ -12,7 +12,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "db:test:setup": "tsx src/db/setup-test-db.ts",
+    "dev:sync": "tsx src/acquisition/cli-sync.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
