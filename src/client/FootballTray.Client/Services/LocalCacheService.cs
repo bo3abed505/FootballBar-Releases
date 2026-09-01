@@ -27,12 +27,12 @@ public class LocalCacheService
 
     public LocalCacheService(string? customDirectory = null)
     {
-        _cacheDirectory = customDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "FootballTray"
-        );
+        _cacheDirectory = customDirectory ?? GetDefaultCacheDirectory();
         _cacheFilePath = Path.Combine(_cacheDirectory, "tray.json");
     }
+
+    public static string GetDefaultCacheDirectory() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FootballTray");
 
     public string CacheFilePath => _cacheFilePath;
 

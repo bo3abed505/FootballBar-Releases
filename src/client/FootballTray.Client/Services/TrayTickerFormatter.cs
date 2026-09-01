@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Services.Preferences;
 
 namespace FootballTray.Client.Services;
 
@@ -16,17 +17,23 @@ public static class TrayTickerFormatter
 {
     /// <summary>
     /// Identifies the single active/primary fixture represented by the taskbar ticker.
-    /// Priority order:
+    /// When user preferences are provided, prioritizes followed live/upcoming matches.
+    /// Priority order without preferences:
     /// 1. First LIVE / HALFTIME / in-play match.
     /// 2. Nearest upcoming PREMATCH match by kickoff time.
     /// 3. First available match (e.g. FINISHED).
     /// 4. Null if empty.
     /// </summary>
-    public static TrayMatchDto? GetActiveMatch(TrayDataDto? trayData)
+    public static TrayMatchDto? GetActiveMatch(TrayDataDto? trayData, UserPreferences? preferences = null)
     {
         if (trayData == null || trayData.Matches == null || trayData.Matches.Count == 0)
         {
             return null;
+        }
+
+        if (preferences != null)
+        {
+            return FixtureRelevanceEngine.PrioritizeMatches(trayData.Matches, preferences).FirstOrDefault();
         }
 
         // 1. Prioritize in-play / Live matches
@@ -57,9 +64,9 @@ public static class TrayTickerFormatter
     }
 
     /// <summary>
-    /// Formats the current TrayDataDto into a compact taskbar ticker string based on data freshness state.
+    /// Formats the current TrayDataDto into a compact taskbar ticker string based on data freshness state and user preferences.
     /// </summary>
-    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState)
+    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState, UserPreferences? preferences = null)
     {
         var connectionState = freshnessState switch
         {
@@ -69,20 +76,20 @@ public static class TrayTickerFormatter
             DataFreshnessState.Empty => TickerConnectionState.NoCacheOffline,
             _ => TickerConnectionState.NoCacheOffline,
         };
-        return FormatTicker(trayData, connectionState);
+        return FormatTicker(trayData, connectionState, preferences);
     }
 
     /// <summary>
     /// Formats the current TrayDataDto into a compact taskbar ticker string.
     /// </summary>
-    public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState)
+    public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState, UserPreferences? preferences = null)
     {
         if (connectionState == TickerConnectionState.NoCacheOffline)
         {
             return "FootballTray · offline";
         }
 
-        var activeMatch = GetActiveMatch(trayData);
+        var activeMatch = GetActiveMatch(trayData, preferences);
 
         if (activeMatch == null)
         {

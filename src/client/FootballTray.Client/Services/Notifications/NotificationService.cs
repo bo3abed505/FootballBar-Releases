@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Services.Preferences;
 
 namespace FootballTray.Client.Services.Notifications;
 
 /// <summary>
-/// Coordinates match alert evaluation, deduplication, formatting, and notification dispatch.
+/// Coordinates match alert evaluation, preference filtering, deduplication, formatting, and notification dispatch.
 /// Completely decoupled from network polling.
 /// </summary>
 public sealed class NotificationService
@@ -41,11 +42,24 @@ public sealed class NotificationService
     }
 
     /// <summary>
-    /// Processes snapshot transitions, emits alerts for new events/transitions, and persists deduplication state.
+    /// Backward-compatible overload without preferences.
+    /// </summary>
+    public Task<List<NotificationPayload>> ProcessTrayUpdateAsync(
+        TrayDataDto? previous,
+        TrayDataDto? current,
+        CancellationToken cancellationToken = default)
+    {
+        return ProcessTrayUpdateAsync(previous, current, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Processes snapshot transitions, filters against user following preferences & category settings,
+    /// emits alerts for eligible new events/transitions, and persists deduplication state.
     /// </summary>
     public async Task<List<NotificationPayload>> ProcessTrayUpdateAsync(
         TrayDataDto? previous,
         TrayDataDto? current,
+        UserPreferences? preferences,
         CancellationToken cancellationToken = default)
     {
         if (current?.Matches == null)
@@ -56,21 +70,50 @@ public sealed class NotificationService
         var candidates = _engine.EvaluateUpdates(previous, current);
         var dispatchedPayloads = new List<NotificationPayload>();
 
+        HashSet<string>? followedTeamIds = preferences?.GetFollowedTeamIdSet();
+        HashSet<string>? followedCompIds = preferences?.GetFollowedCompetitionIdSet();
+
         foreach (var candidate in candidates)
         {
+            // Record in deduplication store regardless of preference filtering
+            // so that if a category/following is re-enabled later, old events do NOT replay.
+            _store.MarkNotified(candidate.DeduplicationKey);
+
+            // 1. Check Global Enablement
+            if (preferences != null && !preferences.Notifications.GlobalEnabled)
+            {
+                continue;
+            }
+
+            // 2. Check Category / Type Enablement
+            if (preferences != null && !preferences.Notifications.IsTypeEnabled(candidate.Type))
+            {
+                continue;
+            }
+
+            // 3. Check Following Relevance (team or competition)
+            if (preferences != null)
+            {
+                bool homeFollowed = !string.IsNullOrWhiteSpace(candidate.HomeTeamId) && followedTeamIds != null && followedTeamIds.Contains(candidate.HomeTeamId);
+                bool awayFollowed = !string.IsNullOrWhiteSpace(candidate.AwayTeamId) && followedTeamIds != null && followedTeamIds.Contains(candidate.AwayTeamId);
+                bool compFollowed = !string.IsNullOrWhiteSpace(candidate.CompetitionId) && followedCompIds != null && followedCompIds.Contains(candidate.CompetitionId);
+
+                if (!homeFollowed && !awayFollowed && !compFollowed)
+                {
+                    continue; // Suppress notification for unfollowed match
+                }
+            }
+
             var payload = NotificationPayloadFormatter.Format(candidate);
 
             // Render alert through injected renderer
             _renderer.RenderNotification(payload);
 
-            // Record key in deduplication store
-            _store.MarkNotified(candidate.DeduplicationKey);
-
             dispatchedPayloads.Add(payload);
             NotificationDispatched?.Invoke(payload);
         }
 
-        if (dispatchedPayloads.Count > 0)
+        if (candidates.Count > 0)
         {
             await _store.SaveAsync(cancellationToken);
         }

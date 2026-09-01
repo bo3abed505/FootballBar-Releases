@@ -7,6 +7,7 @@ using Microsoft.Windows.AppNotifications;
 using FootballTray.Client.Taskbar;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
+using FootballTray.Client.Services.Preferences;
 
 namespace FootballTray.Client;
 
@@ -21,6 +22,7 @@ public partial class App : Application
     private SyncService? _syncService;
     private FootballApiClient? _apiClient;
     private LocalCacheService? _cacheService;
+    private PreferencesService? _preferencesService;
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
@@ -77,8 +79,9 @@ public partial class App : Application
             // Start Football Data Synchronization and Notification pipeline
             _apiClient = new FootballApiClient();
             _cacheService = new LocalCacheService();
+            _preferencesService = new PreferencesService();
             var notificationService = new NotificationService();
-            _syncService = new SyncService(_apiClient, _cacheService, notificationService, TimeSpan.FromSeconds(15));
+            _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
 
             _syncService.TrayUpdated += (sender, updateArgs) =>
             {

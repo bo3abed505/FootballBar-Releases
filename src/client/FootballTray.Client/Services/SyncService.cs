@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Services.Notifications;
+using FootballTray.Client.Services.Preferences;
 
 namespace FootballTray.Client.Services;
 
@@ -22,6 +23,7 @@ public class SyncService : IDisposable
     private readonly FootballApiClient _apiClient;
     private readonly LocalCacheService _cacheService;
     private readonly NotificationService? _notificationService;
+    private readonly IPreferencesService? _preferencesService;
     private readonly TimeSpan _pollingInterval;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private CancellationTokenSource? _cts;
@@ -43,25 +45,48 @@ public class SyncService : IDisposable
     public string? LastKnownETag => _lastKnownEtag;
     public DateTimeOffset? LastValidatedAt => _lastValidatedAt;
     public NotificationService? NotificationService => _notificationService;
+    public IPreferencesService? PreferencesService => _preferencesService;
 
     public SyncService(
         FootballApiClient apiClient,
         LocalCacheService cacheService,
         NotificationService? notificationService = null,
+        IPreferencesService? preferencesService = null,
         TimeSpan? pollingInterval = null)
     {
         _apiClient = apiClient;
         _cacheService = cacheService;
         _notificationService = notificationService;
+        _preferencesService = preferencesService;
         _pollingInterval = pollingInterval ?? TimeSpan.FromSeconds(15);
+
+        if (_preferencesService != null)
+        {
+            _preferencesService.PreferencesChanged += OnPreferencesChanged;
+        }
+    }
+
+    public SyncService(
+        FootballApiClient apiClient,
+        LocalCacheService cacheService,
+        NotificationService? notificationService,
+        TimeSpan? pollingInterval)
+        : this(apiClient, cacheService, notificationService, null, pollingInterval)
+    {
     }
 
     public SyncService(
         FootballApiClient apiClient,
         LocalCacheService cacheService,
         TimeSpan? pollingInterval)
-        : this(apiClient, cacheService, null, pollingInterval)
+        : this(apiClient, cacheService, null, null, pollingInterval)
     {
+    }
+
+    private void OnPreferencesChanged(object? sender, UserPreferences preferences)
+    {
+        // Immediate UI refresh when following or notification preferences are updated
+        PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
     }
 
     /// <summary>
@@ -73,7 +98,12 @@ public class SyncService : IDisposable
         _cts?.Cancel();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        // 0. Initialize notification deduplication history
+        // 0. Initialize preferences and notification deduplication history
+        if (_preferencesService != null)
+        {
+            await _preferencesService.LoadAsync(_cts.Token);
+        }
+
         if (_notificationService != null)
         {
             await _notificationService.InitializeAsync(_cts.Token);
@@ -170,7 +200,8 @@ public class SyncService : IDisposable
                     // Evaluate and dispatch notifications for newly observed events/transitions
                     if (_notificationService != null)
                     {
-                        await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, cancellationToken);
+                        var preferences = _preferencesService?.GetPreferences();
+                        await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, cancellationToken);
                     }
 
                     PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
@@ -239,7 +270,8 @@ public class SyncService : IDisposable
     private void PublishUpdate(TrayDataDto? data, DataFreshnessState freshness, int version, string? etag, DateTimeOffset? lastValidated)
     {
         var connectionState = MapToConnectionState(freshness);
-        var formatted = TrayTickerFormatter.FormatTicker(data, freshness);
+        var preferences = _preferencesService?.GetPreferences();
+        var formatted = TrayTickerFormatter.FormatTicker(data, freshness, preferences);
         TrayUpdated?.Invoke(this, new TrayUpdateEventArgs
         {
             TrayData = data,
@@ -272,7 +304,10 @@ public class SyncService : IDisposable
     public void Dispose()
     {
         Stop();
+        if (_preferencesService != null)
+        {
+            _preferencesService.PreferencesChanged -= OnPreferencesChanged;
+        }
         _refreshLock.Dispose();
     }
 }
-

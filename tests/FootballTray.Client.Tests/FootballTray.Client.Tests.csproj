@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Platforms>x64;x86;ARM64</Platforms>
+    <NoWarn>$(NoWarn);MSTEST0037</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -40,6 +41,15 @@
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\WindowsAppNotificationRenderer.cs" Link="Notifications\WindowsAppNotificationRenderer.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationService.cs" Link="Notifications\NotificationService.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\AppNotificationRegistrationManager.cs" Link="Notifications\AppNotificationRegistrationManager.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\CanonicalEntityIds.cs" Link="Preferences\CanonicalEntityIds.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FollowedTeam.cs" Link="Preferences\FollowedTeam.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FollowedCompetition.cs" Link="Preferences\FollowedCompetition.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\NotificationPreferences.cs" Link="Preferences\NotificationPreferences.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\UserPreferences.cs" Link="Preferences\UserPreferences.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\DefaultPreferences.cs" Link="Preferences\DefaultPreferences.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\IPreferencesService.cs" Link="Preferences\IPreferencesService.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\PreferencesService.cs" Link="Preferences\PreferencesService.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FixtureRelevanceEngine.cs" Link="Preferences\FixtureRelevanceEngine.cs" />
   </ItemGroup>
 
   <ItemGroup>
