@@ -47,7 +47,7 @@ export class FixturesRepository {
           limit: 5,
         },
       },
-      orderBy: [desc(schema.fixtures.kickoffTime)],
+      orderBy: [desc(schema.fixtures.kickoffTime), desc(schema.fixtures.id)],
       limit,
     });
   }

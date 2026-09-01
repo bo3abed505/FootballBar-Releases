@@ -35,4 +35,26 @@ describe('Repository Classes & Schema Definitions', () => {
     expect(schema.installations).toBeDefined();
     expect(schema.installationSettings).toBeDefined();
   });
+
+  it('getTrayMatches orders primarily by kickoffTime descending and tie-breaks deterministically by id', async () => {
+    const fixturesRepo = new FixturesRepository();
+    const results = await fixturesRepo.getTrayMatches(10);
+    expect(results).toBeInstanceOf(Array);
+
+    for (let i = 0; i < results.length - 1; i++) {
+      const current = results[i];
+      const next = results[i + 1];
+      const currentMs = new Date(current.kickoffTime).getTime();
+      const nextMs = new Date(next.kickoffTime).getTime();
+
+      // Primary check: kickoffTime is descending
+      expect(currentMs).toBeGreaterThanOrEqual(nextMs);
+
+      // Tie-breaker check: if kickoff times are identical, id is descending
+      if (currentMs === nextMs) {
+        expect(current.id >= next.id).toBe(true);
+      }
+    }
+  });
 });
+

@@ -11,6 +11,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using FootballTray.Client.Services;
 using FootballTray.Core.Dto;
 
+#pragma warning disable MSTEST0037
+
 namespace FootballTray.Client.Tests;
 
 [TestClass]
