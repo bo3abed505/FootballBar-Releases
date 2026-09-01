@@ -68,4 +68,33 @@ export class AcquisitionService {
       events: eventList,
     };
   }
+
+  /**
+   * Acquires active live matches (consolidated single provider query).
+   */
+  async acquireLive(competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ liveOnly: true, competitionIds });
+  }
+
+  /**
+   * Acquires full match schedule for a specific date across target competitions.
+   */
+  async acquireScheduled(date: string, competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ date, competitionIds });
+  }
+
+  /**
+   * Acquires finalization data for recently completed matches.
+   */
+  async acquireFinalization(competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ liveOnly: true, competitionIds });
+  }
+
+  /**
+   * Acquires updated status for stale prematch fixtures to check for postponement/cancellation.
+   */
+  async acquireStaleRecovery(competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ competitionIds });
+  }
 }
+

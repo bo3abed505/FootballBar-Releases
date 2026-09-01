@@ -116,4 +116,59 @@ export class SyncService {
 
     return summary;
   }
+
+  /**
+   * Synchronizes active live matches (consolidated single query).
+   */
+  async syncLive(competitionIds?: number[]): Promise<SyncSummary> {
+    return this.sync({ liveOnly: true, competitionIds });
+  }
+
+  /**
+   * Synchronizes daily match schedule for a specific date across target competitions.
+   */
+  async syncSchedule(date: string, competitionIds?: number[]): Promise<SyncSummary> {
+    return this.sync({ date, competitionIds });
+  }
+
+  /**
+   * Finalizes recently finished matches to capture final score and events.
+   */
+  async finalizeRecentlyFinished(competitionIds?: number[]): Promise<SyncSummary> {
+    return this.sync({ liveOnly: true, competitionIds });
+  }
+
+  /**
+   * Recovers stale prematch fixtures to check for postponement/cancellation.
+   */
+  async recoverStale(competitionIds?: number[]): Promise<SyncSummary> {
+    return this.sync({ competitionIds });
+  }
+
+  /**
+   * Executes synchronization according to an AcquisitionPolicyEngine SyncPlan.
+   * Returns SyncSummary if an external action was taken, or null if IDLE.
+   */
+  async syncWithPlan(
+    plan: import('./acquisition-policy.js').SyncPlan,
+    options?: { date?: string; competitionIds?: number[] }
+  ): Promise<SyncSummary | null> {
+    switch (plan.action) {
+      case 'POLL_LIVE':
+        return this.syncLive(options?.competitionIds);
+      case 'DISCOVER_SCHEDULE':
+        return this.syncSchedule(
+          options?.date ?? new Date().toISOString().slice(0, 10),
+          options?.competitionIds
+        );
+      case 'FINALIZE':
+        return this.finalizeRecentlyFinished(options?.competitionIds);
+      case 'RECOVER_STALE':
+        return this.recoverStale(options?.competitionIds);
+      case 'IDLE':
+      default:
+        return null;
+    }
+  }
 }
+
