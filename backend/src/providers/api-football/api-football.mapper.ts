@@ -112,8 +112,11 @@ export class ApiFootballMapper {
       isCurrent: true,
     };
 
+    const fixtureId = `fix_${item.fixture.id}`;
+    const events = item.events && item.events.length > 0 ? this.mapEvents(fixtureId, item.events) : undefined;
+
     return {
-      id: `fix_${item.fixture.id}`,
+      id: fixtureId,
       competitionId: comp.id,
       seasonId: season.id,
       homeTeamId: homeTeam.id,
@@ -128,19 +131,24 @@ export class ApiFootballMapper {
       elapsedMinute: item.fixture.status.elapsed ?? 0,
       extraMinute: item.fixture.status.extra ?? 0,
       score: {
-        home: item.goals.home ?? 0,
-        away: item.goals.away ?? 0,
-        homeHt: item.score.halftime.home ?? undefined,
-        awayHt: item.score.halftime.away ?? undefined,
+        home: item.goals?.home ?? 0,
+        away: item.goals?.away ?? 0,
+        homeHt: item.score?.halftime?.home ?? undefined,
+        awayHt: item.score?.halftime?.away ?? undefined,
+        homeEt: item.score?.extratime?.home ?? undefined,
+        awayEt: item.score?.extratime?.away ?? undefined,
+        homePen: item.score?.penalty?.home ?? undefined,
+        awayPen: item.score?.penalty?.away ?? undefined,
       },
-      venue: item.fixture.venue.name || undefined,
+      venue: item.fixture.venue?.name || undefined,
       referee: item.fixture.referee || undefined,
+      events,
     };
   }
 
   static mapFixtureDetail(item: ApiFootballFixtureItem): ProviderFixtureDetail {
     const base = this.mapFixture(item);
-    const events = item.events ? this.mapEvents(base.id, item.events) : [];
+    const events = item.events ? this.mapEvents(base.id, item.events) : (base.events ?? []);
 
     return {
       ...base,
@@ -164,12 +172,20 @@ export class ApiFootballMapper {
         eventType = 'Goal';
       }
 
-      const playerId = e.player.id ? `ply_${e.player.id}` : undefined;
-      const assistId = e.assist.id ? `ply_${e.assist.id}` : undefined;
-      const teamId = `team_${e.team.id}`;
-      const minute = e.time.elapsed;
-      const extraMinute = e.time.extra ?? 0;
-      const eventUid = `evt_${fixtureId}_${minute}_${extraMinute}_${eventType}_${playerId || idx}`;
+      const playerId = e.player?.id ? `ply_${e.player.id}` : undefined;
+      const assistId = e.assist?.id ? `ply_${e.assist.id}` : undefined;
+      const teamId = `team_${e.team?.id ?? 0}`;
+      const minute = e.time?.elapsed ?? 0;
+      const extraMinute = e.time?.extra ?? 0;
+
+      // Stable discriminators: player, assist, detail, comments
+      const playerSlug = (e.player?.name || 'noplayer').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const assistSlug = (e.assist?.name || 'noassist').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const detailSlug = (e.detail || 'nodetail').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const commentSlug = (e.comments || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+
+      const discriminator = `${playerId || playerSlug}_${assistId || assistSlug}_${detailSlug}${commentSlug ? `_${commentSlug}` : ''}`;
+      const eventUid = `evt_${fixtureId}_${minute}_${extraMinute}_${eventType}_${teamId}_${discriminator}`;
 
       return {
         id: `evt_${fixtureId}_${idx + 1}`,
@@ -179,9 +195,9 @@ export class ApiFootballMapper {
         type: eventType,
         minute,
         extraMinute,
-        playerName: e.player.name || undefined,
+        playerName: e.player?.name || undefined,
         playerId,
-        assistPlayerName: e.assist.name || undefined,
+        assistPlayerName: e.assist?.name || undefined,
         assistPlayerId: assistId,
         description: e.detail ? `[${e.type}] ${e.detail}` : undefined,
       };

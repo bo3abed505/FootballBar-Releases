@@ -36,22 +36,102 @@ export class SyncService {
       hasChanges: false,
     };
 
-    // 1. Upsert Competitions
-    if (batch.competitions.length > 0) {
-      await db.insert(schema.competitions).values(batch.competitions).onConflictDoNothing();
+    // 1. Upsert Competitions (Safe non-destructive merge)
+    for (const comp of batch.competitions) {
+      const existing = await db.query.competitions.findFirst({
+        where: eq(schema.competitions.id, comp.id),
+      });
+
+      if (!existing) {
+        await db.insert(schema.competitions).values(comp);
+      } else {
+        const updatedName = comp.name || existing.name;
+        const updatedCode = comp.code ?? existing.code;
+        const updatedType = comp.type ?? existing.type;
+        const updatedCountry = comp.country ?? existing.country;
+        const updatedLogoUrl = comp.logoUrl ?? existing.logoUrl;
+
+        if (
+          existing.name !== updatedName ||
+          existing.code !== updatedCode ||
+          existing.type !== updatedType ||
+          existing.country !== updatedCountry ||
+          existing.logoUrl !== updatedLogoUrl
+        ) {
+          await db
+            .update(schema.competitions)
+            .set({
+              name: updatedName,
+              code: updatedCode,
+              type: updatedType,
+              country: updatedCountry,
+              logoUrl: updatedLogoUrl,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.competitions.id, comp.id));
+        }
+      }
     }
 
-    // 2. Upsert Seasons
-    if (batch.seasons.length > 0) {
-      await db.insert(schema.competitionSeasons).values(batch.seasons).onConflictDoNothing();
+    // 2. Upsert Seasons (Safe non-destructive merge)
+    for (const season of batch.seasons) {
+      const existing = await db.query.competitionSeasons.findFirst({
+        where: eq(schema.competitionSeasons.id, season.id),
+      });
+
+      if (!existing) {
+        await db.insert(schema.competitionSeasons).values(season).onConflictDoNothing();
+      } else {
+        if (existing.isCurrent !== season.isCurrent) {
+          await db
+            .update(schema.competitionSeasons)
+            .set({ isCurrent: season.isCurrent })
+            .where(eq(schema.competitionSeasons.id, season.id));
+        }
+      }
     }
 
-    // 3. Upsert Teams
-    if (batch.teams.length > 0) {
-      await db.insert(schema.teams).values(batch.teams).onConflictDoNothing();
+    // 3. Upsert Teams (Safe non-destructive merge)
+    for (const team of batch.teams) {
+      const existing = await db.query.teams.findFirst({
+        where: eq(schema.teams.id, team.id),
+      });
+
+      if (!existing) {
+        await db.insert(schema.teams).values(team);
+      } else {
+        const updatedName = team.name || existing.name;
+        const updatedShortName = team.shortName || existing.shortName;
+        const updatedCode = team.code ?? existing.code;
+        const updatedCountry = team.country ?? existing.country;
+        const updatedLogoUrl = team.logoUrl ?? existing.logoUrl;
+        const updatedVenue = team.venueName ?? existing.venueName;
+
+        if (
+          existing.name !== updatedName ||
+          existing.shortName !== updatedShortName ||
+          existing.code !== updatedCode ||
+          existing.country !== updatedCountry ||
+          existing.logoUrl !== updatedLogoUrl ||
+          existing.venueName !== updatedVenue
+        ) {
+          await db
+            .update(schema.teams)
+            .set({
+              name: updatedName,
+              shortName: updatedShortName,
+              code: updatedCode,
+              country: updatedCountry,
+              logoUrl: updatedLogoUrl,
+              venueName: updatedVenue,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.teams.id, team.id));
+        }
+      }
     }
 
-    // 4. Upsert Fixtures with Change Detection
+    // 4. Upsert Fixtures with Comprehensive Change Detection & Non-destructive Merge
     for (const incoming of batch.fixtures) {
       const existing = await db.query.fixtures.findFirst({
         where: eq(schema.fixtures.id, incoming.id),
@@ -63,22 +143,71 @@ export class SyncService {
         summary.fixturesInserted++;
         summary.hasChanges = true;
       } else {
-        // Check for meaningful score/state/minute changes
-        const hasScoreChanged = existing.homeScore !== incoming.homeScore || existing.awayScore !== incoming.awayScore;
-        const hasStateChanged = existing.state !== incoming.state;
-        const hasMinuteChanged = existing.elapsedMinute !== incoming.elapsedMinute || existing.extraMinute !== incoming.extraMinute;
-        const hasHtScoreChanged = existing.homeScoreHt !== incoming.homeScoreHt || existing.awayScoreHt !== incoming.awayScoreHt;
+        // Non-destructive preservation of already known good optional data
+        const mergedHomeScoreHt = incoming.homeScoreHt ?? existing.homeScoreHt;
+        const mergedAwayScoreHt = incoming.awayScoreHt ?? existing.awayScoreHt;
+        const mergedHomeScoreEt = incoming.homeScoreEt ?? existing.homeScoreEt;
+        const mergedAwayScoreEt = incoming.awayScoreEt ?? existing.awayScoreEt;
+        const mergedHomeScorePen = incoming.homeScorePen ?? existing.homeScorePen;
+        const mergedAwayScorePen = incoming.awayScorePen ?? existing.awayScorePen;
+        const mergedVenue = incoming.venue ?? existing.venue;
+        const mergedReferee = incoming.referee ?? existing.referee;
+        const mergedRound = incoming.round ?? existing.round;
+        const mergedKickoff = incoming.kickoffTime ?? existing.kickoffTime;
 
-        if (hasScoreChanged || hasStateChanged || hasMinuteChanged || hasHtScoreChanged) {
-          await db.update(schema.fixtures)
+        // Check for meaningful changes
+        const hasScoreChanged =
+          existing.homeScore !== incoming.homeScore ||
+          existing.awayScore !== incoming.awayScore;
+        const hasStateChanged = existing.state !== incoming.state;
+        const hasMinuteChanged =
+          existing.elapsedMinute !== incoming.elapsedMinute ||
+          existing.extraMinute !== incoming.extraMinute;
+        const hasHtChanged =
+          existing.homeScoreHt !== mergedHomeScoreHt ||
+          existing.awayScoreHt !== mergedAwayScoreHt;
+        const hasEtChanged =
+          existing.homeScoreEt !== mergedHomeScoreEt ||
+          existing.awayScoreEt !== mergedAwayScoreEt;
+        const hasPenChanged =
+          existing.homeScorePen !== mergedHomeScorePen ||
+          existing.awayScorePen !== mergedAwayScorePen;
+        const hasKickoffChanged =
+          existing.kickoffTime.getTime() !== mergedKickoff.getTime();
+        const hasMetadataChanged =
+          existing.venue !== mergedVenue ||
+          existing.referee !== mergedReferee ||
+          existing.round !== mergedRound;
+
+        const isChanged =
+          hasScoreChanged ||
+          hasStateChanged ||
+          hasMinuteChanged ||
+          hasHtChanged ||
+          hasEtChanged ||
+          hasPenChanged ||
+          hasKickoffChanged ||
+          hasMetadataChanged;
+
+        if (isChanged) {
+          await db
+            .update(schema.fixtures)
             .set({
               state: incoming.state,
               elapsedMinute: incoming.elapsedMinute,
               extraMinute: incoming.extraMinute,
               homeScore: incoming.homeScore,
               awayScore: incoming.awayScore,
-              homeScoreHt: incoming.homeScoreHt,
-              awayScoreHt: incoming.awayScoreHt,
+              homeScoreHt: mergedHomeScoreHt,
+              awayScoreHt: mergedAwayScoreHt,
+              homeScoreEt: mergedHomeScoreEt,
+              awayScoreEt: mergedAwayScoreEt,
+              homeScorePen: mergedHomeScorePen,
+              awayScorePen: mergedAwayScorePen,
+              kickoffTime: mergedKickoff,
+              round: mergedRound,
+              venue: mergedVenue,
+              referee: mergedReferee,
               lastPolledAt: new Date(),
               updatedAt: new Date(),
             })
@@ -87,8 +216,9 @@ export class SyncService {
           summary.fixturesUpdated++;
           summary.hasChanges = true;
         } else {
-          // Update lastPolledAt only without changing updatedAt version
-          await db.update(schema.fixtures)
+          // Update lastPolledAt only without changing updatedAt version timestamp
+          await db
+            .update(schema.fixtures)
             .set({ lastPolledAt: new Date() })
             .where(eq(schema.fixtures.id, incoming.id));
         }
@@ -98,12 +228,22 @@ export class SyncService {
     // 5. Upsert Events with Duplicate Deduplication
     if (batch.events.length > 0) {
       const incomingUids = batch.events.map((e) => e.eventUid);
-      const existingEvents = await db.select({ eventUid: schema.events.eventUid })
+      const existingEvents = await db
+        .select({ eventUid: schema.events.eventUid })
         .from(schema.events)
         .where(inArray(schema.events.eventUid, incomingUids));
 
       const existingUidSet = new Set(existingEvents.map((e) => e.eventUid));
-      const newEvents = batch.events.filter((e) => !existingUidSet.has(e.eventUid));
+      
+      // Deduplicate both against existing database records and within incoming batch
+      const seenBatchUids = new Set<string>();
+      const newEvents = batch.events.filter((e) => {
+        if (existingUidSet.has(e.eventUid) || seenBatchUids.has(e.eventUid)) {
+          return false;
+        }
+        seenBatchUids.add(e.eventUid);
+        return true;
+      });
 
       summary.eventsSkippedDuplicates = batch.events.length - newEvents.length;
 
