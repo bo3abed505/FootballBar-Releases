@@ -8,6 +8,13 @@
       "when": 1788229240280,
       "tag": "0000_regular_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788284033806,
+      "tag": "0001_crazy_jimmy_woo",
+      "breakpoints": true
     }
   ]
 }

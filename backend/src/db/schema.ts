@@ -191,12 +191,16 @@ export const providerCoverage = pgTable('provider_coverage', {
   provider: text('provider').default('api_football').notNull(),
   competitionId: text('competition_id').notNull().references(() => competitions.id),
   seasonYear: integer('season_year').notNull(),
+  hasFixtures: boolean('has_fixtures').default(true).notNull(),
   hasLiveOdds: boolean('has_live_odds').default(false).notNull(),
   hasLineups: boolean('has_lineups').default(true).notNull(),
   hasEvents: boolean('has_events').default(true).notNull(),
   hasStatistics: boolean('has_statistics').default(true).notNull(),
   hasStandings: boolean('has_standings').default(true).notNull(),
   hasPlayers: boolean('has_players').default(true).notNull(),
+  hasCommentary: boolean('has_commentary').default(false).notNull(),
+  hasRatings: boolean('has_ratings').default(false).notNull(),
+  hasXg: boolean('has_xg').default(false).notNull(),
   lastAuditedAt: timestamp('last_audited_at', { withTimezone: true }),
 }, (table) => [
   uniqueIndex('provider_comp_season_idx').on(table.provider, table.competitionId, table.seasonYear),
@@ -227,13 +231,19 @@ export const apiRequestLedger = pgTable('api_request_ledger', {
   id: text('id').primaryKey(),
   provider: text('provider').default('api_football').notNull(),
   endpoint: text('endpoint').notNull(),
+  operation: text('operation').default('query').notNull(),
+  priority: text('priority').default('NORMAL').notNull(), // NORMAL, CRITICAL
+  success: boolean('success').default(true).notNull(),
   httpStatus: integer('http_status').notNull(),
   responseTimeMs: integer('response_time_ms').notNull(),
   costUnits: integer('cost_units').default(1).notNull(),
+  providerDailyRemaining: integer('provider_daily_remaining'),
+  providerMinuteRemaining: integer('provider_minute_remaining'),
   requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
   errorMessage: text('error_message'),
 }, (table) => [
   index('ledger_requested_at_idx').on(table.requestedAt),
+  index('ledger_provider_requested_idx').on(table.provider, table.requestedAt),
 ]);
 
 // ----------------------------------------------------
