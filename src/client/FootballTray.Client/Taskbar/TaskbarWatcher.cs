@@ -17,30 +17,37 @@ public sealed class TaskbarWatcher : IDisposable
     private bool _isDisposed;
     private DateTime _lastTriggerTime = DateTime.MinValue;
 
+    public bool IsWatching => _winEventHook != IntPtr.Zero;
+    public IntPtr TargetTaskbarHwnd => _targetTaskbarHwnd;
+
     public event Action? TaskbarChanged;
 
     public TaskbarWatcher(DispatcherQueue dispatcherQueue)
     {
-        _dispatcherQueue = dispatcherQueue;
+        _dispatcherQueue = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
         _winEventDelegate = OnWinEvent;
     }
 
     /// <summary>
     /// Starts watching the specified taskbar HWND for location or layout changes.
+    /// Safely unhooks any previous hook before attaching.
     /// </summary>
     public bool Start(IntPtr taskbarHwnd)
     {
-        _targetTaskbarHwnd = taskbarHwnd;
+        if (_isDisposed) return false;
 
-        if (_winEventHook != IntPtr.Zero)
+        Stop();
+
+        if (taskbarHwnd == IntPtr.Zero)
         {
-            UnhookWinEvent(_winEventHook);
-            _winEventHook = IntPtr.Zero;
+            TaskbarLogger.Warn("[WATCHER] Cannot start TaskbarWatcher: taskbar HWND is zero.");
+            return false;
         }
+
+        _targetTaskbarHwnd = taskbarHwnd;
 
         try
         {
-            // Hook EVENT_OBJECT_LOCATIONCHANGE for all processes
             _winEventHook = SetWinEventHook(
                 EVENT_OBJECT_LOCATIONCHANGE,
                 EVENT_OBJECT_LOCATIONCHANGE,
@@ -53,41 +60,41 @@ public sealed class TaskbarWatcher : IDisposable
             if (_winEventHook == IntPtr.Zero)
             {
                 int err = Marshal.GetLastWin32Error();
-                TaskbarLogger.Warn($"SetWinEventHook failed with Win32Error={err}. Falling back to message notifications.");
+                TaskbarLogger.Warn($"[WATCHER] SetWinEventHook failed with Win32Error={err}.");
                 return false;
             }
 
-            TaskbarLogger.Info($"TaskbarWatcher hooked successfully (Hook=0x{_winEventHook.ToInt64():X})");
+            TaskbarLogger.Info($"[WATCHER] TaskbarWatcher started successfully (Hook=0x{_winEventHook.ToInt64():X}, TargetShellTray=0x{_targetTaskbarHwnd.ToInt64():X})");
             return true;
         }
         catch (Exception ex)
         {
-            TaskbarLogger.Error("Failed to initialize TaskbarWatcher hook.", ex);
+            TaskbarLogger.Error("[WATCHER] Failed to initialize TaskbarWatcher hook.", ex);
             return false;
         }
     }
 
     /// <summary>
-    /// Stops watching taskbar events.
+    /// Stops watching taskbar events and cleans up the WinEvent hook.
     /// </summary>
     public void Stop()
     {
         if (_winEventHook != IntPtr.Zero)
         {
-            UnhookWinEvent(_winEventHook);
+            IntPtr hookToRelease = _winEventHook;
             _winEventHook = IntPtr.Zero;
-            TaskbarLogger.Debug("TaskbarWatcher unhooked.");
+            _targetTaskbarHwnd = IntPtr.Zero;
+            UnhookWinEvent(hookToRelease);
+            TaskbarLogger.Info($"[WATCHER] TaskbarWatcher stopped and unhooked (Hook=0x{hookToRelease.ToInt64():X}).");
         }
     }
 
     private void OnWinEvent(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
     {
-        if (_isDisposed) return;
+        if (_isDisposed || _winEventHook == IntPtr.Zero) return;
 
-        // Check if event relates to Shell_TrayWnd or TrayNotifyWnd or child components
         if (_targetTaskbarHwnd != IntPtr.Zero && (hwnd == _targetTaskbarHwnd || IsDescendantOrSame(hwnd, _targetTaskbarHwnd)))
         {
-            // Debounce event within 50ms to prevent thrashing during smooth resizing/animations
             DateTime now = DateTime.UtcNow;
             if ((now - _lastTriggerTime).TotalMilliseconds < 50)
             {
@@ -97,7 +104,7 @@ public sealed class TaskbarWatcher : IDisposable
 
             _dispatcherQueue.TryEnqueue(() =>
             {
-                if (!_isDisposed)
+                if (!_isDisposed && _winEventHook != IntPtr.Zero)
                 {
                     TaskbarChanged?.Invoke();
                 }
@@ -119,17 +126,6 @@ public sealed class TaskbarWatcher : IDisposable
             depth++;
         }
         return false;
-    }
-
-    public void TriggerManualRecalculation()
-    {
-        _dispatcherQueue.TryEnqueue(() =>
-        {
-            if (!_isDisposed)
-            {
-                TaskbarChanged?.Invoke();
-            }
-        });
     }
 
     public void Dispose()

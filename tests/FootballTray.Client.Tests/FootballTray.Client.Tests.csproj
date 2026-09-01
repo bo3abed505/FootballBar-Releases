@@ -20,6 +20,7 @@
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarGeometry.cs" Link="TaskbarGeometry.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarNativeMethods.cs" Link="TaskbarNativeMethods.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarLogger.cs" Link="TaskbarLogger.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarInjection.cs" Link="TaskbarInjection.cs" />
   </ItemGroup>
 
 </Project>

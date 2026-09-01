@@ -16,22 +16,32 @@ namespace FootballTray.Client.Taskbar;
 /// </summary>
 public sealed class TaskbarHost : IDisposable
 {
-    private const string WindowClassName = "FootballTray_TaskbarHostClass";
+    private const string MessageReceiverClassName = "FootballTray_MessageReceiverClass";
+    private const string HostWindowClassName = "FootballTray_TaskbarHostClass";
 
-    private readonly WndProc _wndProcDelegate;
+    private readonly WndProc _messageReceiverWndProcDelegate;
+    private readonly WndProc _hostWndProcDelegate;
     private readonly DispatcherQueue _dispatcherQueue;
+
+    private IntPtr _messageReceiverHwnd = IntPtr.Zero;
     private IntPtr _hostHwnd = IntPtr.Zero;
     private IntPtr _taskbarHwnd = IntPtr.Zero;
+
     private DesktopWindowXamlSource? _xamlSource;
     private UIElement? _hostedContent;
     private TaskbarWatcher? _watcher;
     private ExplorerRecovery? _recovery;
+
     private bool _isDisposed;
-    private bool _classRegistered;
+    private bool _receiverClassRegistered;
+    private bool _hostClassRegistered;
     private uint _taskbarCreatedMsgId;
     private bool _isAttached;
 
     public bool IsAttached => _isAttached;
+    public IntPtr MessageReceiverHwnd => _messageReceiverHwnd;
+    public IntPtr HostHwnd => _hostHwnd;
+    public IntPtr TaskbarHwnd => _taskbarHwnd;
 
     public event Action? Repositioned;
     public event Action<bool>? AttachmentChanged;
@@ -39,14 +49,19 @@ public sealed class TaskbarHost : IDisposable
     public TaskbarHost(DispatcherQueue? dispatcherQueue = null)
     {
         _dispatcherQueue = dispatcherQueue ?? DispatcherQueue.GetForCurrentThread();
-        _wndProcDelegate = CustomWndProc;
+        
+        // Retain delegates in instance fields to prevent GC collection
+        _messageReceiverWndProcDelegate = MessageReceiverWndProc;
+        _hostWndProcDelegate = HostWndProc;
+
+        // Register TaskbarCreated broadcast message
         _taskbarCreatedMsgId = RegisterWindowMessage(TaskbarCreatedMessage);
-        TaskbarLogger.Debug($"TaskbarCreated message registered with ID: 0x{_taskbarCreatedMsgId:X}");
+        TaskbarLogger.Info($"[INIT] TaskbarCreated message registered with ID: 0x{_taskbarCreatedMsgId:X}");
     }
 
     /// <summary>
-    /// Initializes the native HWND, embeds DesktopWindowXamlSource, attaches to Shell_TrayWnd,
-    /// and starts taskbar state watching and Explorer recovery.
+    /// Initializes the persistent message receiver, watcher, recovery handler,
+    /// creates the initial taskbar host HWND, and injects into the primary taskbar.
     /// </summary>
     public async Task<bool> InitializeAsync(UIElement content)
     {
@@ -55,19 +70,19 @@ public sealed class TaskbarHost : IDisposable
 
         _hostedContent = content ?? throw new ArgumentNullException(nameof(content));
 
-        TaskbarLogger.Info("Initializing TaskbarHost...");
+        TaskbarLogger.Info("[INIT] Initializing TaskbarHost...");
 
-        // 1. Create native host HWND and XAML island
-        if (!CreateNativeHost(content))
+        // 1. Create Persistent Message Receiver (never reparented, survives Explorer restart)
+        if (!CreatePersistentMessageReceiver())
         {
-            TaskbarLogger.Error("Failed to create native host HWND and XAML Island.");
+            TaskbarLogger.Error("[INIT] Failed to create persistent message receiver window.");
             return false;
         }
 
-        // 2. Initialize Explorer Recovery
+        // 2. Initialize Explorer Recovery (wired to RecreateAndAttachAsync)
         _recovery = new ExplorerRecovery(_dispatcherQueue, async () =>
         {
-            await ReconnectAsync();
+            return await RecreateAndAttachAsync();
         });
 
         // 3. Initialize Taskbar Watcher
@@ -77,45 +92,141 @@ public sealed class TaskbarHost : IDisposable
             Reposition();
         };
 
-        // 4. Attach to primary taskbar
-        bool attached = await ReconnectAsync();
+        // 4. Perform initial creation and injection
+        bool attached = await RecreateAndAttachAsync();
         return attached;
     }
 
     /// <summary>
-    /// Connects or reconnects the host to Shell_TrayWnd and calculates layout.
+    /// Performs full teardown of any previous/dead host state and creates a fresh
+    /// host HWND, fresh XAML Island, finds the current Shell_TrayWnd, and attaches cleanly.
     /// </summary>
-    private async Task<bool> ReconnectAsync()
+    public async Task<bool> RecreateAndAttachAsync()
     {
         if (_isDisposed) return false;
 
-        _taskbarHwnd = TaskbarInjection.FindPrimaryTaskbar();
-        if (_taskbarHwnd == IntPtr.Zero)
+        IntPtr oldHost = _hostHwnd;
+        IntPtr oldTaskbar = _taskbarHwnd;
+        TaskbarLogger.Info($"[RECOVERY] RecreateAndAttachAsync executing. (OldHost=0x{oldHost.ToInt64():X}, OldShellTray=0x{oldTaskbar.ToInt64():X})");
+
+        // 1. Stop and unhook previous watcher
+        _watcher?.Stop();
+
+        // 2. Safely dispose dead/old XAML Island
+        if (_xamlSource != null)
         {
-            TaskbarLogger.Warn("Primary taskbar (Shell_TrayWnd) not found. Waiting for recovery...");
+            try
+            {
+                _xamlSource.Dispose();
+                TaskbarLogger.Info("[RECOVERY] Old DesktopWindowXamlSource disposed.");
+            }
+            catch (Exception ex)
+            {
+                TaskbarLogger.Warn($"[RECOVERY] Non-fatal exception disposing old DesktopWindowXamlSource: {ex.Message}");
+            }
+            finally
+            {
+                _xamlSource = null;
+            }
+        }
+
+        // 3. Detach and destroy old host HWND if it still exists
+        if (_hostHwnd != IntPtr.Zero)
+        {
+            try
+            {
+                TaskbarInjection.Detach(_hostHwnd);
+                DestroyWindow(_hostHwnd);
+                TaskbarLogger.Info($"[RECOVERY] Old host HWND 0x{oldHost.ToInt64():X} destroyed.");
+            }
+            catch (Exception ex)
+            {
+                TaskbarLogger.Warn($"[RECOVERY] Non-fatal exception destroying old host HWND: {ex.Message}");
+            }
+            finally
+            {
+                _hostHwnd = IntPtr.Zero;
+            }
+        }
+
+        // 4. Find the current/new primary Shell_TrayWnd
+        IntPtr newShellTray = TaskbarInjection.FindPrimaryTaskbar();
+        if (newShellTray == IntPtr.Zero)
+        {
+            TaskbarLogger.Warn("[RECOVERY] Primary taskbar (Shell_TrayWnd) not found. Awaiting recovery retry...");
+            _taskbarHwnd = IntPtr.Zero;
             _isAttached = false;
             AttachmentChanged?.Invoke(false);
             return false;
         }
 
-        // Calculate initial geometry
+        _taskbarHwnd = newShellTray;
+        TaskbarLogger.Info($"[RECOVERY] Discovered primary Shell_TrayWnd HWND: 0x{_taskbarHwnd.ToInt64():X}");
+
+        // 5. Calculate fresh taskbar geometry
         if (!TaskbarGeometry.TryGetPrimaryTaskbarPlacement(_taskbarHwnd, out TaskbarPlacement placement))
         {
-            TaskbarLogger.Warn("Could not determine primary taskbar placement geometry.");
+            TaskbarLogger.Warn("[RECOVERY] Failed to calculate primary taskbar placement geometry.");
             _isAttached = false;
             AttachmentChanged?.Invoke(false);
             return false;
         }
 
-        // Attach host HWND to Shell_TrayWnd
+        TaskbarLogger.Info($"[GEOMETRY] Calculated placement: Pos=({placement.X},{placement.Y}), Size={placement.Width}x{placement.Height}, DPI={placement.Dpi}");
+
+        // 6. Create brand-new native host HWND
+        _hostHwnd = CreateHostHwnd(placement.Width, placement.Height);
+        if (_hostHwnd == IntPtr.Zero)
+        {
+            TaskbarLogger.Error("[RECOVERY] Failed to create new native host HWND.");
+            _isAttached = false;
+            AttachmentChanged?.Invoke(false);
+            return false;
+        }
+
+        TaskbarLogger.Info($"[HOST] Created fresh native host HWND: 0x{_hostHwnd.ToInt64():X}");
+
+        // 7. Create and initialize fresh DesktopWindowXamlSource
+        try
+        {
+            _xamlSource = new DesktopWindowXamlSource();
+            WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hostHwnd);
+            _xamlSource.Initialize(windowId);
+            _xamlSource.Content = _hostedContent;
+
+            if (_xamlSource.SiteBridge != null)
+            {
+                _xamlSource.SiteBridge.MoveAndResize(new RectInt32(0, 0, placement.Width, placement.Height));
+                _xamlSource.SiteBridge.Show();
+            }
+
+            TaskbarLogger.Info("[HOST] Fresh DesktopWindowXamlSource initialized and content attached.");
+        }
+        catch (Exception ex)
+        {
+            TaskbarLogger.Error("[HOST] Exception initializing DesktopWindowXamlSource on fresh host HWND.", ex);
+            _isAttached = false;
+            AttachmentChanged?.Invoke(false);
+            return false;
+        }
+
+        // 8. Attach fresh host HWND into Shell_TrayWnd
         bool attached = TaskbarInjection.Attach(_hostHwnd, _taskbarHwnd, placement);
         if (attached)
         {
             _isAttached = true;
-            UpdateSize(placement.Width, placement.Height);
+            ShowWindow(_hostHwnd, 5 /* SW_SHOW */);
             _watcher?.Start(_taskbarHwnd);
+
+            TaskbarLogger.Info($"[RECOVERY] RecreateAndAttachAsync completed successfully. Host 0x{_hostHwnd.ToInt64():X} docked into Shell_TrayWnd 0x{_taskbarHwnd.ToInt64():X}.");
             AttachmentChanged?.Invoke(true);
             Repositioned?.Invoke();
+        }
+        else
+        {
+            _isAttached = false;
+            AttachmentChanged?.Invoke(false);
+            TaskbarLogger.Warn("[RECOVERY] TaskbarInjection.Attach failed during RecreateAndAttachAsync.");
         }
 
         await Task.CompletedTask;
@@ -140,7 +251,7 @@ public sealed class TaskbarHost : IDisposable
             bool moved = TaskbarInjection.UpdatePosition(_hostHwnd, placement);
             if (moved)
             {
-                UpdateSize(placement.Width, placement.Height);
+                UpdateHostSize(placement.Width, placement.Height);
                 Repositioned?.Invoke();
             }
             return moved;
@@ -173,20 +284,19 @@ public sealed class TaskbarHost : IDisposable
         }
     }
 
-    private bool CreateNativeHost(UIElement content, int width = 140, int height = 32)
+    private bool CreatePersistentMessageReceiver()
     {
-        if (_hostHwnd != IntPtr.Zero) return true;
+        if (_messageReceiverHwnd != IntPtr.Zero) return true;
 
         try
         {
             IntPtr hInstance = GetModuleHandle(null);
 
-            // Register Window Class
             WNDCLASSEX wcx = new WNDCLASSEX
             {
                 cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
                 style = 0,
-                lpfnWndProc = _wndProcDelegate,
+                lpfnWndProc = _messageReceiverWndProcDelegate,
                 cbClsExtra = 0,
                 cbWndExtra = 0,
                 hInstance = hInstance,
@@ -194,22 +304,88 @@ public sealed class TaskbarHost : IDisposable
                 hCursor = IntPtr.Zero,
                 hbrBackground = IntPtr.Zero,
                 lpszMenuName = null,
-                lpszClassName = WindowClassName,
+                lpszClassName = MessageReceiverClassName,
                 hIconSm = IntPtr.Zero
             };
 
             ushort atom = RegisterClassEx(ref wcx);
             if (atom != 0)
             {
-                _classRegistered = true;
+                _receiverClassRegistered = true;
+            }
+
+            // Top-level popup window, not a child, so it receives HWND_BROADCAST
+            int exStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+            int style = WS_POPUP;
+
+            _messageReceiverHwnd = CreateWindowEx(
+                exStyle,
+                MessageReceiverClassName,
+                "FootballTray_MessageReceiver",
+                style,
+                0,
+                0,
+                0,
+                0,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                hInstance,
+                IntPtr.Zero);
+
+            if (_messageReceiverHwnd == IntPtr.Zero)
+            {
+                int err = Marshal.GetLastWin32Error();
+                TaskbarLogger.Error($"[RECEIVER] CreateWindowEx failed for Persistent MessageReceiver. Win32Error={err}");
+                return false;
+            }
+
+            TaskbarLogger.Info($"[RECEIVER] Persistent MessageReceiver HWND created: 0x{_messageReceiverHwnd.ToInt64():X}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TaskbarLogger.Error("[RECEIVER] Exception creating Persistent MessageReceiver window.", ex);
+            return false;
+        }
+    }
+
+    private IntPtr CreateHostHwnd(int width, int height)
+    {
+        try
+        {
+            IntPtr hInstance = GetModuleHandle(null);
+
+            if (!_hostClassRegistered)
+            {
+                WNDCLASSEX wcx = new WNDCLASSEX
+                {
+                    cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+                    style = 0,
+                    lpfnWndProc = _hostWndProcDelegate,
+                    cbClsExtra = 0,
+                    cbWndExtra = 0,
+                    hInstance = hInstance,
+                    hIcon = IntPtr.Zero,
+                    hCursor = IntPtr.Zero,
+                    hbrBackground = IntPtr.Zero,
+                    lpszMenuName = null,
+                    lpszClassName = HostWindowClassName,
+                    hIconSm = IntPtr.Zero
+                };
+
+                ushort atom = RegisterClassEx(ref wcx);
+                if (atom != 0)
+                {
+                    _hostClassRegistered = true;
+                }
             }
 
             int exStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
             int style = WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 
-            _hostHwnd = CreateWindowEx(
+            IntPtr hwnd = CreateWindowEx(
                 exStyle,
-                WindowClassName,
+                HostWindowClassName,
                 "FootballTray_Host",
                 style,
                 0,
@@ -221,37 +397,16 @@ public sealed class TaskbarHost : IDisposable
                 hInstance,
                 IntPtr.Zero);
 
-            if (_hostHwnd == IntPtr.Zero)
-            {
-                int err = Marshal.GetLastWin32Error();
-                TaskbarLogger.Error($"CreateWindowEx failed with Win32Error={err}");
-                return false;
-            }
-
-            TaskbarLogger.Info($"Native host HWND created: 0x{_hostHwnd.ToInt64():X}");
-
-            // Initialize DesktopWindowXamlSource
-            _xamlSource = new DesktopWindowXamlSource();
-            WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hostHwnd);
-            _xamlSource.Initialize(windowId);
-            _xamlSource.Content = content;
-
-            if (_xamlSource.SiteBridge != null)
-            {
-                _xamlSource.SiteBridge.MoveAndResize(new RectInt32(0, 0, width, height));
-                _xamlSource.SiteBridge.Show();
-            }
-
-            return true;
+            return hwnd;
         }
         catch (Exception ex)
         {
-            TaskbarLogger.Error("Exception while creating native host window.", ex);
-            return false;
+            TaskbarLogger.Error("[HOST] Exception creating native host HWND.", ex);
+            return IntPtr.Zero;
         }
     }
 
-    private void UpdateSize(int width, int height)
+    private void UpdateHostSize(int width, int height)
     {
         if (_xamlSource?.SiteBridge != null && width > 0 && height > 0)
         {
@@ -259,33 +414,53 @@ public sealed class TaskbarHost : IDisposable
         }
     }
 
-    private IntPtr CustomWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    private IntPtr MessageReceiverWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         if (msg == _taskbarCreatedMsgId && _taskbarCreatedMsgId != 0)
         {
-            TaskbarLogger.Info("Host WndProc caught TaskbarCreated broadcast message.");
-            _recovery?.HandleTaskbarCreated();
+            TaskbarLogger.Info($"[RECEIVER] Caught TaskbarCreated broadcast (Msg=0x{msg:X}) on MessageReceiver HWND 0x{hWnd.ToInt64():X}");
+            _recovery?.HandleTaskbarCreated(hWnd, msg);
             return IntPtr.Zero;
         }
 
         switch (msg)
         {
+            case WM_DESTROY:
+                TaskbarLogger.Debug($"[RECEIVER] MessageReceiver HWND 0x{hWnd.ToInt64():X} received WM_DESTROY.");
+                return IntPtr.Zero;
+
+            case WM_NCDESTROY:
+                TaskbarLogger.Debug($"[RECEIVER] MessageReceiver HWND 0x{hWnd.ToInt64():X} received WM_NCDESTROY.");
+                _messageReceiverHwnd = IntPtr.Zero;
+                return IntPtr.Zero;
+        }
+
+        return DefWindowProc(hWnd, msg, wParam, lParam);
+    }
+
+    private IntPtr HostWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        switch (msg)
+        {
             case WM_SIZE:
                 int width = (short)(lParam.ToInt64() & 0xFFFF);
                 int height = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
-                UpdateSize(width, height);
+                UpdateHostSize(width, height);
                 return IntPtr.Zero;
 
             case WM_ERASEBKGND:
                 return new IntPtr(1); // Suppress background repaint flicker
 
             case WM_DESTROY:
-                TaskbarLogger.Debug("Host HWND received WM_DESTROY.");
+                TaskbarLogger.Debug($"[HOST] Ephemeral Host HWND 0x{hWnd.ToInt64():X} received WM_DESTROY.");
                 return IntPtr.Zero;
 
             case WM_NCDESTROY:
-                TaskbarLogger.Debug("Host HWND received WM_NCDESTROY.");
-                _hostHwnd = IntPtr.Zero;
+                TaskbarLogger.Debug($"[HOST] Ephemeral Host HWND 0x{hWnd.ToInt64():X} received WM_NCDESTROY.");
+                if (_hostHwnd == hWnd)
+                {
+                    _hostHwnd = IntPtr.Zero;
+                }
                 return IntPtr.Zero;
         }
 
@@ -297,7 +472,7 @@ public sealed class TaskbarHost : IDisposable
         if (_isDisposed) return;
         _isDisposed = true;
 
-        TaskbarLogger.Info("Disposing TaskbarHost and detaching from taskbar...");
+        TaskbarLogger.Info("[SHUTDOWN] Disposing TaskbarHost, MessageReceiver, and cleaning up taskbar hooks...");
 
         try
         {
@@ -324,15 +499,29 @@ public sealed class TaskbarHost : IDisposable
                 _hostHwnd = IntPtr.Zero;
             }
 
-            if (_classRegistered)
+            if (_messageReceiverHwnd != IntPtr.Zero)
             {
-                UnregisterClass(WindowClassName, GetModuleHandle(null));
-                _classRegistered = false;
+                DestroyWindow(_messageReceiverHwnd);
+                _messageReceiverHwnd = IntPtr.Zero;
+            }
+
+            IntPtr hInstance = GetModuleHandle(null);
+
+            if (_hostClassRegistered)
+            {
+                UnregisterClass(HostWindowClassName, hInstance);
+                _hostClassRegistered = false;
+            }
+
+            if (_receiverClassRegistered)
+            {
+                UnregisterClass(MessageReceiverClassName, hInstance);
+                _receiverClassRegistered = false;
             }
         }
         catch (Exception ex)
         {
-            TaskbarLogger.Error("Exception during TaskbarHost disposal.", ex);
+            TaskbarLogger.Error("[SHUTDOWN] Exception during TaskbarHost disposal.", ex);
         }
     }
 }
