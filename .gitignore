@@ -20,6 +20,9 @@ ARM/
 ARM64/
 bld/
 [Bb]uild/
+publish/
+[Aa]rtifacts/
+*.zip
 *.appx
 *.msix
 *.appxbundle

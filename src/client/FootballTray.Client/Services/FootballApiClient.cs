@@ -51,6 +51,16 @@ public class FootballApiClient : IDisposable
         PropertyNameCaseInsensitive = true,
     };
 
+    public static string GetDefaultBaseUrl()
+    {
+        string? envUrl = Environment.GetEnvironmentVariable("FOOTBALLTRAY_BACKEND_URL");
+        if (!string.IsNullOrWhiteSpace(envUrl) && Uri.TryCreate(envUrl, UriKind.Absolute, out _))
+        {
+            return envUrl.TrimEnd('/');
+        }
+        return DefaultBaseUrl;
+    }
+
     public FootballApiClient(HttpClient? httpClient = null, string? baseUrl = null)
     {
         if (httpClient != null)
@@ -62,7 +72,7 @@ public class FootballApiClient : IDisposable
         {
             _httpClient = new HttpClient
             {
-                BaseAddress = new Uri(baseUrl ?? DefaultBaseUrl),
+                BaseAddress = new Uri(baseUrl ?? GetDefaultBaseUrl()),
                 Timeout = TimeSpan.FromSeconds(5),
             };
             _disposeClient = true;
