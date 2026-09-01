@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Services.Notifications;
 
 namespace FootballTray.Client.Services;
 
@@ -20,6 +21,7 @@ public class SyncService : IDisposable
 {
     private readonly FootballApiClient _apiClient;
     private readonly LocalCacheService _cacheService;
+    private readonly NotificationService? _notificationService;
     private readonly TimeSpan _pollingInterval;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private CancellationTokenSource? _cts;
@@ -40,15 +42,26 @@ public class SyncService : IDisposable
     public int LastKnownVersion => _lastKnownVersion;
     public string? LastKnownETag => _lastKnownEtag;
     public DateTimeOffset? LastValidatedAt => _lastValidatedAt;
+    public NotificationService? NotificationService => _notificationService;
 
     public SyncService(
         FootballApiClient apiClient,
         LocalCacheService cacheService,
+        NotificationService? notificationService = null,
         TimeSpan? pollingInterval = null)
     {
         _apiClient = apiClient;
         _cacheService = cacheService;
+        _notificationService = notificationService;
         _pollingInterval = pollingInterval ?? TimeSpan.FromSeconds(15);
+    }
+
+    public SyncService(
+        FootballApiClient apiClient,
+        LocalCacheService cacheService,
+        TimeSpan? pollingInterval)
+        : this(apiClient, cacheService, null, pollingInterval)
+    {
     }
 
     /// <summary>
@@ -60,6 +73,12 @@ public class SyncService : IDisposable
         _cts?.Cancel();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        // 0. Initialize notification deduplication history
+        if (_notificationService != null)
+        {
+            await _notificationService.InitializeAsync(_cts.Token);
+        }
+
         // 1. Immediately restore local cache for instant UI presentation
         var cached = await _cacheService.LoadCacheAsync(_cts.Token);
         if (cached?.Envelope?.Data != null)
@@ -69,6 +88,9 @@ public class SyncService : IDisposable
             _lastKnownEtag = cached.ETag;
             _lastValidatedAt = cached.LastValidatedAt != default ? cached.LastValidatedAt : cached.CachedAt;
             _freshnessState = DataFreshnessState.Stale;
+
+            // Establish baseline in notification engine so cached historical data is never replayed
+            _notificationService?.Engine.EvaluateUpdates(null, _currentTrayData);
 
             PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
         }
@@ -135,6 +157,7 @@ public class SyncService : IDisposable
                 // Version check: update only if version is newer or uninitialized
                 if (_currentTrayData == null || serverVersion >= _lastKnownVersion)
                 {
+                    var previousData = _currentTrayData;
                     _currentTrayData = envelope.Data;
                     _lastKnownVersion = serverVersion;
                     _lastKnownEtag = response.ETag;
@@ -143,6 +166,12 @@ public class SyncService : IDisposable
 
                     // Atomically persist to disk
                     await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
+
+                    // Evaluate and dispatch notifications for newly observed events/transitions
+                    if (_notificationService != null)
+                    {
+                        await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, cancellationToken);
+                    }
 
                     PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                     return _freshnessState;
