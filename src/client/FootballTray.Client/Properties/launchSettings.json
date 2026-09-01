@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "FootballTray.Client (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "FootballTray.Client (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

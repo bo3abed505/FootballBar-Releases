@@ -1,0 +1,20 @@
+{
+  "name": "footballtray-backend",
+  "version": "0.1.0",
+  "description": "FootballTray backend data ingestion and normalized API service",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest"
+  },
+  "keywords": [
+    "football",
+    "taskbar",
+    "api-football",
+    "winui3"
+  ],
+  "author": "",
+  "license": "MIT"
+}
