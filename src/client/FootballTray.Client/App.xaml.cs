@@ -8,6 +8,7 @@ using FootballTray.Client.Taskbar;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.ViewModels;
 
 namespace FootballTray.Client;
 
@@ -26,6 +27,7 @@ public partial class App : Application
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
+    public static MainViewModel? CurrentMainViewModel { get; private set; }
 
     public App()
     {
@@ -37,15 +39,28 @@ public partial class App : Application
     /// </summary>
     protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        // 1. Initialize Core Client Services first
+        _apiClient = new FootballApiClient();
+        _cacheService = new LocalCacheService();
+        _preferencesService = new PreferencesService();
+        var notificationService = new NotificationService();
+        _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
+
+        // 2. Initialize Root MainViewModel
+        CurrentMainViewModel = new MainViewModel(_preferencesService, _syncService);
+
+        // 3. Create Main Application Window
         _window = new MainWindow();
         _window.Activate();
 
-        // Register AppNotificationManager before calling Register()
+        // 4. Register AppNotificationManager
         InitializeAppNotifications();
 
         _window.Closed += (s, e) =>
         {
-            TaskbarLogger.Info("MainWindow closed, cleaning up TaskbarHost, SyncService, and Notifications...");
+            TaskbarLogger.Info("MainWindow closed, cleaning up TaskbarHost, SyncService, MainViewModel, and Notifications...");
+            CurrentMainViewModel?.Dispose();
+            CurrentMainViewModel = null;
             _syncService?.Dispose();
             _syncService = null;
             _apiClient?.Dispose();
@@ -57,7 +72,7 @@ public partial class App : Application
             UninitializeAppNotifications();
         };
 
-        // Initialize Taskbar Host and inject into primary taskbar
+        // 5. Initialize Taskbar Host and inject into primary taskbar
         try
         {
             _taskbarHost = new TaskbarHost();
@@ -75,13 +90,6 @@ public partial class App : Application
             {
                 TaskbarLogger.Warn("TaskbarHost initialization completed with unattached state. Waiting for recovery...");
             }
-
-            // Start Football Data Synchronization and Notification pipeline
-            _apiClient = new FootballApiClient();
-            _cacheService = new LocalCacheService();
-            _preferencesService = new PreferencesService();
-            var notificationService = new NotificationService();
-            _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
 
             _syncService.TrayUpdated += (sender, updateArgs) =>
             {
@@ -130,4 +138,3 @@ public partial class App : Application
         }
     }
 }
-

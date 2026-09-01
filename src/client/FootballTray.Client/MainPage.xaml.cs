@@ -1,131 +1,188 @@
 using System;
-using System.Linq;
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using FootballTray.Client.Taskbar;
-using FootballTray.Core.Models;
-using FootballTray.Core.Providers.Mock;
+using Microsoft.UI.Xaml.Media;
+using FootballTray.Client.Services.Notifications;
+using FootballTray.Client.ViewModels;
 
 namespace FootballTray.Client;
 
 public sealed partial class MainPage : Page
 {
-    private bool _isVisible = true;
-    private readonly MockFootballProvider _mockProvider = new();
+    private MainViewModel? _viewModel;
+
+    public MainViewModel? ViewModel
+    {
+        get => _viewModel;
+        set
+        {
+            if (_viewModel != null)
+            {
+                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            }
+
+            _viewModel = value;
+
+            if (_viewModel != null)
+            {
+                _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+                BindViewModel();
+            }
+        }
+    }
 
     public MainPage()
     {
         InitializeComponent();
-
-        TaskbarLogger.LogMessageReceived += OnLogMessageReceived;
-        _mockProvider.FixtureUpdated += OnFixtureUpdated;
-        _mockProvider.MatchEventOccurred += OnMatchEventOccurred;
-
-        UpdateUiFromFixture(_mockProvider.CurrentFixture);
-
+        Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
 
-    private void OnFixtureUpdated(Fixture fixture)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        if (ViewModel == null && App.CurrentMainViewModel != null)
         {
-            UpdateUiFromFixture(fixture);
-        });
-    }
-
-    private void OnMatchEventOccurred(MatchEvent matchEvent)
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            RecentEventText.Text = $"Latest Event: [{matchEvent.MinuteDisplay}] {matchEvent.Type} - {matchEvent.Team.Name} ({matchEvent.Description})";
-        });
-    }
-
-    private void UpdateUiFromFixture(Fixture fixture)
-    {
-        HomeTeamText.Text = fixture.HomeTeam.Name;
-        AwayTeamText.Text = fixture.AwayTeam.Name;
-        MatchScoreText.Text = fixture.Score.DisplayScore;
-        MatchStatusText.Text = $"{fixture.State.ToString().ToUpperInvariant()} ({fixture.MatchTimeDisplay})";
-
-        if (fixture.Events.Count > 0)
-        {
-            var lastEvent = fixture.Events.Last();
-            RecentEventText.Text = $"Latest Event: [{lastEvent.MinuteDisplay}] {lastEvent.Type} - {lastEvent.Team.Name} ({lastEvent.Description})";
+            ViewModel = App.CurrentMainViewModel;
         }
-        else
+
+        if (ViewModel != null)
         {
-            RecentEventText.Text = "Events: None yet";
-        }
-    }
-
-    private void OnStepNextClick(object sender, RoutedEventArgs e)
-    {
-        _mockProvider.StepNext();
-    }
-
-    private void OnAdvance17Click(object sender, RoutedEventArgs e)
-    {
-        _mockProvider.AdvanceToMinute(17);
-    }
-
-    private void OnAdvanceHtClick(object sender, RoutedEventArgs e)
-    {
-        _mockProvider.AdvanceToMinute(45);
-    }
-
-    private void OnAdvance72Click(object sender, RoutedEventArgs e)
-    {
-        _mockProvider.AdvanceToMinute(72);
-    }
-
-    private void OnAdvanceFtClick(object sender, RoutedEventArgs e)
-    {
-        _mockProvider.AdvanceToMinute(90, 5);
-    }
-
-    private void OnResetSimClick(object sender, RoutedEventArgs e)
-    {
-        _mockProvider.Reset();
-    }
-
-    private void OnLogMessageReceived(TaskbarLogLevel level, string message, Exception? ex)
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            string line = $"[{DateTime.Now:HH:mm:ss}] [{level.ToString().ToUpperInvariant()}] {message}";
-            if (ex != null) line += $" ({ex.Message})";
-            LogTextBox.Text += line + Environment.NewLine;
-        });
-    }
-
-    private void OnRepositionClick(object sender, RoutedEventArgs e)
-    {
-        TaskbarLogger.Info("Manual recalculate & reposition requested from UI.");
-        App.CurrentTaskbarHost?.Reposition();
-    }
-
-    private void OnToggleVisibilityClick(object sender, RoutedEventArgs e)
-    {
-        if (_isVisible)
-        {
-            App.CurrentTaskbarHost?.Hide();
-            _isVisible = false;
-            TaskbarLogger.Info("Taskbar host hidden via UI toggle.");
-        }
-        else
-        {
-            App.CurrentTaskbarHost?.Show();
-            _isVisible = true;
-            TaskbarLogger.Info("Taskbar host shown via UI toggle.");
+            await ViewModel.InitializeAsync();
+            UpdateUiFromViewModel();
         }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        TaskbarLogger.LogMessageReceived -= OnLogMessageReceived;
-        _mockProvider.FixtureUpdated -= OnFixtureUpdated;
-        _mockProvider.MatchEventOccurred -= OnMatchEventOccurred;
+        if (_viewModel != null)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        }
+    }
+
+    private void BindViewModel()
+    {
+        if (_viewModel == null) return;
+
+        MatchItemsList.ItemsSource = _viewModel.FilteredMatches;
+        TeamsList.ItemsSource = _viewModel.AvailableTeams;
+        CompetitionsList.ItemsSource = _viewModel.AvailableCompetitions;
+        NotificationCategoriesList.ItemsSource = _viewModel.NotificationCategories;
+
+        GlobalNotificationsSwitch.IsOn = _viewModel.IsGlobalNotificationsEnabled;
+        UpdateUiFromViewModel();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            UpdateUiFromViewModel();
+        });
+    }
+
+    private void UpdateUiFromViewModel()
+    {
+        if (_viewModel == null) return;
+
+        // Connection status & indicator
+        ConnectionStatusText.Text = _viewModel.ConnectionStatusText;
+        if (_viewModel.IsOffline)
+        {
+            ConnectionDot.Fill = (Brush)Application.Current.Resources["SystemFillColorCautionBrush"] 
+                ?? (Brush)Application.Current.Resources["SystemFillColorAttentionBrush"];
+        }
+        else
+        {
+            ConnectionDot.Fill = (Brush)Application.Current.Resources["SystemFillColorSuccessBrush"];
+        }
+
+        // Active Ticker Summary
+        ActiveTickerSummaryText.Text = $"📌 {_viewModel.ActiveTickerText}";
+
+        // Global notifications switch
+        if (GlobalNotificationsSwitch.IsOn != _viewModel.IsGlobalNotificationsEnabled)
+        {
+            GlobalNotificationsSwitch.IsOn = _viewModel.IsGlobalNotificationsEnabled;
+        }
+
+        // Empty state visibility
+        if (_viewModel.IsEmpty)
+        {
+            EmptyStateBorder.Visibility = Visibility.Visible;
+            EmptyStateTitleText.Text = _viewModel.EmptyStateTitle;
+            EmptyStateSubtitleText.Text = _viewModel.EmptyStateMessage;
+        }
+        else
+        {
+            EmptyStateBorder.Visibility = Visibility.Collapsed;
+        }
+
+        // Status / Error InfoBar
+        if (_viewModel.HasStatusMessage)
+        {
+            StatusInfoBar.Message = _viewModel.StatusMessage ?? string.Empty;
+            StatusInfoBar.IsOpen = true;
+        }
+        else
+        {
+            StatusInfoBar.IsOpen = false;
+        }
+
+        // Update active filter button styling
+        UpdateFilterButtons();
+    }
+
+    private void UpdateFilterButtons()
+    {
+        if (_viewModel == null) return;
+
+        var accentStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+        var defaultStyle = (Style)Application.Current.Resources["DefaultButtonStyle"];
+
+        FilterAllButton.Style = _viewModel.ActiveFilter == MatchFilterType.All ? accentStyle : defaultStyle;
+        FilterFollowingButton.Style = _viewModel.ActiveFilter == MatchFilterType.Following ? accentStyle : defaultStyle;
+        FilterLiveButton.Style = _viewModel.ActiveFilter == MatchFilterType.Live ? accentStyle : defaultStyle;
+        FilterUpcomingButton.Style = _viewModel.ActiveFilter == MatchFilterType.Upcoming ? accentStyle : defaultStyle;
+        FilterFinishedButton.Style = _viewModel.ActiveFilter == MatchFilterType.Finished ? accentStyle : defaultStyle;
+    }
+
+    private void OnFilterAllClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.All);
+    private void OnFilterFollowingClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Following);
+    private void OnFilterLiveClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Live);
+    private void OnFilterUpcomingClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Upcoming);
+    private void OnFilterFinishedClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Finished);
+
+    private async void OnTeamFollowToggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleSwitch ts && ts.Tag is string teamId && _viewModel != null)
+        {
+            await _viewModel.ToggleTeamFollowAsync(teamId);
+        }
+    }
+
+    private async void OnCompetitionFollowToggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleSwitch ts && ts.Tag is string compId && _viewModel != null)
+        {
+            await _viewModel.ToggleCompetitionFollowAsync(compId);
+        }
+    }
+
+    private async void OnGlobalNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleSwitch ts && _viewModel != null && ts.IsOn != _viewModel.IsGlobalNotificationsEnabled)
+        {
+            await _viewModel.ToggleGlobalNotificationsAsync(ts.IsOn);
+        }
+    }
+
+    private async void OnNotificationCategoryToggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleSwitch ts && ts.Tag is NotificationType type && _viewModel != null)
+        {
+            await _viewModel.ToggleNotificationCategoryAsync(type, ts.IsOn);
+        }
     }
 }

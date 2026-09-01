@@ -18,7 +18,7 @@ public class TrayUpdateEventArgs : EventArgs
     public DateTimeOffset? LastValidatedAt { get; init; }
 }
 
-public class SyncService : IDisposable
+public class SyncService : ISyncService
 {
     private readonly FootballApiClient _apiClient;
     private readonly LocalCacheService _cacheService;
@@ -83,10 +83,15 @@ public class SyncService : IDisposable
     {
     }
 
+    public void RefreshTickerOnPreferenceChange()
+    {
+        PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+    }
+
     private void OnPreferencesChanged(object? sender, UserPreferences preferences)
     {
         // Immediate UI refresh when following or notification preferences are updated
-        PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+        RefreshTickerOnPreferenceChange();
     }
 
     /// <summary>

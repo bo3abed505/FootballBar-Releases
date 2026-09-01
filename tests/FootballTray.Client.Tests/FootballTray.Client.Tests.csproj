@@ -41,6 +41,7 @@
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\WindowsAppNotificationRenderer.cs" Link="Notifications\WindowsAppNotificationRenderer.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationService.cs" Link="Notifications\NotificationService.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\AppNotificationRegistrationManager.cs" Link="Notifications\AppNotificationRegistrationManager.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\ISyncService.cs" Link="ISyncService.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\CanonicalEntityIds.cs" Link="Preferences\CanonicalEntityIds.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FollowedTeam.cs" Link="Preferences\FollowedTeam.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FollowedCompetition.cs" Link="Preferences\FollowedCompetition.cs" />
@@ -50,6 +51,12 @@
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\IPreferencesService.cs" Link="Preferences\IPreferencesService.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\PreferencesService.cs" Link="Preferences\PreferencesService.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FixtureRelevanceEngine.cs" Link="Preferences\FixtureRelevanceEngine.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MatchFilterType.cs" Link="ViewModels\MatchFilterType.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MatchItemViewModel.cs" Link="ViewModels\MatchItemViewModel.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\FollowedTeamItemViewModel.cs" Link="ViewModels\FollowedTeamItemViewModel.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\FollowedCompetitionItemViewModel.cs" Link="ViewModels\FollowedCompetitionItemViewModel.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\NotificationCategoryItemViewModel.cs" Link="ViewModels\NotificationCategoryItemViewModel.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MainViewModel.cs" Link="ViewModels\MainViewModel.cs" />
   </ItemGroup>
 
   <ItemGroup>
