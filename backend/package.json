@@ -14,7 +14,9 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
     "db:test:setup": "tsx src/db/setup-test-db.ts",
-    "dev:sync": "tsx src/acquisition/cli-sync.ts"
+    "dev:sync": "tsx src/acquisition/cli-sync.ts",
+    "dev:sync:goal": "tsx src/acquisition/cli-sync.ts --simulate-goal",
+    "dev:sync:reset": "tsx src/acquisition/cli-sync.ts --reset"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",

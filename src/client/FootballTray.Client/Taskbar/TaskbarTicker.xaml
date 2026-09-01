@@ -7,14 +7,18 @@
     mc:Ignorable="d">
 
     <Border
+        x:Name="RootBorder"
         Background="{ThemeResource LayerFillColorDefaultBrush}"
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="6"
         Padding="8,2,8,2"
         HorizontalAlignment="Stretch"
-        VerticalAlignment="Stretch">
-        
+        VerticalAlignment="Stretch"
+        PointerEntered="RootBorder_PointerEntered"
+        PointerExited="RootBorder_PointerExited"
+        Tapped="RootBorder_Tapped">
+
         <StackPanel
             Orientation="Horizontal"
             HorizontalAlignment="Center"
@@ -22,12 +26,14 @@
             Spacing="6">
             
             <FontIcon
+                x:Name="TickerIcon"
                 Glyph="&#xE7FC;"
                 FontSize="12"
                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
 
             <TextBlock
-                Text="FootballTray DEV"
+                x:Name="TickerText"
+                Text="FootballTray"
                 FontSize="12"
                 FontWeight="SemiBold"
                 VerticalAlignment="Center"

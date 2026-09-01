@@ -42,6 +42,8 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.mock-state.json
+*.mock-state.json
 
 # IDE & Editor files
 .idea/

@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   FootballProvider,
   ProviderCompetition,
@@ -10,8 +12,27 @@ import {
   FixtureFilter,
 } from './football-provider.js';
 
+interface PersistentFixtureState {
+  state: string;
+  elapsedMinute: number;
+  extraMinute?: number;
+  score: {
+    home: number;
+    away: number;
+    homeHt?: number;
+    awayHt?: number;
+  };
+  events: ProviderEvent[];
+}
+
+interface PersistentMockState {
+  fixtures: Record<string, PersistentFixtureState>;
+}
+
 export class MockFootballProvider implements FootballProvider {
   readonly providerName = 'mock';
+
+  private readonly stateFilePath: string | null;
 
   // Seeded Teams
   private readonly teamBarcelona: ProviderTeam = {
@@ -51,16 +72,6 @@ export class MockFootballProvider implements FootballProvider {
     code: 'EGY',
     country: 'Egypt',
     logoUrl: 'https://media.api-sports.io/football/teams/32.png',
-    venueName: 'Cairo International Stadium',
-  };
-
-  private readonly teamAlAhly: ProviderTeam = {
-    id: 'team_alahly',
-    name: 'Al Ahly SC',
-    shortName: 'AHL',
-    code: 'AHL',
-    country: 'Egypt',
-    logoUrl: 'https://media.api-sports.io/football/teams/1029.png',
     venueName: 'Cairo International Stadium',
   };
 
@@ -107,12 +118,24 @@ export class MockFootballProvider implements FootballProvider {
   // Mutable state for dynamic test simulation
   private fixtures: Map<string, ProviderFixtureDetail> = new Map();
 
-  constructor() {
+  constructor(customStateFilePath?: string) {
+    if (process.env.NODE_ENV === 'production') {
+      this.stateFilePath = null;
+    } else if (customStateFilePath) {
+      this.stateFilePath = customStateFilePath;
+    } else if (process.env.NODE_ENV === 'test') {
+      // In automated tests without an explicit customStateFilePath, isolate in-memory
+      this.stateFilePath = null;
+    } else {
+      // In local development CLI execution, default to workspace .mock-state.json
+      this.stateFilePath = path.resolve(process.cwd(), '.mock-state.json');
+    }
+
     this.reset();
   }
 
   /**
-   * Resets mock data back to baseline development state
+   * Resets mock data back to baseline development state.
    */
   reset(): void {
     this.fixtures.clear();
@@ -202,7 +225,7 @@ export class MockFootballProvider implements FootballProvider {
       homeTeam: this.teamBarcelona,
       awayTeam: this.teamRealMadrid,
       round: '[DEV MOCK] Regular Season - Round 26',
-      kickoffTime: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+      kickoffTime: '2026-09-01T01:42:51.804Z',
       state: 'LIVE',
       elapsedMinute: 72,
       extraMinute: 0,
@@ -229,7 +252,7 @@ export class MockFootballProvider implements FootballProvider {
       homeTeam: this.teamSpain,
       awayTeam: this.teamEgypt,
       round: '[DEV MOCK] International Friendly',
-      kickoffTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+      kickoffTime: '2026-09-01T06:27:51.804Z',
       state: 'PREMATCH',
       elapsedMinute: 0,
       extraMinute: 0,
@@ -244,14 +267,114 @@ export class MockFootballProvider implements FootballProvider {
 
     this.fixtures.set(elClasico.id, elClasico);
     this.fixtures.set(spainEgypt.id, spainEgypt);
+
+    // If a persistent development state exists, load it on startup (dev only)
+    this.loadPersistentState();
   }
 
   /**
-   * Helper to simulate a match event dynamically (e.g. 88' goal for Barcelona -> 2-1)
+   * Loads simulated fixture state from local file if configured.
    */
-  simulateGoal(fixtureId: string, isHome: boolean, minute: number, scorer: { name: string; id: string }, assist?: { name: string; id: string }): void {
+  loadPersistentState(): boolean {
+    if (!this.stateFilePath) {
+      return false;
+    }
+
+    try {
+      if (!fs.existsSync(this.stateFilePath)) {
+        return false;
+      }
+
+      const content = fs.readFileSync(this.stateFilePath, 'utf-8');
+      const parsed: PersistentMockState = JSON.parse(content);
+
+      if (!parsed?.fixtures) {
+        return false;
+      }
+
+      for (const [id, saved] of Object.entries(parsed.fixtures)) {
+        const existing = this.fixtures.get(id);
+        if (existing) {
+          existing.state = saved.state;
+          existing.elapsedMinute = saved.elapsedMinute;
+          existing.extraMinute = saved.extraMinute ?? 0;
+          existing.score = { ...saved.score };
+          existing.events = [...saved.events];
+        }
+      }
+
+      return true;
+    } catch {
+      // Invalid/corrupt state file is safely ignored
+      return false;
+    }
+  }
+
+  /**
+   * Saves simulated fixture state to local file (dev only).
+   */
+  savePersistentState(): boolean {
+    if (!this.stateFilePath) {
+      return false;
+    }
+
+    try {
+      const persistent: PersistentMockState = { fixtures: {} };
+
+      for (const [id, f] of this.fixtures.entries()) {
+        persistent.fixtures[id] = {
+          state: f.state,
+          elapsedMinute: f.elapsedMinute,
+          extraMinute: f.extraMinute ?? 0,
+          score: { ...f.score },
+          events: [...f.events],
+        };
+      }
+
+      fs.writeFileSync(this.stateFilePath, JSON.stringify(persistent, null, 2), 'utf-8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Clears the persistent mock state file from disk.
+   */
+  clearPersistentState(): void {
+    if (!this.stateFilePath) {
+      return;
+    }
+
+    try {
+      if (fs.existsSync(this.stateFilePath)) {
+        fs.unlinkSync(this.stateFilePath);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Simulates a match event dynamically (e.g. 89' goal for Barcelona -> 2-1).
+   * Fully idempotent: will not double-apply if the same event already exists.
+   */
+  simulateGoal(
+    fixtureId: string,
+    isHome: boolean,
+    minute: number,
+    scorer: { name: string; id: string },
+    assist?: { name: string; id: string }
+  ): boolean {
     const fixture = this.fixtures.get(fixtureId);
-    if (!fixture) return;
+    if (!fixture) return false;
+
+    const eventUid = `evt_${fixtureId}_${minute}_0_Goal_${scorer.id}`;
+
+    // Idempotency check: if event is already recorded, do nothing
+    if (fixture.events.some((e) => e.eventUid === eventUid)) {
+      return false;
+    }
 
     const team = isHome ? fixture.homeTeam : fixture.awayTeam;
     const newScore = {
@@ -262,7 +385,7 @@ export class MockFootballProvider implements FootballProvider {
 
     const newEvent: ProviderEvent = {
       id: `evt_${fixtureId}_${minute}_goal`,
-      eventUid: `evt_${fixtureId}_${minute}_0_Goal_${scorer.id}`,
+      eventUid,
       fixtureId,
       teamId: team.id,
       type: 'Goal',
@@ -278,6 +401,10 @@ export class MockFootballProvider implements FootballProvider {
     fixture.score = newScore;
     fixture.elapsedMinute = minute;
     fixture.events.push(newEvent);
+
+    // Save development state across CLI executions
+    this.savePersistentState();
+    return true;
   }
 
   async getCompetitions(): Promise<ProviderCompetition[]> {

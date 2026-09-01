@@ -21,6 +21,10 @@
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarNativeMethods.cs" Link="TaskbarNativeMethods.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarLogger.cs" Link="TaskbarLogger.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarInjection.cs" Link="TaskbarInjection.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\FootballApiClient.cs" Link="FootballApiClient.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\LocalCacheService.cs" Link="LocalCacheService.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\TrayTickerFormatter.cs" Link="TrayTickerFormatter.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Services\SyncService.cs" Link="SyncService.cs" />
   </ItemGroup>
 
   <ItemGroup>

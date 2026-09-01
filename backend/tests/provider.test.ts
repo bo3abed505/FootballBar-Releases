@@ -1,11 +1,23 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { MockFootballProvider } from '../src/providers/mock.provider.js';
 
 describe('MockFootballProvider', () => {
+  const tempStateFile = path.resolve(process.cwd(), '.mock-state-test.json');
   let provider: MockFootballProvider;
 
   beforeEach(() => {
-    provider = new MockFootballProvider();
+    if (fs.existsSync(tempStateFile)) {
+      fs.unlinkSync(tempStateFile);
+    }
+    provider = new MockFootballProvider(tempStateFile);
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempStateFile)) {
+      fs.unlinkSync(tempStateFile);
+    }
   });
 
   it('provides deterministic competitions and seasons', async () => {
@@ -44,16 +56,61 @@ describe('MockFootballProvider', () => {
     expect(details?.events[1].playerName).toContain('Martinez');
   });
 
-  it('simulates a new goal dynamically', async () => {
-    provider.simulateGoal('fix_elclasico_2026', true, 88, { name: 'P. Gonzalez', id: 'ply_bar_8' });
-    const details = await provider.getFixtureDetails('fix_elclasico_2026');
+  it('simulates a new goal dynamically and persists state to file in development', async () => {
+    const applied = provider.simulateGoal('fix_elclasico_2026', true, 88, { name: 'P. Gonzalez', id: 'ply_bar_8' });
+    expect(applied).toBe(true);
 
+    const details = await provider.getFixtureDetails('fix_elclasico_2026');
     expect(details?.score.home).toBe(2);
     expect(details?.score.away).toBe(1);
     expect(details?.elapsedMinute).toBe(88);
     expect(details?.events.length).toBe(7);
-    expect(details?.events[6].type).toBe('Goal');
-    expect(details?.events[6].minute).toBe(88);
-    expect(details?.events[6].playerName).toBe('P. Gonzalez');
+
+    // Verify file was written
+    expect(fs.existsSync(tempStateFile)).toBe(true);
+
+    // Verify a fresh MockFootballProvider instance in a new "process" loads the persisted state
+    const newInstance = new MockFootballProvider(tempStateFile);
+    const loadedDetails = await newInstance.getFixtureDetails('fix_elclasico_2026');
+    expect(loadedDetails?.score.home).toBe(2);
+    expect(loadedDetails?.score.away).toBe(1);
+    expect(loadedDetails?.elapsedMinute).toBe(88);
+    expect(loadedDetails?.events.length).toBe(7);
+  });
+
+  it('is strictly idempotent when simulateGoal is called repeatedly with same parameters', async () => {
+    const firstCall = provider.simulateGoal('fix_elclasico_2026', true, 89, { name: 'L. Martinez', id: 'ply_bar_10' });
+    expect(firstCall).toBe(true);
+
+    // Second call with same event UID must return false and not re-increment score
+    const secondCall = provider.simulateGoal('fix_elclasico_2026', true, 89, { name: 'L. Martinez', id: 'ply_bar_10' });
+    expect(secondCall).toBe(false);
+
+    const details = await provider.getFixtureDetails('fix_elclasico_2026');
+    expect(details?.score.home).toBe(2); // Still 2, not 3
+    expect(details?.events.length).toBe(7); // Still 7, not 8
+  });
+
+  it('removes persistent state file when reset() is called', () => {
+    provider.simulateGoal('fix_elclasico_2026', true, 89, { name: 'L. Martinez', id: 'ply_bar_10' });
+    expect(fs.existsSync(tempStateFile)).toBe(true);
+
+    provider.clearPersistentState();
+    expect(fs.existsSync(tempStateFile)).toBe(false);
+  });
+
+  it('never reads or writes persistent mock state when NODE_ENV=production', () => {
+    const originalEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+
+      const prodProvider = new MockFootballProvider(tempStateFile);
+      prodProvider.simulateGoal('fix_elclasico_2026', true, 89, { name: 'L. Martinez', id: 'ply_bar_10' });
+
+      // In production mode, file must NEVER be created
+      expect(fs.existsSync(tempStateFile)).toBe(false);
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
   });
 });

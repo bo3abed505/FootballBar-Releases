@@ -1,6 +1,5 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import etag from '@fastify/etag';
 import { apiRoutes } from './api/routes.js';
 import * as dotenv from 'dotenv';
 
@@ -8,12 +7,7 @@ dotenv.config();
 
 export async function buildServer(opts = {}) {
   const app = Fastify({
-    logger: process.env.NODE_ENV === 'test' ? false : {
-      transport: {
-        target: 'pino-pretty',
-        options: { colorize: true },
-      },
-    },
+    logger: process.env.NODE_ENV === 'test' ? false : true,
     ...opts,
   });
 
