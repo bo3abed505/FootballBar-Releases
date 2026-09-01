@@ -2,18 +2,41 @@
   "name": "footballtray-backend",
   "version": "0.1.0",
   "description": "FootballTray backend data ingestion and normalized API service",
-  "main": "dist/index.js",
+  "type": "module",
+  "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts",
-    "test": "vitest"
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:seed": "tsx src/db/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/etag": "^6.0.2",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.39.3",
+    "fastify": "^5.2.1",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.8",
+    "@types/pg": "^8.11.11",
+    "drizzle-kit": "^0.30.5",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
   },
   "keywords": [
     "football",
     "taskbar",
     "api-football",
-    "winui3"
+    "fastify",
+    "drizzle"
   ],
   "author": "",
   "license": "MIT"
