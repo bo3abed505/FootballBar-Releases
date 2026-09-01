@@ -1,18 +1,9 @@
+using System;
+using System.Threading.Tasks;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
-using Microsoft.UI.Xaml.Shapes;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using FootballTray.Client.Taskbar;
 
 namespace FootballTray.Client;
 
@@ -22,11 +13,10 @@ namespace FootballTray.Client;
 public partial class App : Application
 {
     private Window? _window;
-    
-    /// <summary>
-    /// Initializes the singleton application object.  This is the first line of authored code
-    /// executed, and as such is the logical equivalent of main() or WinMain().
-    /// </summary>
+    private TaskbarHost? _taskbarHost;
+
+    public static TaskbarHost? CurrentTaskbarHost { get; private set; }
+
     public App()
     {
         InitializeComponent();
@@ -35,10 +25,41 @@ public partial class App : Application
     /// <summary>
     /// Invoked when the application is launched.
     /// </summary>
-    /// <param name="args">Details about the launch request and process.</param>
-    protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         _window = new MainWindow();
         _window.Activate();
+
+        _window.Closed += (s, e) =>
+        {
+            TaskbarLogger.Info("MainWindow closed, cleaning up TaskbarHost...");
+            _taskbarHost?.Dispose();
+            _taskbarHost = null;
+            CurrentTaskbarHost = null;
+        };
+
+        // Initialize Taskbar Host and inject into primary taskbar
+        try
+        {
+            _taskbarHost = new TaskbarHost();
+            CurrentTaskbarHost = _taskbarHost;
+
+            var tickerControl = new TaskbarTicker();
+            bool initialized = await _taskbarHost.InitializeAsync(tickerControl);
+
+            if (initialized)
+            {
+                _taskbarHost.Show();
+                TaskbarLogger.Info("TaskbarHost successfully initialized and displayed.");
+            }
+            else
+            {
+                TaskbarLogger.Warn("TaskbarHost initialization completed with unattached state. Waiting for recovery...");
+            }
+        }
+        catch (Exception ex)
+        {
+            TaskbarLogger.Error("Unhandled exception during TaskbarHost startup.", ex);
+        }
     }
 }

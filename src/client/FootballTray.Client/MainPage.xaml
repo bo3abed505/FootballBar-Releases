@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="FootballTray.Client.MainPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -8,11 +7,78 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <!--
-        This is the main content area of your application.
-        Add your UI elements here — for example, controls, layouts, and data-bound views.
-        Use 'dotnet new winui-page' to create additional pages and navigate to them via
-        the Frame in MainWindow (RootFrame).
-    -->
-    <Grid />
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="6">
+            <TextBlock
+                Text="FootballTray Taskbar Host PoC"
+                Style="{ThemeResource TitleTextBlockStyle}" />
+            <TextBlock
+                Text="Milestone 2: Native WinUI 3 taskbar hosting directly embedded in Windows 11 Shell_TrayWnd."
+                Style="{ThemeResource BodyTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <!-- Controls / Actions -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
+            <Button
+                x:Name="RepositionButton"
+                Click="OnRepositionClick"
+                Style="{ThemeResource AccentButtonStyle}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                    <TextBlock Text="Recalculate &amp; Reposition" />
+                </StackPanel>
+            </Button>
+
+            <Button
+                x:Name="ToggleVisibilityButton"
+                Click="OnToggleVisibilityClick">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE7B3;" FontSize="14" />
+                    <TextBlock Text="Toggle Taskbar Visibility" />
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <!-- Diagnostic Log View -->
+        <Border
+            Grid.Row="2"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="16">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    Text="Taskbar Diagnostics Log"
+                    FontWeight="SemiBold"
+                    Style="{ThemeResource SubtitleTextBlockStyle}" />
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <TextBox
+                        x:Name="LogTextBox"
+                        IsReadOnly="True"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas, Cascadia Code, monospace"
+                        FontSize="12"
+                        TextWrapping="Wrap"
+                        BorderThickness="0"
+                        Background="Transparent" />
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
 </Page>
