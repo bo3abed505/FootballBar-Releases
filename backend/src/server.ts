@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { apiRoutes } from './api/routes.js';
 import * as dotenv from 'dotenv';
+import { AppRuntime } from './runtime/app-runtime.js';
 
 dotenv.config();
 
@@ -22,18 +23,18 @@ export async function buildServer(opts = {}) {
   return app;
 }
 
-// Start server if run directly
-if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
-  const port = parseInt(process.env.PORT || '4000', 10);
-  const host = '0.0.0.0';
+export { AppRuntime };
 
+// Start server and background acquisition runtime if run directly
+if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
   buildServer()
-    .then((app) => app.listen({ port, host }))
-    .then((address) => {
-      console.log(`[SERVER] FootballTray backend listening on ${address}`);
+    .then((app) => {
+      const runtime = new AppRuntime(app);
+      return runtime.start();
     })
     .catch((err) => {
-      console.error('[SERVER] Failed to start server:', err);
+      console.error('[SERVER] Failed to start application runtime:', err);
       process.exit(1);
     });
 }
+
