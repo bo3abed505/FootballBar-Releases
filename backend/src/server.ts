@@ -25,6 +25,16 @@ export async function buildServer(opts = {}) {
 
 export { AppRuntime };
 
+// Top-level crash and unhandled error handling
+process.on('uncaughtException', (err: Error) => {
+  console.error(`[FATAL:UNCAUGHT_EXCEPTION] ${err.name}: ${err.message}`, err.stack);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`[FATAL:UNHANDLED_REJECTION] ${msg}`);
+});
+
 // Start server and background acquisition runtime if run directly
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
   buildServer()

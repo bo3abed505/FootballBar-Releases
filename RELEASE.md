@@ -152,6 +152,53 @@ npm start
 - **Custom Backend URL**: Set environment variable `FOOTBALLTRAY_BACKEND_URL` (e.g. `http://192.168.1.50:4000`) before starting `FootballTray.exe`.
 - **Local Cache Storage**: `%LOCALAPPDATA%\FootballTray\cache.json`
 - **Preferences Storage**: `%LOCALAPPDATA%\FootballTray\preferences.json`
+- **Local Logs Directory**: `%LOCALAPPDATA%\FootballTray\logs\footballtray.log` (5 MB bounded rotation, max 3 retained `.log` archives)
+
+---
+
+## Diagnostics, Observability & Production Troubleshooting
+
+FootballTray includes local, bounded, non-intrusive diagnostics designed to diagnose client and backend health without exposing secrets or sending telemetry to third parties.
+
+### 1. Client Diagnostics & Log Access
+- **Diagnostics UI**: The main settings window features a dedicated **System Diagnostics** panel displaying:
+  - Client version & build architecture
+  - Overall health state (`Healthy`, `Degraded`, `Recovering`, `Failed`)
+  - Server synchronization status & last successful response timestamp
+  - Taskbar HWND host attachment status
+  - Notification registration state
+- **Copy Diagnostics to Clipboard**: Clicking the "Copy Diagnostics" button exports a structured, sanitized diagnostics report ready for issue tracking.
+- **Log Files**: Local log files are located at `%LOCALAPPDATA%\FootballTray\logs\footballtray.log`.
+  - Bounded to 5 MB per file with automatic rotation.
+  - Retains a maximum of 3 historical archives (`footballtray.1.log`, `footballtray.2.log`, `footballtray.3.log`).
+  - Automatic redaction of any sensitive credentials or keys.
+
+### 2. Backend Health & Observability Endpoints
+- **Architecture**: Diagnostics API provides lightweight operational telemetry using existing PostgreSQL database connection pool and application state. No secondary database, SQLite store, external metrics service, or telemetry backend is used.
+- **`/health`**: Lightweight health check returning:
+  ```json
+  {
+    "status": "ok",
+    "database": "connected",
+    "latencyMs": 4,
+    "timestamp": "2026-09-02T12:00:00.000Z",
+    "version": "1.0.0",
+    "provider": "mock",
+    "scheduler": { "running": true, "lastCycleOutcome": "success" },
+    "uptimeSeconds": 3600
+  }
+  ```
+- **`/api/diagnostics`**: Comprehensive operational telemetry returning memory usage, scheduler cycle history, and provider quota consumption without exposing database credentials or API keys.
+
+### 3. Production Troubleshooting Runbook
+
+| Issue / Symptom | Probable Cause | Diagnostic Verification | Recovery Action |
+| :--- | :--- | :--- | :--- |
+| **Client displays "Stale Data" badge** | Backend unreachable or poll timeout | Check `footballtray.log` for `[Sync][PollFailed]` errors. Verify `GET /health` on backend. | Ensure backend service is running; client will automatically resume fresh sync on next poll. |
+| **Taskbar ticker not visible** | Explorer restart or HWND re-docking | Check Diagnostics UI: Taskbar Host will show `Unattached` or `Recovering`. | Taskbar watcher automatically detects `TaskbarCreated` message and re-attaches within 5 seconds. |
+| **Notifications not appearing** | Notifications disabled in Windows Settings or preferences | Check Diagnostics UI for Notification Engine status (`Registered` vs `Disabled`). Check `preferences.json`. | Enable notifications in Windows App Settings or toggle "Enable Notifications" in FootballTray UI. |
+| **Backend reports Provider Quota Exhaustion** | Daily API-Football request budget limit reached | Check `/api/diagnostics` -> `budget.isExhausted`. | Acquisition scheduler automatically enters fallback idle mode until daily budget resets at 00:00 UTC. |
+| **Database disconnected** | PostgreSQL service stopped or invalid credentials in `.env` | Check `GET /health` -> `"database": "disconnected"`. | Restart PostgreSQL service and check `DATABASE_URL` in backend `.env`. |
 
 ---
 

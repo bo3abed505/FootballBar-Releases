@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services.Preferences;
 
 namespace FootballTray.Client.Services.Notifications;
@@ -73,6 +74,8 @@ public sealed class NotificationService
         HashSet<string>? followedTeamIds = preferences?.GetFollowedTeamIdSet();
         HashSet<string>? followedCompIds = preferences?.GetFollowedCompetitionIdSet();
 
+        AppLogger.Debug("Notifications", "CandidatesEvaluated", $"Evaluated {candidates.Count} candidate alerts from snapshot transition.");
+
         foreach (var candidate in candidates)
         {
             // Record in deduplication store regardless of preference filtering
@@ -82,12 +85,14 @@ public sealed class NotificationService
             // 1. Check Global Enablement
             if (preferences != null && !preferences.Notifications.GlobalEnabled)
             {
+                AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Notifications globally disabled.");
                 continue;
             }
 
             // 2. Check Category / Type Enablement
             if (preferences != null && !preferences.Notifications.IsTypeEnabled(candidate.Type))
             {
+                AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Category '{candidate.Type}' disabled.");
                 continue;
             }
 
@@ -100,14 +105,23 @@ public sealed class NotificationService
 
                 if (!homeFollowed && !awayFollowed && !compFollowed)
                 {
+                    AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Match entities not followed.");
                     continue; // Suppress notification for unfollowed match
                 }
             }
 
             var payload = NotificationPayloadFormatter.Format(candidate);
 
-            // Render alert through injected renderer
-            _renderer.RenderNotification(payload);
+            try
+            {
+                // Render alert through injected renderer
+                _renderer.RenderNotification(payload);
+                AppLogger.Info("Notifications", "NotificationRendered", $"Dispatched alert: [{payload.Type}] '{payload.Title}' - '{payload.Body}'");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Notifications", "NotificationRenderError", $"Failed to render notification for '{candidate.DeduplicationKey}': {ex.Message}", ex: ex);
+            }
 
             dispatchedPayloads.Add(payload);
             NotificationDispatched?.Invoke(payload);

@@ -137,6 +137,7 @@ public sealed class AppNotificationRegistrationManager
             _invokedHandler = (sender, rawArgs) =>
             {
                 var result = NotificationActivationHandler.ParseQueryString(rawArgs);
+                Diagnostics.AppLogger.Info("Notifications", "NotificationActivated", $"Notification invoked (Action: {result.Action}, FixtureId: {result.FixtureId ?? "none"}, IsValid: {result.IsValid})");
                 _activationCallback?.Invoke(result);
             };
 
@@ -149,11 +150,12 @@ public sealed class AppNotificationRegistrationManager
             {
                 _bridge.Register();
                 IsRegistered = true;
+                Diagnostics.AppLogger.Info("Notifications", "RegistrationSuccess", "AppNotificationManager registered successfully.");
                 return true;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[NOTIFICATIONS] AppNotificationManager.Register failed: {ex.Message}");
+                Diagnostics.AppLogger.Error("Notifications", "RegistrationFailed", $"AppNotificationManager.Register failed: {ex.Message}", ex: ex);
 
                 // Rollback: safely detach handler and reset state
                 if (_invokedHandler != null)
@@ -180,7 +182,6 @@ public sealed class AppNotificationRegistrationManager
                 return true; // No action needed
             }
 
-            bool success = true;
             try
             {
                 if (IsHandlerAttached && _invokedHandler != null)
@@ -188,13 +189,21 @@ public sealed class AppNotificationRegistrationManager
                     _bridge.NotificationInvoked -= _invokedHandler;
                     _invokedHandler = null;
                 }
+                IsHandlerAttached = false;
 
-                _bridge.Unregister();
+                if (IsRegistered)
+                {
+                    _bridge.Unregister();
+                    IsRegistered = false;
+                }
+
+                Diagnostics.AppLogger.Info("Notifications", "Unregistered", "AppNotificationManager unregistered cleanly.");
+                return true;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[NOTIFICATIONS] AppNotificationManager.Unregister error: {ex.Message}");
-                success = false;
+                Diagnostics.AppLogger.Warn("Notifications", "UnregisterError", $"Error during AppNotificationManager unregister: {ex.Message}", ex: ex);
+                return false;
             }
             finally
             {
@@ -202,8 +211,6 @@ public sealed class AppNotificationRegistrationManager
                 IsRegistered = false;
                 _activationCallback = null;
             }
-
-            return success;
         }
     }
 }

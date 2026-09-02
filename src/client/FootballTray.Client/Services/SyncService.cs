@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
 
@@ -35,15 +36,22 @@ public class SyncService : ISyncService
     private TrayDataDto? _currentTrayData;
     private DataFreshnessState _freshnessState = DataFreshnessState.Empty;
     private DateTimeOffset? _lastValidatedAt;
+    private DateTimeOffset? _lastSuccessfulServerResponseTime;
+    private DateTimeOffset? _lastRefreshAttempt;
+    private long _lastRefreshDurationMs;
 
     public event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
 
     public TrayDataDto? CurrentTrayData => _currentTrayData;
     public DataFreshnessState FreshnessState => _freshnessState;
+    public DataFreshnessState CurrentFreshness => _freshnessState;
     public TickerConnectionState CurrentState => MapToConnectionState(_freshnessState);
     public int LastKnownVersion => _lastKnownVersion;
     public string? LastKnownETag => _lastKnownEtag;
     public DateTimeOffset? LastValidatedAt => _lastValidatedAt;
+    public DateTimeOffset? LastSuccessfulServerResponseTime => _lastSuccessfulServerResponseTime;
+    public DateTimeOffset? LastRefreshAttempt => _lastRefreshAttempt;
+    public long LastRefreshDurationMs => _lastRefreshDurationMs;
     public NotificationService? NotificationService => _notificationService;
     public IPreferencesService? PreferencesService => _preferencesService;
 
@@ -163,15 +171,21 @@ public class SyncService : ISyncService
     private async Task<DataFreshnessState> ExecutePollInternalAsync(CancellationToken cancellationToken)
     {
         await _refreshLock.WaitAsync(cancellationToken);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _lastRefreshAttempt = DateTimeOffset.UtcNow;
         try
         {
+            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (ETag: '{_lastKnownEtag ?? "none"}')...");
             var response = await _apiClient.GetTrayAsync(_lastKnownEtag, cancellationToken);
+            sw.Stop();
+            _lastRefreshDurationMs = sw.ElapsedMilliseconds;
 
             if (response.IsNotModified)
             {
                 // 304 Not Modified: Server confirms cached representation is still current
                 _freshnessState = DataFreshnessState.NotModified;
                 _lastValidatedAt = DateTimeOffset.UtcNow;
+                _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
                 if (!string.IsNullOrWhiteSpace(response.ETag))
                 {
                     _lastKnownEtag = response.ETag;
@@ -180,6 +194,7 @@ public class SyncService : ISyncService
                 // Update cache validation timestamp
                 await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
 
+                AppLogger.Info("Sync", "PollNotModified", $"Backend returned 304 Not Modified ({_lastRefreshDurationMs}ms). Cache revalidated.");
                 PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                 return _freshnessState;
             }
@@ -197,6 +212,7 @@ public class SyncService : ISyncService
                     _lastKnownVersion = serverVersion;
                     _lastKnownEtag = response.ETag;
                     _lastValidatedAt = DateTimeOffset.UtcNow;
+                    _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
                     _freshnessState = DataFreshnessState.Fresh;
 
                     // Atomically persist to disk
@@ -209,12 +225,14 @@ public class SyncService : ISyncService
                         await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, cancellationToken);
                     }
 
+                    AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
                     PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                     return _freshnessState;
                 }
             }
 
             // Server returned error (4xx/5xx), network failure, or malformed payload
+            AppLogger.Warn("Sync", "PollFailed", $"Backend returned unsuccessful response: {response.ErrorMessage ?? "Unknown"}. Fallback to cached state.");
             return HandleOfflineFallback();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -223,7 +241,9 @@ public class SyncService : ISyncService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[SYNC] Poll error: {ex.Message}");
+            sw.Stop();
+            _lastRefreshDurationMs = sw.ElapsedMilliseconds;
+            AppLogger.Warn("Sync", "PollException", $"Network sync failed ({_lastRefreshDurationMs}ms): {ex.Message}. Falling back to offline cache.", ex: ex);
             return HandleOfflineFallback();
         }
         finally

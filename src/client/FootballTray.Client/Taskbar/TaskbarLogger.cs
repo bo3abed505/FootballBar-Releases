@@ -25,24 +25,16 @@ public static class TaskbarLogger
 
     private static void Log(TaskbarLogLevel level, string message, Exception? ex = null)
     {
-        string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        string formatted = $"[Taskbar][{timestamp}][{level.ToString().ToUpperInvariant()}] {message}";
-        if (ex != null)
+        var diagLevel = level switch
         {
-            formatted += $" | Exception: {ex.GetType().Name}: {ex.Message}";
-        }
+            TaskbarLogLevel.Debug => Diagnostics.DiagnosticLogLevel.Debug,
+            TaskbarLogLevel.Info => Diagnostics.DiagnosticLogLevel.Info,
+            TaskbarLogLevel.Warn => Diagnostics.DiagnosticLogLevel.Warning,
+            TaskbarLogLevel.Error => Diagnostics.DiagnosticLogLevel.Error,
+            _ => Diagnostics.DiagnosticLogLevel.Info
+        };
 
-        Trace.WriteLine(formatted);
-        System.Diagnostics.Debug.WriteLine(formatted);
-        Console.WriteLine(formatted);
-
-        try
-        {
-            string tempLogPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "FootballTray_taskbar.log");
-            System.IO.File.AppendAllText(tempLogPath, formatted + Environment.NewLine);
-        }
-        catch { }
-
+        Diagnostics.AppLogger.Log(diagLevel, "Taskbar", "TaskbarEvent", message, null, ex);
         LogMessageReceived?.Invoke(level, message, ex);
     }
 }

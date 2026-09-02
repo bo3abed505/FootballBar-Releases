@@ -384,4 +384,76 @@ export class RequestGateway {
 
     return { dailyRemaining, minuteRemaining };
   }
+
+  /**
+   * Returns safe operational diagnostic metrics for request quota and budget.
+   * Guaranteed to contain zero keys or secrets.
+   */
+  async getDiagnostics(provider = 'api_football'): Promise<{
+    provider: string;
+    allocatedDaily: number;
+    consumedDaily: number;
+    remainingDaily: number;
+    isExhausted: boolean;
+    operationalLimit: number;
+    hardLimit: number;
+    minuteCeiling: number;
+    lastRequestAt: string | null;
+    minuteWindowReservations: number;
+  }> {
+    try {
+      const budgetRes = await this.pool.query(
+        `SELECT allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
+         FROM provider_daily_budget
+         WHERE provider = $1 AND budget_date = CURRENT_DATE`,
+        [provider]
+      );
+
+      const countRes = await this.pool.query(
+        `SELECT COUNT(*) as cnt
+         FROM request_ledger
+         WHERE provider = $1 AND requested_at >= NOW() - INTERVAL '60 seconds'`,
+        [provider]
+      );
+
+      const lastReqRes = await this.pool.query(
+        `SELECT requested_at
+         FROM request_ledger
+         WHERE provider = $1
+         ORDER BY requested_at DESC
+         LIMIT 1`,
+        [provider]
+      );
+
+      const row = budgetRes.rows[0];
+      const minuteCount = parseInt(countRes.rows[0]?.cnt || '0', 10);
+      const lastReq = lastReqRes.rows[0]?.requested_at;
+
+      return {
+        provider,
+        allocatedDaily: row ? row.allocated_calls : RequestGateway.HARD_DAILY_LIMIT,
+        consumedDaily: row ? row.consumed_calls : 0,
+        remainingDaily: row ? row.remaining_calls : RequestGateway.HARD_DAILY_LIMIT,
+        isExhausted: row ? row.is_exhausted : false,
+        operationalLimit: RequestGateway.OPERATIONAL_DAILY_LIMIT,
+        hardLimit: RequestGateway.HARD_DAILY_LIMIT,
+        minuteCeiling: RequestGateway.MINUTE_CEILING,
+        lastRequestAt: lastReq ? new Date(lastReq).toISOString() : null,
+        minuteWindowReservations: minuteCount,
+      };
+    } catch {
+      return {
+        provider,
+        allocatedDaily: RequestGateway.HARD_DAILY_LIMIT,
+        consumedDaily: 0,
+        remainingDaily: RequestGateway.HARD_DAILY_LIMIT,
+        isExhausted: false,
+        operationalLimit: RequestGateway.OPERATIONAL_DAILY_LIMIT,
+        hardLimit: RequestGateway.HARD_DAILY_LIMIT,
+        minuteCeiling: RequestGateway.MINUTE_CEILING,
+        lastRequestAt: null,
+        minuteWindowReservations: 0,
+      };
+    }
+  }
 }

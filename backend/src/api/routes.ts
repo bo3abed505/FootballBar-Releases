@@ -3,19 +3,76 @@ import { createHash } from 'crypto';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import { checkDatabaseConnection } from '../db/index.js';
 import { createResponseEnvelope, createErrorEnvelope } from './envelope.js';
+import { RequestGateway } from '../gateway/request-gateway.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const fixturesRepo = new FixturesRepository();
 
   // ----------------------------------------------------
-  // Health check endpoint
+  // Health check endpoint (backward-compatible & enhanced)
   // ----------------------------------------------------
   fastify.get('/health', async (request, reply) => {
     const dbStatus = await checkDatabaseConnection();
+    const scheduler: any = (fastify as any).scheduler;
+    const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
+
     return reply.status(200).send({
       status: 'ok',
       database: dbStatus.connected ? 'connected' : 'disconnected',
       latencyMs: dbStatus.latencyMs,
+      timestamp: new Date().toISOString(),
+      version: '1.0.0',
+      provider: process.env.FOOTBALL_PROVIDER || 'mock',
+      scheduler: schedulerDiag
+        ? {
+            running: schedulerDiag.running,
+            lastCycleOutcome: schedulerDiag.lastCycleOutcome,
+          }
+        : {
+            running: false,
+            lastCycleOutcome: null,
+          },
+      uptimeSeconds: Math.round(process.uptime()),
+    });
+  });
+
+  // ----------------------------------------------------
+  // Diagnostics Endpoint (safe, sanitized, internal observability)
+  // ----------------------------------------------------
+  fastify.get('/api/diagnostics', async (request, reply) => {
+    const dbStatus = await checkDatabaseConnection();
+    const gateway = new RequestGateway();
+    const budgetDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
+    const scheduler: any = (fastify as any).scheduler;
+    const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
+
+    return reply.status(200).send({
+      service: {
+        name: 'footballtray-backend',
+        version: '1.0.0',
+        nodeVersion: process.version,
+        uptimeSeconds: Math.round(process.uptime()),
+        memoryUsage: process.memoryUsage(),
+      },
+      provider: {
+        mode: process.env.FOOTBALL_PROVIDER || 'mock',
+        allowLiveRequests: process.env.ALLOW_LIVE_PROVIDER_REQUESTS === 'true',
+      },
+      database: {
+        connected: dbStatus.connected,
+        latencyMs: dbStatus.latencyMs,
+      },
+      scheduler: schedulerDiag ?? {
+        running: false,
+        executingCycle: false,
+        lastCycleAt: null,
+        lastCycleAction: null,
+        lastCycleDurationMs: null,
+        lastCycleOutcome: null,
+        consecutiveErrors: 0,
+        nextRecommendedWakeAt: null,
+      },
+      budget: budgetDiag,
       timestamp: new Date().toISOString(),
     });
   });

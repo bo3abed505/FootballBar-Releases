@@ -29,6 +29,17 @@ export interface SchedulerLogger {
   error(message: string, meta?: Record<string, unknown>): void;
 }
 
+export interface SchedulerDiagnostics {
+  running: boolean;
+  executingCycle: boolean;
+  lastCycleAt: string | null;
+  lastCycleAction: string | null;
+  lastCycleDurationMs: number | null;
+  lastCycleOutcome: 'success' | 'error' | 'idle' | null;
+  consecutiveErrors: number;
+  nextRecommendedWakeAt: string | null;
+}
+
 export interface SchedulerDependencies {
   syncService: SyncService;
   fixturesRepository: FixturesRepository;
@@ -111,6 +122,14 @@ export class AcquisitionScheduler {
   private abortController: AbortController | null = null;
   private loopPromise: Promise<void> | null = null;
 
+  // Diagnostic state metrics
+  private lastCycleAt: Date | null = null;
+  private lastCycleAction: string | null = null;
+  private lastCycleDurationMs: number | null = null;
+  private lastCycleOutcome: 'success' | 'error' | 'idle' | null = null;
+  private consecutiveErrors = 0;
+  private nextRecommendedWakeAt: Date | null = null;
+
   // Default fallback sleep when policy returns IDLE with no recommended delay (e.g., 5 minutes)
   static readonly DEFAULT_IDLE_DELAY_MS = 300_000;
   // Default error backoff to avoid aggressive looping on persistent network/database issues
@@ -130,6 +149,22 @@ export class AcquisitionScheduler {
       info: (msg, meta) => console.log(`[SCHEDULER] ${msg}`, meta ? JSON.stringify(meta) : ''),
       warn: (msg, meta) => console.warn(`[SCHEDULER:WARN] ${msg}`, meta ? JSON.stringify(meta) : ''),
       error: (msg, meta) => console.error(`[SCHEDULER:ERROR] ${msg}`, meta ? JSON.stringify(meta) : ''),
+    };
+  }
+
+  /**
+   * Returns a diagnostic snapshot of the scheduler.
+   */
+  getDiagnostics(): SchedulerDiagnostics {
+    return {
+      running: this.running,
+      executingCycle: this.executingCycle,
+      lastCycleAt: this.lastCycleAt ? this.lastCycleAt.toISOString() : null,
+      lastCycleAction: this.lastCycleAction,
+      lastCycleDurationMs: this.lastCycleDurationMs,
+      lastCycleOutcome: this.lastCycleOutcome,
+      consecutiveErrors: this.consecutiveErrors,
+      nextRecommendedWakeAt: this.nextRecommendedWakeAt ? this.nextRecommendedWakeAt.toISOString() : null,
     };
   }
 
@@ -198,6 +233,7 @@ export class AcquisitionScheduler {
       throw new Error('Cannot execute cycle: another cycle is already in progress.');
     }
 
+    const startTime = Date.now();
     this.executingCycle = true;
     try {
       const currentDate = this.now();
@@ -238,10 +274,23 @@ export class AcquisitionScheduler {
         this.logger.info(`System idle: ${plan.reason}`);
       }
 
+      // Update diagnostic metrics
+      this.lastCycleAt = currentDate;
+      this.lastCycleAction = plan.action;
+      this.lastCycleDurationMs = Date.now() - startTime;
+      this.lastCycleOutcome = plan.action === 'IDLE' ? 'idle' : 'success';
+      this.consecutiveErrors = 0;
+
       // 5. Notify cycle complete callback
       this.onCycleComplete?.(plan, syncSummary);
 
       return { plan, summary: syncSummary };
+    } catch (err: any) {
+      this.consecutiveErrors++;
+      this.lastCycleAt = this.now();
+      this.lastCycleDurationMs = Date.now() - startTime;
+      this.lastCycleOutcome = 'error';
+      throw err;
     } finally {
       this.executingCycle = false;
     }
@@ -280,6 +329,7 @@ export class AcquisitionScheduler {
         break;
       }
 
+      this.nextRecommendedWakeAt = new Date(this.now().getTime() + nextWaitMs);
       this.logger.info(`Scheduler waiting ${Math.round(nextWaitMs / 1000)}s until next evaluation cycle.`);
       await this.sleep(nextWaitMs, signal);
     }

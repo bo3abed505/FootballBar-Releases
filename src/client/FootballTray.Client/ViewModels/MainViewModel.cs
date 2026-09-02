@@ -19,6 +19,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly ISyncService? _syncService;
     private readonly IPreferencesService _preferencesService;
+    private readonly Diagnostics.IDiagnosticsService _diagnosticsService;
 
     private MatchFilterType _activeFilter = MatchFilterType.All;
     private string _connectionStatusText = "Connecting...";
@@ -39,6 +40,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
+
+    public Diagnostics.IDiagnosticsService DiagnosticsService => _diagnosticsService;
+
+    public string DiagnosticsVersionText => $"Version {_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
+    public string DiagnosticsHealthStatusText => $"{_diagnosticsService.GetCurrentSnapshot().HealthState} ({_diagnosticsService.GetCurrentSnapshot().FreshnessState})";
+    public string DiagnosticsLastSyncText => _diagnosticsService.GetCurrentSnapshot().LastSuccessfulServerResponseTime?.ToString("HH:mm:ss 'UTC'") ?? "Never";
+    public string DiagnosticsTaskbarText => _diagnosticsService.GetCurrentSnapshot().TaskbarHostStatus;
+    public string DiagnosticsReportText => _diagnosticsService.GetSanitizedReportText();
 
     public MatchFilterType ActiveFilter
     {
@@ -126,10 +135,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public MainViewModel(IPreferencesService preferencesService, ISyncService? syncService = null)
+    public MainViewModel(
+        IPreferencesService preferencesService,
+        ISyncService? syncService = null,
+        Diagnostics.IDiagnosticsService? diagnosticsService = null)
     {
         _preferencesService = preferencesService ?? throw new ArgumentNullException(nameof(preferencesService));
         _syncService = syncService;
+        _diagnosticsService = diagnosticsService ?? new Diagnostics.DiagnosticsService(_syncService, _preferencesService);
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -137,6 +150,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _syncService.TrayUpdated += OnTrayUpdated;
         }
+    }
+
+    public string CopyDiagnosticsToClipboard()
+    {
+        string report = _diagnosticsService.GetSanitizedReportText();
+        try
+        {
+            var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            dataPackage.SetText(report);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+        }
+        catch
+        {
+            // Defensive clipboard fallback for headless/test environments
+        }
+
+        StatusMessage = "Diagnostics copied to clipboard.";
+        return report;
     }
 
     public async Task InitializeAsync()

@@ -130,6 +130,12 @@ public sealed partial class MainPage : Page
             StatusInfoBar.IsOpen = false;
         }
 
+        // Diagnostics Card
+        DiagnosticsVersionText.Text = _viewModel.DiagnosticsVersionText;
+        DiagnosticsHealthText.Text = _viewModel.DiagnosticsHealthStatusText;
+        DiagnosticsLastSyncText.Text = _viewModel.DiagnosticsLastSyncText;
+        DiagnosticsTaskbarText.Text = _viewModel.DiagnosticsTaskbarText;
+
         // Update active filter button styling
         UpdateFilterButtons();
     }
@@ -184,5 +190,10 @@ public sealed partial class MainPage : Page
         {
             await _viewModel.ToggleNotificationCategoryAsync(type, ts.IsOn);
         }
+    }
+
+    private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e)
+    {
+        _viewModel?.CopyDiagnosticsToClipboard();
     }
 }

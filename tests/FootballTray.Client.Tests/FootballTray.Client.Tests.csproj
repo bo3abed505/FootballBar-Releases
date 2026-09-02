@@ -57,6 +57,14 @@
     <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\FollowedCompetitionItemViewModel.cs" Link="ViewModels\FollowedCompetitionItemViewModel.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\NotificationCategoryItemViewModel.cs" Link="ViewModels\NotificationCategoryItemViewModel.cs" />
     <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MainViewModel.cs" Link="ViewModels\MainViewModel.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\DiagnosticLogLevel.cs" Link="Diagnostics\DiagnosticLogLevel.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\ApplicationHealthState.cs" Link="Diagnostics\ApplicationHealthState.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\DiagnosticLogEntry.cs" Link="Diagnostics\DiagnosticLogEntry.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\FileLogSink.cs" Link="Diagnostics\FileLogSink.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\AppLogger.cs" Link="Diagnostics\AppLogger.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\ClientHealthSnapshot.cs" Link="Diagnostics\ClientHealthSnapshot.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\IDiagnosticsService.cs" Link="Diagnostics\IDiagnosticsService.cs" />
+    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\DiagnosticsService.cs" Link="Diagnostics\DiagnosticsService.cs" />
   </ItemGroup>
 
   <ItemGroup>

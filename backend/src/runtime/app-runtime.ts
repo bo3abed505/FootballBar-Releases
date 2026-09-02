@@ -93,6 +93,7 @@ export class AppRuntime {
           targetCompetitionIds: targetCompetitionIds.length > 0 ? targetCompetitionIds : undefined,
           providerName: this.provider.providerName,
         });
+      (this.app as any).scheduler = this.scheduler;
     } else {
       this.scheduler = null;
     }

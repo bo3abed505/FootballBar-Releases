@@ -13,7 +13,12 @@ public interface ISyncService : IDisposable
     event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
     TrayDataDto? CurrentTrayData { get; }
     DataFreshnessState FreshnessState { get; }
+    DataFreshnessState CurrentFreshness => FreshnessState;
     TickerConnectionState CurrentState { get; }
+    DateTimeOffset? LastSuccessfulServerResponseTime { get; }
+    DateTimeOffset? LastRefreshAttempt { get; }
+    string? LastKnownETag { get; }
+    DateTimeOffset? LastValidatedAt { get; }
     Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default);
     Task StartAsync(CancellationToken cancellationToken = default);
     void RefreshTickerOnPreferenceChange();
