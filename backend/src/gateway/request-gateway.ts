@@ -41,12 +41,13 @@ export class RequestGateway {
     try {
       await client.query('BEGIN');
 
-      // 1. Ensure daily budget row exists for today
-      const budgetId = `budget_${provider}_${new Date().toISOString().slice(0, 10)}`;
+      // 1. Ensure daily budget row exists for today (evaluated in UTC)
+      const todayDate = new Date().toISOString().slice(0, 10);
+      const budgetId = `budget_${provider}_${todayDate}`;
       await client.query(
         `INSERT INTO provider_daily_budget (
            id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-         ) VALUES ($1, $2, CURRENT_DATE, $3, 0, $3, false, NOW())
+         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, $3, 0, $3, false, NOW())
          ON CONFLICT (provider, budget_date) DO NOTHING`,
         [budgetId, provider, RequestGateway.HARD_DAILY_LIMIT]
       );
@@ -55,12 +56,15 @@ export class RequestGateway {
       const budgetRes = await client.query(
         `SELECT id, allocated_calls, consumed_calls, remaining_calls, is_exhausted
          FROM provider_daily_budget
-         WHERE provider = $1 AND budget_date = CURRENT_DATE
+         WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date
          FOR UPDATE`,
         [provider]
       );
 
       const budget = budgetRes.rows[0];
+      if (!budget) {
+        throw new Error(`[REQUEST_GATEWAY] Failed to initialize daily budget for provider: ${provider}`);
+      }
       const consumed = budget.consumed_calls;
       const remaining = budget.remaining_calls;
 
@@ -205,7 +209,7 @@ export class RequestGateway {
              consumed_calls = GREATEST(consumed_calls, $2 - LEAST(remaining_calls, $1)),
              is_exhausted = (LEAST(remaining_calls, $1) <= 0),
              updated_at = NOW()
-         WHERE provider = $3 AND budget_date = CURRENT_DATE`,
+         WHERE provider = $3 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
         [safeReported, RequestGateway.HARD_DAILY_LIMIT, provider]
       );
 
@@ -405,20 +409,20 @@ export class RequestGateway {
       const budgetRes = await this.pool.query(
         `SELECT allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
          FROM provider_daily_budget
-         WHERE provider = $1 AND budget_date = CURRENT_DATE`,
+         WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
         [provider]
       );
 
       const countRes = await this.pool.query(
         `SELECT COUNT(*) as cnt
-         FROM request_ledger
+         FROM api_request_ledger
          WHERE provider = $1 AND requested_at >= NOW() - INTERVAL '60 seconds'`,
         [provider]
       );
 
       const lastReqRes = await this.pool.query(
         `SELECT requested_at
-         FROM request_ledger
+         FROM api_request_ledger
          WHERE provider = $1
          ORDER BY requested_at DESC
          LIMIT 1`,

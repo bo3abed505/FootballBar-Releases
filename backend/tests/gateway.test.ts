@@ -23,7 +23,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 89, 11, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 89, 11, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -38,7 +38,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 90, 10, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 90, 10, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -51,7 +51,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 90, 10, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 90, 10, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -65,7 +65,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 99, 1, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 99, 1, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -79,7 +79,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 100, 0, true, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 100, 0, true, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -143,7 +143,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 99, 1, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 99, 1, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -166,7 +166,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 1, 99, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 1, 99, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -189,7 +189,7 @@ describe('RequestGateway', () => {
 
     // Verify database was reconciled to remaining = 50
     const budgetCheck = await pool.query(
-      `SELECT consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = CURRENT_DATE`,
+      `SELECT consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
       [testProvider]
     );
     expect(budgetCheck.rows[0].remaining_calls).toBe(50);
@@ -200,7 +200,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 0, 100, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 0, 100, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -208,7 +208,7 @@ describe('RequestGateway', () => {
     await (gateway as any).reconcileQuota(testProvider, 50);
 
     let budgetCheck = await pool.query(
-      `SELECT remaining_calls, consumed_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = CURRENT_DATE`,
+      `SELECT remaining_calls, consumed_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
       [testProvider]
     );
     expect(budgetCheck.rows[0].remaining_calls).toBe(50);
@@ -217,7 +217,7 @@ describe('RequestGateway', () => {
     await (gateway as any).reconcileQuota(testProvider, 75);
 
     budgetCheck = await pool.query(
-      `SELECT remaining_calls, consumed_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = CURRENT_DATE`,
+      `SELECT remaining_calls, consumed_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
       [testProvider]
     );
     // Monotonic LEAST guarantees remaining_calls stays 50 (lowest reported), NOT 75
@@ -230,7 +230,7 @@ describe('RequestGateway', () => {
     await pool.query(
       `INSERT INTO provider_daily_budget (
          id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-       ) VALUES ($1, $2, CURRENT_DATE, 100, 10, 90, false, NOW())`,
+       ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 10, 90, false, NOW())`,
       [`budget_${testProvider}_today`, testProvider]
     );
 
@@ -246,7 +246,7 @@ describe('RequestGateway', () => {
     await gateway.execute({ provider: testProvider, endpoint: '/status', operation: 'probe' }, mockHttp);
 
     const budgetCheck = await pool.query(
-      `SELECT remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = CURRENT_DATE`,
+      `SELECT remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
       [testProvider]
     );
     expect(budgetCheck.rows[0].remaining_calls).toBe(89); // decremented locally, not inflated to 99
@@ -318,5 +318,136 @@ describe('RequestGateway', () => {
     expect(ledgerCheck.rows[0].endpoint).toContain('key=[REDACTED]');
     expect(ledgerCheck.rows[0].error_message).not.toContain('secret_12345_token');
     expect(ledgerCheck.rows[0].error_message).toContain('key=[REDACTED]');
+  });
+
+  // ============================================================
+  // Phase 3 Regression Tests: Idempotent Daily Budget Initialization
+  // ============================================================
+  describe('Daily Budget Initialization & Concurrency (Phase 3 Regression)', () => {
+    it('Test A — Existing budget row: preserves counters and reserves slot without throwing', async () => {
+      // Seed existing row with consumed = 4, remaining = 96
+      await pool.query(
+        `INSERT INTO provider_daily_budget (
+           id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
+         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 4, 96, false, NOW())`,
+        [`budget_${testProvider}_today`, testProvider]
+      );
+
+      const res = await gateway.reserveSlot(testProvider, '/fixtures', 'sync_live', 'NORMAL');
+      expect(res.allowed).toBe(true);
+      expect(res.consumedDaily).toBe(5);
+      expect(res.remainingDaily).toBe(95);
+      expect(res.ledgerId).toBeDefined();
+
+      const check = await pool.query(
+        `SELECT id, consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(check.rows.length).toBe(1);
+      expect(check.rows[0].id).toBe(`budget_${testProvider}_today`);
+      expect(check.rows[0].consumed_calls).toBe(5);
+      expect(check.rows[0].remaining_calls).toBe(95);
+    });
+
+    it('Test B — Missing daily row: creates it correctly and reserves slot', async () => {
+      // Ensure row does not exist
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      const res = await gateway.reserveSlot(testProvider, '/fixtures', 'sync_init', 'NORMAL');
+      expect(res.allowed).toBe(true);
+      expect(res.consumedDaily).toBe(1);
+      expect(res.remainingDaily).toBe(99);
+
+      const check = await pool.query(
+        `SELECT allocated_calls, consumed_calls, remaining_calls, is_exhausted FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(check.rows.length).toBe(1);
+      expect(check.rows[0].allocated_calls).toBe(100);
+      expect(check.rows[0].consumed_calls).toBe(1);
+      expect(check.rows[0].remaining_calls).toBe(99);
+      expect(check.rows[0].is_exhausted).toBe(false);
+    });
+
+    it('Test C — Concurrent initialization: concurrent reserveSlot() operations succeed without duplicate-key error', async () => {
+      // Ensure row does not exist initially
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // Launch 4 concurrent reserveSlot calls
+      const results = await Promise.all([
+        gateway.reserveSlot(testProvider, '/fixtures', 'concurrent_1', 'NORMAL'),
+        gateway.reserveSlot(testProvider, '/fixtures', 'concurrent_2', 'NORMAL'),
+        gateway.reserveSlot(testProvider, '/fixtures', 'concurrent_3', 'NORMAL'),
+        gateway.reserveSlot(testProvider, '/fixtures', 'concurrent_4', 'NORMAL'),
+      ]);
+
+      expect(results.every((r) => r.allowed)).toBe(true);
+      const consumedValues = results.map((r) => r.consumedDaily).sort((a, b) => (a ?? 0) - (b ?? 0));
+      expect(consumedValues).toEqual([1, 2, 3, 4]);
+
+      const check = await pool.query(
+        `SELECT id, allocated_calls, consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(check.rows.length).toBe(1);
+      expect(check.rows[0].consumed_calls).toBe(4);
+      expect(check.rows[0].remaining_calls).toBe(96);
+    });
+
+    it('Test D — Existing exhausted row: rejects normal requests according to existing policy', async () => {
+      // Seed budget with consumed = 100, remaining = 0, is_exhausted = true
+      await pool.query(
+        `INSERT INTO provider_daily_budget (
+           id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
+         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 100, 0, true, NOW())`,
+        [`budget_${testProvider}_today`, testProvider]
+      );
+
+      const resNormal = await gateway.reserveSlot(testProvider, '/fixtures', 'exhausted_normal', 'NORMAL');
+      expect(resNormal.allowed).toBe(false);
+      expect(resNormal.reason).toBe('OPERATIONAL_BUDGET_EXHAUSTED');
+
+      const resCritical = await gateway.reserveSlot(testProvider, '/fixtures', 'exhausted_crit', 'CRITICAL');
+      expect(resCritical.allowed).toBe(false);
+      expect(resCritical.reason).toBe('HARD_BUDGET_EXHAUSTED');
+    });
+
+    it('Test E — Operational limit / reserve behavior: allows critical requests when operational limit reached', async () => {
+      // Seed budget with consumed = 90, remaining = 10 (operational limit reached)
+      await pool.query(
+        `INSERT INTO provider_daily_budget (
+           id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
+         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 90, 10, false, NOW())`,
+        [`budget_${testProvider}_today`, testProvider]
+      );
+
+      // Normal request denied
+      const resNormal = await gateway.reserveSlot(testProvider, '/fixtures', 'op_normal', 'NORMAL');
+      expect(resNormal.allowed).toBe(false);
+      expect(resNormal.reason).toBe('OPERATIONAL_BUDGET_EXHAUSTED');
+
+      // Critical request allowed (uses safety reserve)
+      const resCritical = await gateway.reserveSlot(testProvider, '/fixtures', 'op_critical', 'CRITICAL');
+      expect(resCritical.allowed).toBe(true);
+      expect(resCritical.consumedDaily).toBe(91);
+      expect(resCritical.remainingDaily).toBe(9);
+    });
+
+    it('Test F — Minute ceiling: enforces 8 requests per minute ceiling', async () => {
+      // Insert 8 ledger rows within the last minute
+      for (let i = 0; i < 8; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+           ) VALUES ($1, $2, '/status', 'min_test', 'NORMAL', true, 200, 50, 1, NOW() - INTERVAL '15 seconds')`,
+          [`ledg_min_ceiling_${i}`, testProvider]
+        );
+      }
+
+      const res = await gateway.reserveSlot(testProvider, '/status', 'ceiling_probe', 'NORMAL');
+      expect(res.allowed).toBe(false);
+      expect(res.reason).toBe('MINUTE_RATE_LIMIT');
+      expect(res.waitMs).toBeGreaterThan(0);
+    });
   });
 });
