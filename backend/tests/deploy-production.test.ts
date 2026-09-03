@@ -106,8 +106,8 @@ describe('Production Backend Deployment & Packaging Logic', () => {
     // Hard safety gate: Backup executed, checked for non-empty, and parsed as XML before stopping or switching
     expect(scriptContent).toContain('HARD SAFETY GATE: Checked Task Backup & XML Validation');
     expect(scriptContent).toContain('string]::IsNullOrWhiteSpace($taskBackupXml)');
-    expect(scriptContent).toContain('[xml]$parsedBackupXml = [xml]$taskBackupXml');
-    expect(scriptContent).toContain('$parsedBackupXml.Task.Actions.Exec.Command');
+    expect(scriptContent).toContain('$parsedBackup = Test-TaskXmlDefinition -XmlContent $taskBackupXml');
+    expect(scriptContent).toContain('-not $parsedBackup.IsValid -or -not $parsedBackup.Command');
     expect(scriptContent).toContain('Task backup verified and valid XML saved');
   });
 
@@ -153,7 +153,7 @@ describe('Production Backend Deployment & Packaging Logic', () => {
     expect(scriptContent).toContain('$taskUser -ne "S-1-5-18"');
 
     // 4. Trigger is BootTrigger
-    expect(scriptContent).toContain('$registeredXml.Task.Triggers.BootTrigger');
+    expect(scriptContent).toContain('$taskInfo.HasBootTrigger');
 
     // 5. Command is Node
     expect(scriptContent).toContain('C:\\Program Files\\nodejs\\node.exe');
@@ -327,3 +327,162 @@ Set-DeploymentManifestStatus -ReleaseDir '${escapedDir}' -Status '${status}'
     expect(funcDef).toContain('throw "CRITICAL:');
   });
 });
+
+describe('Task XML Namespace-Aware Parsing and Rollback Non-Terminating Error Handling', () => {
+  const scriptsDir = path.resolve(__dirname, '../../scripts');
+  const deployScriptPath = path.join(scriptsDir, 'deploy-backend-production.ps1');
+
+  // Real-world Task Scheduler XML fixture containing default namespace
+  const taskXmlFixture = `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>FootballTray Production Backend Service (Standalone)</Description>
+    <URI>\\FootballTray-Backend</URI>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <RestartOnFailure>
+      <Count>3</Count>
+      <Interval>PT1M</Interval>
+    </RestartOnFailure>
+    <StartWhenAvailable>true</StartWhenAvailable>
+  </Settings>
+  <Triggers>
+    <BootTrigger />
+  </Triggers>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\\Program Files\\nodejs\\node.exe</Command>
+      <Arguments>--env-file=C:\\ProgramData\\FootballTray\\backend\\config\\.env.production.local dist/server.js</Arguments>
+      <WorkingDirectory>C:\\ProgramData\\FootballTray\\backend\\current</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>`;
+
+  const runTestTaskXmlInPwsh = (xmlString: string): any => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    const funcMatch = scriptContent.match(/function Test-TaskXmlDefinition \{[\s\S]*?\n\}/);
+    if (!funcMatch) {
+      throw new Error('Could not find Test-TaskXmlDefinition in script');
+    }
+    const funcDef = funcMatch[0];
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ft-taskxml-test-'));
+    const testRunnerPath = path.join(tempDir, 'run-xml-test.ps1');
+    const xmlPath = path.join(tempDir, 'fixture.xml');
+    fs.writeFileSync(xmlPath, xmlString, 'utf8');
+
+    const psScript = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${funcDef}
+$rawXml = Get-Content -LiteralPath '${xmlPath.replace(/'/g, "''")}' -Raw
+$result = Test-TaskXmlDefinition -XmlContent $rawXml
+$result | ConvertTo-Json
+`;
+    fs.writeFileSync(testRunnerPath, psScript, 'utf8');
+
+    try {
+      const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${testRunnerPath}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return JSON.parse(stdout);
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  };
+
+  it('Requirement 1: Task XML parser defines and uses XmlNamespaceManager with Task Scheduler namespace', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    expect(scriptContent).toContain('function Test-TaskXmlDefinition');
+    expect(scriptContent).toContain('System.Xml.XmlNamespaceManager');
+    expect(scriptContent).toContain('http://schemas.microsoft.com/windows/2004/02/mit/task');
+
+    const parsed = runTestTaskXmlInPwsh(taskXmlFixture);
+    expect(parsed.IsValid).toBe(true);
+  });
+
+  it('Requirement 2: BootTrigger is detected reliably despite real Task Scheduler default namespace', () => {
+    // 1. With BootTrigger
+    const parsedWithBoot = runTestTaskXmlInPwsh(taskXmlFixture);
+    expect(parsedWithBoot.HasBootTrigger).toBe(true);
+
+    // 2. Without BootTrigger (missing or different trigger)
+    const xmlWithoutBoot = taskXmlFixture.replace('<BootTrigger />', '<TimeTrigger><StartBoundary>2026-09-03T00:00:00</StartBoundary></TimeTrigger>');
+    const parsedWithoutBoot = runTestTaskXmlInPwsh(xmlWithoutBoot);
+    expect(parsedWithoutBoot.HasBootTrigger).toBe(false);
+  });
+
+  it('Requirement 3: SYSTEM principal UserId and RunLevel are extracted accurately with the namespace', () => {
+    const parsed = runTestTaskXmlInPwsh(taskXmlFixture);
+    expect(parsed.UserId).toBe('S-1-5-18');
+    expect(parsed.RunLevel).toBe('HighestAvailable');
+  });
+
+  it('Requirement 4: Exec Command, Arguments, and WorkingDirectory are extracted accurately with the namespace', () => {
+    const parsed = runTestTaskXmlInPwsh(taskXmlFixture);
+    expect(parsed.Command).toBe('C:\\Program Files\\nodejs\\node.exe');
+    expect(parsed.Arguments).toContain('--env-file=C:\\ProgramData\\FootballTray\\backend\\config\\.env.production.local');
+    expect(parsed.Arguments).toContain('dist/server.js');
+    expect(parsed.WorkingDirectory).toBe('C:\\ProgramData\\FootballTray\\backend\\current');
+  });
+
+  it('Requirement 5: Rollback catch path does not use terminating Write-Error before or during rollback', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Extract the catch block
+    const catchIndex = scriptContent.indexOf('Write-Host "CRITICAL: Deployment verification failed');
+    expect(catchIndex).toBeGreaterThan(0);
+    const catchBlock = scriptContent.substring(catchIndex);
+
+    // Rollback block must NOT contain Write-Error
+    expect(catchBlock).not.toContain('Write-Error');
+  });
+
+  it('Requirement 6: Rollback sequence remains ordered strictly according to production invariant steps 1-8', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Capture the rollback catch block
+    const catchIndex = scriptContent.indexOf('Write-Host "CRITICAL: Deployment verification failed');
+    const catchBlock = scriptContent.substring(catchIndex);
+
+    // Step 1: Stop failed task
+    const step1 = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/End", "/TN", "FootballTray-Backend")');
+    // Step 2: Mark release manifest failed
+    const step2 = catchBlock.indexOf('Set-DeploymentManifestStatus -ReleaseDir $releaseDir -Status "failed"');
+    // Step 3: Restore previous junction
+    const step3 = catchBlock.indexOf('New-Item -ItemType Junction -Path $currentJunction -Target $previousJunctionTarget');
+    // Step 4: Restore previous task XML
+    const step4 = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Create", "/TN", "FootballTray-Backend", "/XML", $taskBackupPath, "/F")');
+    // Step 5: Start restored task
+    const step5 = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend")');
+    // Step 6: Verify restored task configuration
+    const step6 = catchBlock.indexOf('Verify Restored Task XML');
+    // Step 7: Verify /health of restored service
+    const step7 = catchBlock.indexOf('http://127.0.0.1:4000/health');
+    // Step 8: Final failure throw
+    const step8 = catchBlock.indexOf('throw "Deployment aborted due to verification failure');
+
+    expect(step1).toBeGreaterThan(0);
+    expect(step2).toBeGreaterThan(step1);
+    expect(step3).toBeGreaterThan(step2);
+    expect(step4).toBeGreaterThan(step3);
+    expect(step5).toBeGreaterThan(step4);
+    expect(step6).toBeGreaterThan(step5);
+    expect(step7).toBeGreaterThan(step6);
+    expect(step8).toBeGreaterThan(step7);
+  });
+});
+

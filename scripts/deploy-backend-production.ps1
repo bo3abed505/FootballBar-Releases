@@ -338,7 +338,67 @@ function New-BackendTaskXml {
 }
 
 # ----------------------------------------------------------------------
-# 7. Set Restrictive ACLs on Configuration Directory and Files
+# 7. Parse and Validate Task XML with XmlNamespaceManager
+# ----------------------------------------------------------------------
+function Test-TaskXmlDefinition {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$XmlContent
+    )
+
+    [xml]$doc = $XmlContent
+    $taskNamespaceUri = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+    $nsm = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
+    $nsm.AddNamespace("t", $taskNamespaceUri)
+
+    $taskNode = $doc.SelectSingleNode("/t:Task", $nsm)
+    $useNs = ($null -ne $taskNode)
+    if (-not $taskNode) {
+        $taskNode = $doc.SelectSingleNode("/*[local-name()='Task']")
+    }
+    if (-not $taskNode) {
+        throw "Task XML verification failed: missing root <Task> element."
+    }
+
+    $selectNode = {
+        param([string]$xpathNs, [string]$xpathLocal)
+        if ($useNs) {
+            return $doc.SelectSingleNode($xpathNs, $nsm)
+        } else {
+            return $doc.SelectSingleNode($xpathLocal)
+        }
+    }
+
+    $userNode = & $selectNode "/t:Task/t:Principals/t:Principal/t:UserId" "//*[local-name()='UserId']"
+    $userId = if ($userNode) { $userNode.InnerText.Trim() } else { $null }
+
+    $runLevelNode = & $selectNode "/t:Task/t:Principals/t:Principal/t:RunLevel" "//*[local-name()='RunLevel']"
+    $runLevel = if ($runLevelNode) { $runLevelNode.InnerText.Trim() } else { $null }
+
+    $bootTriggerNode = & $selectNode "/t:Task/t:Triggers/t:BootTrigger" "//*[local-name()='BootTrigger']"
+
+    $cmdNode = & $selectNode "/t:Task/t:Actions/t:Exec/t:Command" "//*[local-name()='Exec']/*[local-name()='Command']"
+    $command = if ($cmdNode) { $cmdNode.InnerText.Trim() } else { $null }
+
+    $argsNode = & $selectNode "/t:Task/t:Actions/t:Exec/t:Arguments" "//*[local-name()='Exec']/*[local-name()='Arguments']"
+    $arguments = if ($argsNode) { $argsNode.InnerText.Trim() } else { $null }
+
+    $workDirNode = & $selectNode "/t:Task/t:Actions/t:Exec/t:WorkingDirectory" "//*[local-name()='Exec']/*[local-name()='WorkingDirectory']"
+    $workingDir = if ($workDirNode) { $workDirNode.InnerText.Trim() } else { $null }
+
+    return [PSCustomObject]@{
+        IsValid          = ($null -ne $taskNode)
+        UserId           = $userId
+        RunLevel         = $runLevel
+        HasBootTrigger   = ($null -ne $bootTriggerNode)
+        Command          = $command
+        Arguments        = $arguments
+        WorkingDirectory = $workingDir
+    }
+}
+
+# ----------------------------------------------------------------------
+# 8. Set Restrictive ACLs on Configuration Directory and Files
 # ----------------------------------------------------------------------
 function Set-SecureAcl {
     param ([string]$Path)
@@ -462,7 +522,7 @@ if ($Rollback) {
         if ($rollbackHealthy) {
             Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back and verified healthy." -ForegroundColor Green
         } else {
-            Write-Error "CRITICAL: Rollback health verification failed! Service did not report healthy status."
+            Write-Host "CRITICAL: Rollback health verification failed! Service did not report healthy status." -ForegroundColor Red
             throw "Rollback verification failed."
         }
     } else {
@@ -654,8 +714,8 @@ if (-not $SkipTaskUpdate) {
 
     # Parse and validate as XML
     try {
-        [xml]$parsedBackupXml = [xml]$taskBackupXml
-        if (-not $parsedBackupXml.Task -or -not $parsedBackupXml.Task.Actions.Exec.Command) {
+        $parsedBackup = Test-TaskXmlDefinition -XmlContent $taskBackupXml
+        if (-not $parsedBackup.IsValid -or -not $parsedBackup.Command) {
             throw "Backup XML does not contain a valid <Task> structure."
         }
         Write-Host "  Task backup verified and valid XML saved to '$taskBackupPath'." -ForegroundColor Green
@@ -706,37 +766,37 @@ if (-not $SkipTaskUpdate) {
 
         # 2. Query task XML and parse
         $queryLines = Invoke-SchtasksChecked -Arguments @("/Query", "/TN", "FootballTray-Backend", "/XML") -Operation "Query Registered Task"
-        [xml]$registeredXml = ($queryLines -join "`n").Trim()
-        if (-not $registeredXml.Task) {
+        $taskInfo = Test-TaskXmlDefinition -XmlContent ($queryLines -join "`n").Trim()
+        if (-not $taskInfo.IsValid) {
             throw "Task verification failed: Invalid registered XML."
         }
 
         # 3. Task user is SYSTEM
-        $taskUser = $registeredXml.Task.Principals.Principal.UserId
+        $taskUser = $taskInfo.UserId
         if ($taskUser -ne "S-1-5-18" -and $taskUser -notmatch "SYSTEM") {
             throw "Task user verification failed: expected SYSTEM (S-1-5-18), found '$taskUser'."
         }
 
         # 4. Task trigger is BootTrigger
-        if (-not $registeredXml.Task.Triggers.BootTrigger) {
+        if (-not $taskInfo.HasBootTrigger) {
             throw "Task trigger verification failed: missing BootTrigger."
         }
 
         # 5. Task command is expected Node executable
-        $taskCommand = $registeredXml.Task.Actions.Exec.Command
+        $taskCommand = $taskInfo.Command
         if (-not [string]::Equals($taskCommand, "C:\Program Files\nodejs\node.exe", [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Task command verification failed: expected 'C:\Program Files\nodejs\node.exe', found '$taskCommand'."
         }
 
         # 6. Task working directory is C:\ProgramData\FootballTray\backend\current
-        $taskWorkingDir = $registeredXml.Task.Actions.Exec.WorkingDirectory
+        $taskWorkingDir = $taskInfo.WorkingDirectory
         $expectedWorkDir = [System.IO.Path]::GetFullPath($currentJunction).TrimEnd('\')
         if (-not [string]::Equals([System.IO.Path]::GetFullPath($taskWorkingDir).TrimEnd('\'), $expectedWorkDir, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Task working directory verification failed: expected '$expectedWorkDir', found '$taskWorkingDir'."
         }
 
         # 7. Task arguments contain config/.env.production.local and dist/server.js
-        $taskArgs = $registeredXml.Task.Actions.Exec.Arguments
+        $taskArgs = $taskInfo.Arguments
         if ($taskArgs -notlike "*--env-file=*config\.env.production.local*dist/server.js*" -and $taskArgs -notlike "*--env-file=*config/.env.production.local*dist/server.js*") {
             throw "Task arguments verification failed: expected config/.env.production.local and dist/server.js in '$taskArgs'."
         }
@@ -771,7 +831,7 @@ if (-not $SkipTaskUpdate) {
         Write-Host "  Deployment manifest updated to 'verified'." -ForegroundColor Green
 
     } catch {
-        Write-Error "CRITICAL: Deployment verification failed ($($_.Exception.Message))! Initiating automatic two-way rollback..."
+        Write-Host "CRITICAL: Deployment verification failed ($($_.Exception.Message))! Initiating automatic two-way rollback..." -ForegroundColor Red
 
         # 1. Stop failed task
         try {
@@ -807,8 +867,8 @@ if (-not $SkipTaskUpdate) {
 
         # 6. Verify restored task configuration
         $restoredQuery = Invoke-SchtasksChecked -Arguments @("/Query", "/TN", "FootballTray-Backend", "/XML") -Operation "Verify Restored Task XML"
-        [xml]$restoredXml = ($restoredQuery -join "`n").Trim()
-        if (-not $restoredXml.Task) {
+        $restoredInfo = Test-TaskXmlDefinition -XmlContent ($restoredQuery -join "`n").Trim()
+        if (-not $restoredInfo.IsValid) {
             throw "CRITICAL: Restored task definition is invalid XML!"
         }
 
@@ -832,7 +892,7 @@ if (-not $SkipTaskUpdate) {
         if ($rollbackHealthy) {
             Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified service health." -ForegroundColor Yellow
         } else {
-            Write-Error "CRITICAL: Rollback health verification failed! The previous service did not recover within the timeout period."
+            Write-Host "CRITICAL: Rollback health verification failed! The previous service did not recover within the timeout period." -ForegroundColor Red
             throw "Deployment failed and rollback service verification also failed."
         }
 
