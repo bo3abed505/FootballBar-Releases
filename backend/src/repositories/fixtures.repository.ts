@@ -78,7 +78,11 @@ export class FixturesRepository {
   async getActiveSummary(now: Date = new Date()): Promise<FixturesSummary> {
     const candidateFixtures = await db.query.fixtures.findMany({
       where: or(
-        inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
+        and(
+          inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
+          gte(schema.fixtures.kickoffTime, new Date(now.getTime() - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS)),
+          lte(schema.fixtures.kickoffTime, new Date(now.getTime() + AcquisitionPolicyEngine.APPROACHING_WINDOW_MS))
+        ),
         and(
           inArray(schema.fixtures.state, ['PREMATCH', 'NS', 'TBD']),
           lte(schema.fixtures.kickoffTime, new Date(now.getTime() + 24 * 60 * 60 * 1000))

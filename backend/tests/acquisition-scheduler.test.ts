@@ -155,7 +155,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
   // 2. Policy-Driven Cadence & Action Dispatch
   // ============================================================
   describe('Policy Cadence & Action Execution', () => {
-    it('dispatches POLL_LIVE and waits for policy-recommended interval (120s for budget > 50)', async () => {
+    it('dispatches POLL_LIVE and waits for policy-recommended interval (180s for budget > 50)', async () => {
       let sleptMs = 0;
       const customSleep = vi.fn().mockImplementation(async (ms, signal) => {
         sleptMs = ms;
@@ -194,7 +194,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
 
       expect(dispatchedPlan?.action).toBe('POLL_LIVE');
       expect(mockSyncService.syncWithPlan).toHaveBeenCalledTimes(1);
-      expect(sleptMs).toBe(120_000); // 120s fast cadence from policy
+      expect(sleptMs).toBe(180_000); // 180s fast cadence from policy
 
       await scheduler.stop();
     });
@@ -520,6 +520,134 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       await scheduler.executeSingleCycle();
 
       expect(capturedDateStr).toBe('2026-11-25');
+    });
+  });
+
+  // ============================================================
+  // 7. Milestone 16.5A - Starvation Prevention & Lifecycle Hardening
+  // ============================================================
+  describe('Milestone 16.5A - Starvation Prevention & Lifecycle Hardening', () => {
+    it('does NOT starve DISCOVER_SCHEDULE when schedule is unknown today, even if live matches are reported', async () => {
+      let executedAction: string | null = null;
+      const mockSyncService: any = {
+        syncWithPlan: vi.fn().mockImplementation(async (plan) => {
+          executedAction = plan.action;
+          return createDummySyncSummary(plan.action);
+        }),
+      };
+
+      const mockRepo: any = {
+        getActiveSummary: vi.fn().mockResolvedValue({
+          liveCount: 2, // Live matches present
+          recentlyFinishedCount: 0,
+          stalePrematchCount: 0,
+          scheduleKnownForToday: false, // But daily schedule not yet discovered
+        }),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        getBudgetContext: async () => ({ consumedDaily: 10, remainingDaily: 90 }),
+        logger: silentLogger,
+      });
+
+      await scheduler.executeSingleCycle();
+
+      expect(executedAction).toBe('DISCOVER_SCHEDULE');
+      expect(mockSyncService.syncWithPlan).toHaveBeenCalledTimes(1);
+    });
+
+    it('scheduler exits POLL_LIVE and transitions to IDLE when liveCount drops to 0', async () => {
+      let executedActions: string[] = [];
+      let currentLiveCount = 1;
+
+      const mockSyncService: any = {
+        syncWithPlan: vi.fn().mockImplementation(async (plan) => {
+          executedActions.push(plan.action);
+          // Simulate live match ending on first sync
+          currentLiveCount = 0;
+          return createDummySyncSummary(plan.action);
+        }),
+      };
+
+      const mockRepo: any = {
+        getActiveSummary: vi.fn().mockImplementation(async () => ({
+          liveCount: currentLiveCount,
+          recentlyFinishedCount: 0,
+          stalePrematchCount: 0,
+          scheduleKnownForToday: true,
+        })),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        getBudgetContext: async () => ({ consumedDaily: 10, remainingDaily: 90 }),
+        logger: silentLogger,
+      });
+
+      // Cycle 1: liveCount is 1 -> POLL_LIVE
+      await scheduler.executeSingleCycle();
+      expect(executedActions).toEqual(['POLL_LIVE']);
+
+      // Cycle 2: liveCount is now 0 -> IDLE (no sync call)
+      await scheduler.executeSingleCycle();
+      expect(executedActions).toEqual(['POLL_LIVE']); // No new call to syncWithPlan
+    });
+
+    it('does not starve FINALIZE when liveCount drops to 0 and recentlyFinishedCount > 0', async () => {
+      let executedAction: string | null = null;
+      const mockSyncService: any = {
+        syncWithPlan: vi.fn().mockImplementation(async (plan) => {
+          executedAction = plan.action;
+          return createDummySyncSummary(plan.action);
+        }),
+      };
+
+      const mockRepo: any = {
+        getActiveSummary: vi.fn().mockResolvedValue({
+          liveCount: 0,
+          recentlyFinishedCount: 2,
+          stalePrematchCount: 0,
+          scheduleKnownForToday: true,
+        }),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        getBudgetContext: async () => ({ consumedDaily: 10, remainingDaily: 90 }),
+        logger: silentLogger,
+      });
+
+      await scheduler.executeSingleCycle();
+      expect(executedAction).toBe('FINALIZE');
+    });
+
+    it('critical reserve ceiling (10) strictly prevents POLL_LIVE even with 5 live matches', async () => {
+      const mockSyncService: any = {
+        syncWithPlan: vi.fn(),
+      };
+
+      const mockRepo: any = {
+        getActiveSummary: vi.fn().mockResolvedValue({
+          liveCount: 5,
+          recentlyFinishedCount: 0,
+          stalePrematchCount: 0,
+          scheduleKnownForToday: true,
+        }),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        getBudgetContext: async () => ({ consumedDaily: 90, remainingDaily: 10 }), // at reserve ceiling
+        logger: silentLogger,
+      });
+
+      await scheduler.executeSingleCycle();
+      expect(mockSyncService.syncWithPlan).not.toHaveBeenCalled();
     });
   });
 });

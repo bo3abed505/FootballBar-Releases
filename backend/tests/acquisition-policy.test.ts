@@ -10,10 +10,10 @@ describe('AcquisitionPolicyEngine - Pure Budget & Polling Policy', () => {
   // A. Live Polling Cadence Tests
   // ============================================================
   describe('calculateLivePollingInterval()', () => {
-    it('recommends 120s (2m) fast interval when budget > 50', () => {
-      expect(AcquisitionPolicyEngine.calculateLivePollingInterval(80)).toBe(120_000);
-      expect(AcquisitionPolicyEngine.calculateLivePollingInterval(90)).toBe(120_000);
-      expect(AcquisitionPolicyEngine.calculateLivePollingInterval(51)).toBe(120_000);
+    it('recommends 180s (3m) fast interval when budget > 50', () => {
+      expect(AcquisitionPolicyEngine.calculateLivePollingInterval(80)).toBe(180_000);
+      expect(AcquisitionPolicyEngine.calculateLivePollingInterval(90)).toBe(180_000);
+      expect(AcquisitionPolicyEngine.calculateLivePollingInterval(51)).toBe(180_000);
     });
 
     it('recommends 300s (5m) standard interval when budget is between 20 and 50 inclusive', () => {
@@ -66,34 +66,57 @@ describe('AcquisitionPolicyEngine - Pure Budget & Polling Policy', () => {
       expect(AcquisitionPolicyEngine.classifyFixtureState(fixture, fixedNow)).toBe('APPROACHING');
     });
 
-    it('classifies in-progress matches (LIVE, HALFTIME, 1H, 2H) as LIVE_WINDOW', () => {
+    it('classifies in-progress matches (LIVE, HALFTIME, 1H, 2H) within 3.5h of kickoff as LIVE_WINDOW', () => {
       expect(
         AcquisitionPolicyEngine.classifyFixtureState(
-          { state: 'LIVE', kickoffTime: new Date('2026-03-01T14:30:00Z') },
+          { state: 'LIVE', kickoffTime: new Date('2026-03-01T14:30:00Z') }, // 30m ago
           fixedNow
         )
       ).toBe('LIVE_WINDOW');
 
       expect(
         AcquisitionPolicyEngine.classifyFixtureState(
-          { state: 'HALFTIME', kickoffTime: new Date('2026-03-01T14:15:00Z') },
+          { state: 'HALFTIME', kickoffTime: new Date('2026-03-01T14:15:00Z') }, // 45m ago
           fixedNow
         )
       ).toBe('LIVE_WINDOW');
 
       expect(
         AcquisitionPolicyEngine.classifyFixtureState(
-          { state: '1H', kickoffTime: new Date('2026-03-01T14:45:00Z') },
+          { state: '1H', kickoffTime: new Date('2026-03-01T14:45:00Z') }, // 15m ago
           fixedNow
         )
       ).toBe('LIVE_WINDOW');
 
       expect(
         AcquisitionPolicyEngine.classifyFixtureState(
-          { state: '2H', kickoffTime: new Date('2026-03-01T14:00:00Z') },
+          { state: '2H', kickoffTime: new Date('2026-03-01T13:30:00Z') }, // 90m ago
           fixedNow
         )
       ).toBe('LIVE_WINDOW');
+    });
+
+    it('classifies LIVE matches whose kickoff was > 3.5h ago as FINAL or RECENTLY_FINISHED, never LIVE_WINDOW', () => {
+      // Exactly 3h 35m ago (215 min ago -> past 210 min max age, but within 15m reconciliation window)
+      const justExpiredLive = {
+        state: 'LIVE',
+        kickoffTime: new Date('2026-03-01T11:25:00Z'), // 215m ago
+      };
+      expect(AcquisitionPolicyEngine.classifyFixtureState(justExpiredLive, fixedNow)).toBe('RECENTLY_FINISHED');
+
+      // 5 hours ago (300 min ago -> way past 210 min max age and reconciliation window)
+      const ancientLive = {
+        state: 'LIVE',
+        kickoffTime: new Date('2026-03-01T10:00:00Z'), // 5h ago
+      };
+      expect(AcquisitionPolicyEngine.classifyFixtureState(ancientLive, fixedNow)).toBe('FINAL');
+
+      // 2 days ago (e.g. fake test data like fix_elclasico_2026)
+      const seededStaleLive = {
+        state: 'LIVE',
+        kickoffTime: new Date('2026-02-27T10:00:00Z'), // 2 days ago
+      };
+      expect(AcquisitionPolicyEngine.classifyFixtureState(seededStaleLive, fixedNow)).toBe('FINAL');
     });
 
     it('classifies matches finished within the last 15m as RECENTLY_FINISHED', () => {
@@ -148,29 +171,45 @@ describe('AcquisitionPolicyEngine - Pure Budget & Polling Policy', () => {
       remainingDaily: 80,
     };
 
-    it('prioritizes POLL_LIVE when live fixtures exist', () => {
+    it('prioritizes DISCOVER_SCHEDULE when today schedule is unknown, preventing schedule starvation even if live fixtures exist', () => {
+      const summaryWithLiveAndUnknownSchedule: FixturesSummary = {
+        liveCount: 2,
+        approachingCount: 1,
+        recentlyFinishedCount: 1,
+        stalePrematchCount: 1,
+        scheduleKnownForToday: false, // Today's schedule not discovered yet
+      };
+
+      const plan = AcquisitionPolicyEngine.evaluateSyncPlan(abundantBudget, summaryWithLiveAndUnknownSchedule);
+      expect(plan.action).toBe('DISCOVER_SCHEDULE');
+      expect(plan.priority).toBe('NORMAL');
+      expect(plan.recommendedNextPollMs).toBe(3600_000);
+      expect(plan.reason).toContain("Today's match schedule has not been discovered yet");
+    });
+
+    it('prioritizes POLL_LIVE when today schedule is known and live fixtures exist', () => {
       const summary: FixturesSummary = {
         liveCount: 2,
         approachingCount: 1,
         recentlyFinishedCount: 1,
         stalePrematchCount: 1,
-        scheduleKnownForToday: false,
+        scheduleKnownForToday: true,
       };
 
       const plan = AcquisitionPolicyEngine.evaluateSyncPlan(abundantBudget, summary);
       expect(plan.action).toBe('POLL_LIVE');
       expect(plan.priority).toBe('NORMAL');
-      expect(plan.recommendedNextPollMs).toBe(120_000);
+      expect(plan.recommendedNextPollMs).toBe(180_000);
       expect(plan.reason).toContain('Live match in progress');
     });
 
-    it('prioritizes FINALIZE when no live matches exist but recently finished matches are pending', () => {
+    it('prioritizes FINALIZE when schedule is known, no live matches exist, but recently finished matches are pending', () => {
       const summary: FixturesSummary = {
         liveCount: 0,
         approachingCount: 0,
         recentlyFinishedCount: 1,
         stalePrematchCount: 1,
-        scheduleKnownForToday: false,
+        scheduleKnownForToday: true,
       };
 
       const plan = AcquisitionPolicyEngine.evaluateSyncPlan(abundantBudget, summary);
@@ -179,34 +218,19 @@ describe('AcquisitionPolicyEngine - Pure Budget & Polling Policy', () => {
       expect(plan.reason).toContain('Recently finished match requires final reconciliation');
     });
 
-    it('prioritizes RECOVER_STALE when stale prematch matches exist and no live/recently-finished matches', () => {
+    it('prioritizes RECOVER_STALE when schedule is known, stale prematch matches exist and no live/recently-finished matches', () => {
       const summary: FixturesSummary = {
         liveCount: 0,
         approachingCount: 0,
         recentlyFinishedCount: 0,
         stalePrematchCount: 2,
-        scheduleKnownForToday: false,
+        scheduleKnownForToday: true,
       };
 
       const plan = AcquisitionPolicyEngine.evaluateSyncPlan(abundantBudget, summary);
       expect(plan.action).toBe('RECOVER_STALE');
       expect(plan.recommendedNextPollMs).toBe(300_000);
       expect(plan.reason).toContain('Stale prematch fixtures detected');
-    });
-
-    it('prioritizes DISCOVER_SCHEDULE when today schedule is unknown and no active/stale matches exist', () => {
-      const summary: FixturesSummary = {
-        liveCount: 0,
-        approachingCount: 0,
-        recentlyFinishedCount: 0,
-        stalePrematchCount: 0,
-        scheduleKnownForToday: false,
-      };
-
-      const plan = AcquisitionPolicyEngine.evaluateSyncPlan(abundantBudget, summary);
-      expect(plan.action).toBe('DISCOVER_SCHEDULE');
-      expect(plan.recommendedNextPollMs).toBe(3600_000);
-      expect(plan.reason).toContain("Today's match schedule has not been discovered yet");
     });
 
     it('returns IDLE when schedule is known and no live/approaching/stale matches exist', () => {

@@ -79,7 +79,10 @@ export class AcquisitionPolicyEngine {
   static readonly CRITICAL_RESERVE_CEILING = 10; // <= 10
 
   // Polling intervals in milliseconds
-  static readonly FAST_CADENCE_MS = 120_000; // 120s (2m)
+  // Calibrated for API-Football 100/day free-tier quota (90 operational daily ceiling).
+  // A 110-minute match at 180s (3m) consumes ~36 requests (vs 55 at 120s), saving 33% quota
+  // and allowing 2-3 full match windows per day without quota exhaustion.
+  static readonly FAST_CADENCE_MS = 180_000; // 180s (3m)
   static readonly STANDARD_CADENCE_MS = 300_000; // 300s (5m)
   static readonly SLOW_CADENCE_MS = 600_000; // 600s (10m)
 
@@ -92,11 +95,19 @@ export class AcquisitionPolicyEngine {
   // Approaching kickoff window (15 minutes before kickoff)
   static readonly APPROACHING_WINDOW_MS = 15 * 60 * 1000;
 
+  // Maximum duration a match can remain in a LIVE/in-play state before being considered expired/stale.
+  // Normal regulation match = 90 min + 15 min halftime + 10 min stoppage (~115 min).
+  // Knockout extra time (30 min + 5 min break) + penalty shootout (15 min) extends this to ~165 min.
+  // 210 minutes (3.5 hours) provides a generous 45-minute safety buffer for extraordinary match delays
+  // (e.g. VAR, severe injury, weather interruption) while firmly preventing orphaned/stale fixtures
+  // from pinning the scheduler indefinitely.
+  static readonly MAX_LIVE_MATCH_AGE_MS = 210 * 60 * 1000; // 3.5 hours (210 minutes)
+
   /**
    * Calculates recommended polling interval based on remaining daily budget.
    *
    * Thresholds:
-   *   remainingBudget > 50           → 120s (120,000 ms)
+   *   remainingBudget > 50           → 180s (180,000 ms)
    *   remainingBudget >= 20 && <= 50 → 300s (300,000 ms)
    *   remainingBudget > 10 && < 20   → 600s (600,000 ms)
    *   remainingBudget <= 10          → null (disabled / reserve protection)
@@ -131,6 +142,19 @@ export class AcquisitionPolicyEngine {
     // 1. Live match states (uses existing domain representations)
     const liveStates = new Set(['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']);
     if (liveStates.has(stateUpper)) {
+      // Live state expiration guard: if kickoff was > MAX_LIVE_MATCH_AGE_MS ago,
+      // the match cannot plausibly still be in progress.
+      if (diffMs < -this.MAX_LIVE_MATCH_AGE_MS) {
+        const timePastMaxAge = -diffMs - this.MAX_LIVE_MATCH_AGE_MS;
+        if (timePastMaxAge <= this.RECENTLY_FINISHED_WINDOW_MS) {
+          return 'RECENTLY_FINISHED';
+        }
+        return 'FINAL';
+      }
+      // If kickoff is in the future beyond approaching window (> 15m), match cannot be in progress
+      if (diffMs > this.APPROACHING_WINDOW_MS) {
+        return 'SCHEDULED_FUTURE';
+      }
       return 'LIVE_WINDOW';
     }
 
@@ -183,11 +207,12 @@ export class AcquisitionPolicyEngine {
    *
    * Priority order:
    *   1. Budget Exhaustion / Critical Reserve Protection: If budget <= 10, return IDLE.
-   *   2. Active Live Matches: Return POLL_LIVE with budget-scaled interval.
-   *   3. Recently Finished Matches: Return FINALIZE for final score/event sync.
-   *   4. Stale Prematch: Return RECOVER_STALE to update postponed/cancelled status.
-   *   5. Undiscovered Daily Schedule: Return DISCOVER_SCHEDULE.
-   *   6. Otherwise: Return IDLE.
+   *   2. Undiscovered Daily Schedule: Return DISCOVER_SCHEDULE (prevents starvation of daily schedule).
+   *   3. Active Live Matches: Return POLL_LIVE with budget-scaled interval.
+   *   4. Recently Finished Matches: Return FINALIZE for final score/event sync.
+   *   5. Stale Prematch: Return RECOVER_STALE to update postponed/cancelled status.
+   *   6. Approaching Match: Wait for kickoff.
+   *   7. Otherwise: Return IDLE.
    */
   static evaluateSyncPlan(
     budget: BudgetContext,
@@ -206,7 +231,17 @@ export class AcquisitionPolicyEngine {
       };
     }
 
-    // 2. Live Fixtures Priority (Consolidated poll for all live matches)
+    // 2. Undiscovered Daily Schedule Priority (Prevents live matches from starving schedule discovery)
+    if (!fixturesSummary.scheduleKnownForToday) {
+      return {
+        action: 'DISCOVER_SCHEDULE',
+        priority: 'NORMAL',
+        recommendedNextPollMs: 3600_000,
+        reason: "Today's match schedule has not been discovered yet.",
+      };
+    }
+
+    // 3. Live Fixtures Priority (Consolidated poll for all live matches)
     if (fixturesSummary.liveCount > 0) {
       const intervalMs = this.calculateLivePollingInterval(remaining);
       if (intervalMs === null) {
@@ -226,7 +261,7 @@ export class AcquisitionPolicyEngine {
       };
     }
 
-    // 3. Recently Finished Reconciliation
+    // 4. Recently Finished Reconciliation
     if (fixturesSummary.recentlyFinishedCount > 0) {
       return {
         action: 'FINALIZE',
@@ -236,23 +271,13 @@ export class AcquisitionPolicyEngine {
       };
     }
 
-    // 4. Stale Prematch Recovery
+    // 5. Stale Prematch Recovery
     if (fixturesSummary.stalePrematchCount > 0) {
       return {
         action: 'RECOVER_STALE',
         priority: 'NORMAL',
         recommendedNextPollMs: 300_000,
         reason: `Stale prematch fixtures detected (${fixturesSummary.stalePrematchCount} past kickoff). Probing for postponed/cancelled status.`,
-      };
-    }
-
-    // 5. Undiscovered Daily Schedule
-    if (!fixturesSummary.scheduleKnownForToday) {
-      return {
-        action: 'DISCOVER_SCHEDULE',
-        priority: 'NORMAL',
-        recommendedNextPollMs: 3600_000,
-        reason: "Today's match schedule has not been discovered yet.",
       };
     }
 
