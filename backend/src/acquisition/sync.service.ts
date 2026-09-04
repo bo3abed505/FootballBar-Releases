@@ -481,8 +481,37 @@ export class SyncService {
   /**
    * Recovers stale prematch fixtures to check for postponement/cancellation.
    */
-  async recoverStale(competitionIds?: number[]): Promise<SyncSummary> {
-    return this.sync({ competitionIds });
+  async recoverStale(options?: { date?: string; competitionIds?: number[] } | number[]): Promise<SyncSummary> {
+    if (Array.isArray(options)) {
+      if (options.length === 0) {
+        return {
+          provider: this.provider.providerName,
+          fixturesDiscovered: 0,
+          fixturesInserted: 0,
+          fixturesUpdated: 0,
+          eventsInserted: 0,
+          eventsSkippedDuplicates: 0,
+          hasChanges: false,
+        };
+      }
+      const todayStr = new Date().toISOString().slice(0, 10);
+      return this.sync({ date: todayStr, competitionIds: options });
+    }
+
+    if (options?.competitionIds && options.competitionIds.length === 0) {
+      return {
+        provider: this.provider.providerName,
+        fixturesDiscovered: 0,
+        fixturesInserted: 0,
+        fixturesUpdated: 0,
+        eventsInserted: 0,
+        eventsSkippedDuplicates: 0,
+        hasChanges: false,
+      };
+    }
+
+    const todayStr = options?.date ?? new Date().toISOString().slice(0, 10);
+    return this.sync({ date: todayStr, competitionIds: options?.competitionIds });
   }
 
   /**
@@ -504,7 +533,7 @@ export class SyncService {
       case 'FINALIZE':
         return this.finalizeRecentlyFinished(options?.competitionIds);
       case 'RECOVER_STALE':
-        return this.recoverStale(options?.competitionIds);
+        return this.recoverStale(options);
       case 'IDLE':
       default:
         return null;

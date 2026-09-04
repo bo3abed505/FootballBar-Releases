@@ -90,6 +90,22 @@ export class FixturesRepository {
           lt(schema.fixtures.kickoffTime, cutoff)
         )
       );
+
+    // Also sweep ancient PREMATCH fixtures past match day (> 24h past kickoff) locally to POSTPONED
+    const ancientPrematchCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    await db
+      .update(schema.fixtures)
+      .set({
+        state: 'POSTPONED',
+        updatedAt: now,
+      })
+      .where(
+        and(
+          inArray(schema.fixtures.state, ['PREMATCH', 'NS', 'TBD']),
+          lt(schema.fixtures.kickoffTime, ancientPrematchCutoff)
+        )
+      );
+
     return result.rowCount ?? 0;
   }
 
@@ -99,9 +115,9 @@ export class FixturesRepository {
 
   /**
    * Marks schedule discovery as completed for a given UTC date string (YYYY-MM-DD).
-   * Persists a durable discovery record in api_request_ledger (0 cost units).
+   * Persists a durable discovery record in api_request_ledger (0 cost units, provider='system').
    */
-  async markScheduleDiscovered(dateStr: string): Promise<void> {
+  async markScheduleDiscovered(dateStr: string, now: Date = new Date()): Promise<void> {
     this.invalidatedDates.delete(dateStr);
     this.discoveredDates.add(dateStr);
 
@@ -116,7 +132,7 @@ export class FixturesRepository {
         httpStatus: 200,
         responseTimeMs: 0,
         costUnits: 0,
-        requestedAt: new Date(),
+        requestedAt: now,
       }).onConflictDoNothing();
     } catch {
       // Fallback gracefully if ledger write fails
@@ -125,34 +141,31 @@ export class FixturesRepository {
 
   /**
    * Explicitly invalidates schedule discovery state for a date (or all dates).
-   * Forces next scheduler cycle to perform a discovery cycle.
+   * Persists a durable invalidation marker (0 cost units, provider='system', operation='INVALIDATE_SCHEDULE').
+   * Forces next scheduler cycle to perform a discovery cycle even across restarts,
+   * while completely preserving immutable historical provider audit logs.
    */
-  async invalidateSchedule(dateStr?: string): Promise<void> {
-    const targetDate = dateStr ?? new Date().toISOString().slice(0, 10);
+  async invalidateSchedule(dateStr?: string, now: Date = new Date()): Promise<void> {
+    const targetDate = dateStr ?? now.toISOString().slice(0, 10);
     this.discoveredDates.delete(targetDate);
     this.invalidatedDates.add(targetDate);
 
     try {
-      const startOfDay = new Date(targetDate + 'T00:00:00.000Z');
-      const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-      await db
-        .update(schema.apiRequestLedger)
-        .set({ success: false, errorMessage: 'SCHEDULE_INVALIDATED' })
-        .where(
-          and(
-            gte(schema.apiRequestLedger.requestedAt, startOfDay),
-            lt(schema.apiRequestLedger.requestedAt, nextDay),
-            or(
-              eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE'),
-              and(
-                eq(schema.apiRequestLedger.operation, 'get_fixtures'),
-                like(schema.apiRequestLedger.endpoint, `%date=${targetDate}%`)
-              )
-            )
-          )
-        );
+      await db.insert(schema.apiRequestLedger).values({
+        id: `inval_${targetDate}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        provider: 'system',
+        endpoint: `/schedule?date=${targetDate}`,
+        operation: 'INVALIDATE_SCHEDULE',
+        priority: 'NORMAL',
+        success: true,
+        httpStatus: 200,
+        responseTimeMs: 0,
+        costUnits: 0,
+        requestedAt: now,
+        errorMessage: 'SCHEDULE_INVALIDATED',
+      }).onConflictDoNothing();
     } catch {
-      // Fallback gracefully if database update fails
+      // Fallback gracefully if database insert fails
     }
   }
 
@@ -162,6 +175,81 @@ export class FixturesRepository {
   isScheduleDiscovered(dateStr: string): boolean {
     if (this.invalidatedDates.has(dateStr)) return false;
     return this.discoveredDates.has(dateStr);
+  }
+
+  /**
+   * Resolves the authoritative discovery state for a date by checking in-memory cache
+   * and persistent ledger markers (cleanly ordering DISCOVER_SCHEDULE vs INVALIDATE_SCHEDULE).
+   */
+  async resolveScheduleState(dateStr: string, now: Date = new Date()): Promise<'DISCOVERED' | 'INVALIDATED' | 'UNKNOWN'> {
+    if (this.invalidatedDates.has(dateStr)) return 'INVALIDATED';
+    if (this.discoveredDates.has(dateStr)) return 'DISCOVERED';
+
+    try {
+      const startOfDay = new Date(dateStr + 'T00:00:00.000Z');
+      const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+
+      // Check for durable invalidation marker for dateStr
+      const latestInvalidation = await db.query.apiRequestLedger.findFirst({
+        where: and(
+          eq(schema.apiRequestLedger.provider, 'system'),
+          eq(schema.apiRequestLedger.operation, 'INVALIDATE_SCHEDULE'),
+          gte(schema.apiRequestLedger.requestedAt, startOfDay),
+          lt(schema.apiRequestLedger.requestedAt, nextDay)
+        ),
+        orderBy: [desc(schema.apiRequestLedger.requestedAt)],
+      });
+
+      // Check for latest successful discovery evidence for dateStr
+      const latestDiscovery = await db.query.apiRequestLedger.findFirst({
+        where: and(
+          eq(schema.apiRequestLedger.success, true),
+          gte(schema.apiRequestLedger.requestedAt, startOfDay),
+          lt(schema.apiRequestLedger.requestedAt, nextDay),
+          or(
+            and(
+              eq(schema.apiRequestLedger.provider, 'system'),
+              eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE')
+            ),
+            and(
+              eq(schema.apiRequestLedger.provider, 'api_football'),
+              eq(schema.apiRequestLedger.operation, 'get_fixtures'),
+              like(schema.apiRequestLedger.endpoint, `%date=${dateStr}%`)
+            )
+          )
+        ),
+        orderBy: [desc(schema.apiRequestLedger.requestedAt)],
+      });
+
+      const invalidationTime = latestInvalidation
+        ? (latestInvalidation.requestedAt instanceof Date
+            ? latestInvalidation.requestedAt.getTime()
+            : new Date(latestInvalidation.requestedAt).getTime())
+        : null;
+
+      const discoveryTime = latestDiscovery
+        ? (latestDiscovery.requestedAt instanceof Date
+            ? latestDiscovery.requestedAt.getTime()
+            : new Date(latestDiscovery.requestedAt).getTime())
+        : null;
+
+      if (invalidationTime !== null && (discoveryTime === null || invalidationTime >= discoveryTime)) {
+        this.invalidatedDates.add(dateStr);
+        return 'INVALIDATED';
+      }
+
+      if (discoveryTime !== null && (invalidationTime === null || discoveryTime > invalidationTime)) {
+        this.discoveredDates.add(dateStr);
+        if (latestDiscovery?.operation !== 'DISCOVER_SCHEDULE') {
+          await this.markScheduleDiscovered(dateStr, now);
+        }
+        return 'DISCOVERED';
+      }
+    } catch {
+      // Fallback gracefully if database query fails
+    }
+
+    return 'UNKNOWN';
   }
 
   /**
@@ -181,6 +269,7 @@ export class FixturesRepository {
         ),
         and(
           inArray(schema.fixtures.state, ['PREMATCH', 'NS', 'TBD']),
+          gte(schema.fixtures.kickoffTime, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
           lte(schema.fixtures.kickoffTime, new Date(now.getTime() + 24 * 60 * 60 * 1000))
         ),
         and(
@@ -196,15 +285,16 @@ export class FixturesRepository {
     let approachingCount = 0;
     let recentlyFinishedCount = 0;
     let stalePrematchCount = 0;
-    let scheduleKnownForToday = false;
+    const staleCompetitionIds: number[] = [];
 
-    if (!this.invalidatedDates.has(todayUtcPrefix) && this.discoveredDates.has(todayUtcPrefix)) {
-      scheduleKnownForToday = true;
-    }
+    // Authoritative schedule resolution (persists across restarts)
+    const scheduleState = await this.resolveScheduleState(todayUtcPrefix, now);
+    let scheduleKnownForToday = scheduleState === 'DISCOVERED';
 
     for (const f of candidateFixtures) {
       const kickoffStr = f.kickoffTime instanceof Date ? f.kickoffTime.toISOString() : String(f.kickoffTime);
-      if (kickoffStr.slice(0, 10) === todayUtcPrefix && !this.invalidatedDates.has(todayUtcPrefix)) {
+      // Only recognize schedule from existing DB fixtures if today's date was not explicitly invalidated
+      if (kickoffStr.slice(0, 10) === todayUtcPrefix && scheduleState !== 'INVALIDATED') {
         scheduleKnownForToday = true;
       }
 
@@ -223,35 +313,18 @@ export class FixturesRepository {
         recentlyFinishedCount++;
       } else if (classification === 'STALE_PREMATCH') {
         stalePrematchCount++;
+        if (f.competitionId) {
+          const compNum = parseInt(f.competitionId.replace(/^comp_/, ''), 10);
+          if (!isNaN(compNum)) {
+            staleCompetitionIds.push(compNum);
+          }
+        }
       }
     }
 
-    // If still not known and not explicitly invalidated, check persistent ledger for previous successful discovery today
-    if (!scheduleKnownForToday && !this.invalidatedDates.has(todayUtcPrefix)) {
-      try {
-        const startOfDay = new Date(todayUtcPrefix + 'T00:00:00.000Z');
-        const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-        const pastDiscovery = await db.query.apiRequestLedger.findFirst({
-          where: and(
-            eq(schema.apiRequestLedger.success, true),
-            gte(schema.apiRequestLedger.requestedAt, startOfDay),
-            lt(schema.apiRequestLedger.requestedAt, nextDay),
-            or(
-              eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE'),
-              and(
-                eq(schema.apiRequestLedger.operation, 'get_fixtures'),
-                like(schema.apiRequestLedger.endpoint, `%date=${todayUtcPrefix}%`)
-              )
-            )
-          ),
-        });
-        if (pastDiscovery) {
-          scheduleKnownForToday = true;
-          this.discoveredDates.add(todayUtcPrefix);
-        }
-      } catch {
-        // Fallback gracefully if ledger query is unavailable
-      }
+    // If fixtures existed today but no ledger record existed yet, persist discovery marker
+    if (scheduleKnownForToday && scheduleState === 'UNKNOWN') {
+      await this.markScheduleDiscovered(todayUtcPrefix, now);
     }
 
     return {
@@ -259,6 +332,7 @@ export class FixturesRepository {
       approachingCount,
       recentlyFinishedCount,
       stalePrematchCount,
+      staleCompetitionIds: Array.from(new Set(staleCompetitionIds)),
       scheduleKnownForToday,
     };
   }

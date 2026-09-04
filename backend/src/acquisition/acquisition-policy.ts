@@ -57,6 +57,7 @@ export interface FixturesSummary {
   approachingCount?: number;
   recentlyFinishedCount: number;
   stalePrematchCount: number;
+  staleCompetitionIds?: number[];
   scheduleKnownForToday: boolean;
   lastScheduleDiscoveryAt?: Date | string | null;
 }
@@ -182,7 +183,12 @@ export class AcquisitionPolicyEngine {
     }
 
     // 4. Prematch states (PREMATCH, NS, TBD)
-    // 4a. Stale prematch: kickoff was > 3 hours in the past but state is still PREMATCH
+    // 4a. Ancient prematch: kickoff was > 24 hours in the past — match is abandoned/postponed
+    if (diffMs < -24 * 60 * 60 * 1000) {
+      return 'FINAL';
+    }
+
+    // 4b. Stale prematch: kickoff was > 3 hours in the past but < 24 hours
     if (diffMs < -this.STALE_PREMATCH_THRESHOLD_MS) {
       return 'STALE_PREMATCH';
     }

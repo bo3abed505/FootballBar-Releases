@@ -43,7 +43,7 @@ export interface SchedulerDiagnostics {
 export interface SchedulerDependencies {
   syncService: SyncService;
   fixturesRepository: FixturesRepository;
-  getBudgetContext?: (provider?: string) => Promise<BudgetContext>;
+  getBudgetContext?: (provider?: string, now?: Date) => Promise<BudgetContext>;
   nowFn?: () => Date;
   sleepFn?: (ms: number, signal?: AbortSignal) => Promise<void>;
   targetCompetitionIds?: number[];
@@ -77,8 +77,8 @@ async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 /**
  * Default PostgreSQL reader for provider daily budget state.
  */
-export async function getDatabaseBudgetContext(provider = 'api_football'): Promise<BudgetContext> {
-  const todayStr = new Date().toISOString().slice(0, 10);
+export async function getDatabaseBudgetContext(provider = 'api_football', now = new Date()): Promise<BudgetContext> {
+  const todayStr = now.toISOString().slice(0, 10);
   const startOfDay = new Date(todayStr + 'T00:00:00.000Z');
   const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
@@ -134,7 +134,7 @@ export async function getDatabaseBudgetContext(provider = 'api_football'): Promi
 export class AcquisitionScheduler {
   private readonly syncService: SyncService;
   private readonly fixturesRepo: FixturesRepository;
-  private readonly getBudget: (provider?: string) => Promise<BudgetContext>;
+  private readonly getBudget: (provider?: string, now?: Date) => Promise<BudgetContext>;
   private readonly now: () => Date;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   private readonly targetCompetitionIds?: number[];
@@ -267,7 +267,7 @@ export class AcquisitionScheduler {
       const todayDateStr = currentDate.toISOString().slice(0, 10);
 
       // 1. Fetch current budget state
-      const budget = await this.getBudget(this.providerName);
+      const budget = await this.getBudget(this.providerName, currentDate);
 
       // 2. Fetch fixture summary from repository
       const summary = await this.fixturesRepo.getActiveSummary(currentDate);
@@ -286,14 +286,36 @@ export class AcquisitionScheduler {
       // 4. Dispatch action via SyncService
       let syncSummary: SyncSummary | null = null;
       if (plan.action !== 'IDLE') {
-        syncSummary = await this.syncService.syncWithPlan(plan, {
-          date: todayDateStr,
-          competitionIds: this.targetCompetitionIds,
-        });
+        let targetComps = this.targetCompetitionIds;
+
+        if (plan.action === 'RECOVER_STALE') {
+          if (summary.staleCompetitionIds && summary.staleCompetitionIds.length > 0) {
+            targetComps = summary.staleCompetitionIds.filter(
+              (id) => !this.targetCompetitionIds || this.targetCompetitionIds.includes(id)
+            );
+          } else if (summary.staleCompetitionIds && summary.staleCompetitionIds.length === 0) {
+            // Safety: stale fixtures cannot be mapped to any target competitions,
+            // avoid issuing an unbounded 6-league query.
+            targetComps = [];
+          } else {
+            // summary.staleCompetitionIds was not provided (e.g. mocked in unit tests)
+            targetComps = this.targetCompetitionIds;
+          }
+        }
+
+        if (plan.action === 'RECOVER_STALE' && targetComps && targetComps.length === 0) {
+          this.logger.warn('RECOVER_STALE plan triggered but no target competition IDs match stale fixtures. Skipping provider call.');
+          syncSummary = null;
+        } else {
+          syncSummary = await this.syncService.syncWithPlan(plan, {
+            date: todayDateStr,
+            competitionIds: targetComps,
+          });
+        }
 
         if (plan.action === 'DISCOVER_SCHEDULE') {
           if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
-            await this.fixturesRepo.markScheduleDiscovered(todayDateStr);
+            await this.fixturesRepo.markScheduleDiscovered(todayDateStr, currentDate);
           }
         }
 

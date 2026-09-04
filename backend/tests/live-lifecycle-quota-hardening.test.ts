@@ -3,7 +3,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { db, schema, pool } from '../src/db/index.js';
 import { SyncService } from '../src/acquisition/sync.service.js';
 import { AcquisitionPolicyEngine, FixturesSummary, BudgetContext } from '../src/acquisition/acquisition-policy.js';
-import { AcquisitionScheduler } from '../src/acquisition/acquisition-scheduler.js';
+import { AcquisitionScheduler, getDatabaseBudgetContext } from '../src/acquisition/acquisition-scheduler.js';
 import { FixturesRepository } from '../src/repositories/fixtures.repository.js';
 import { FootballProvider, ProviderFixture, ProviderEvent } from '../src/providers/football-provider.js';
 import { RequestGateway } from '../src/gateway/request-gateway.js';
@@ -1171,6 +1171,375 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       await db.delete(schema.events);
       await db.delete(schema.fixtures);
       await pool.query("SET TIME ZONE 'UTC'");
+    });
+
+    it('22. Production Restart & Ancient Prematch: verifies fresh repository instance with prior discovery batches and ancient prematch fixtures evaluates IDLE with zero provider calls', async () => {
+      const testProvider = 'api_football';
+      const gateway = new RequestGateway(pool);
+      const testDate = new Date('2026-09-04T01:57:27.000Z');
+      const todayStr = '2026-09-04';
+
+      // Reset test state
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // 1. Seed the exact three prior discovery batches from production (18 calls total)
+      for (let batch = 1; batch <= 3; batch++) {
+        for (let league = 1; league <= 6; league++) {
+          await pool.query(
+            `INSERT INTO api_request_ledger (
+               id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+             ) VALUES ($1, $2, $3, 'get_fixtures', 'NORMAL', true, 200, 50, 1, $4)`,
+            [
+              `ledg_test_batch_${batch}_lg_${league}`,
+              testProvider,
+              `/fixtures?date=2026-09-04&league=${league}`,
+              new Date(`2026-09-04T0${batch - 1}:30:00.000Z`),
+            ]
+          );
+        }
+      }
+
+      // 2. Insert ancient prematch fixture (kickoff 3 days ago, e.g. fix_spain_egypt_2026)
+      await db.insert(schema.competitions).values({
+        id: 'comp_test_ancient',
+        name: 'Ancient Comp',
+        code: 'AC',
+        country: 'International',
+      }).onConflictDoNothing();
+
+      await db.insert(schema.competitionSeasons).values({
+        id: 'season_test_ancient',
+        competitionId: 'comp_test_ancient',
+        year: 2026,
+        displayYear: '2026',
+        startDate: new Date('2025-08-01'),
+        endDate: new Date('2026-05-31'),
+      }).onConflictDoNothing();
+
+      await db.insert(schema.teams).values([
+        { id: 'team_test_h', name: 'Home Team', shortName: 'HT' },
+        { id: 'team_test_a', name: 'Away Team', shortName: 'AT' },
+      ]).onConflictDoNothing();
+
+      await db.insert(schema.fixtures).values({
+        id: 'fix_ancient_prematch_test',
+        competitionId: 'comp_test_ancient',
+        seasonId: 'season_test_ancient',
+        homeTeamId: 'team_test_h',
+        awayTeamId: 'team_test_a',
+        kickoffTime: new Date('2026-09-01T06:27:51.804Z'), // 3 days in past
+        state: 'PREMATCH',
+        elapsedMinute: 0,
+      });
+
+      // 3. Setup mock provider: should NEVER be called
+      let providerCalls = 0;
+      const mockProvider: FootballProvider = {
+        providerName: testProvider,
+        getCompetitions: async () => [],
+        getFixtures: async () => {
+          providerCalls++;
+          return [];
+        },
+        getFixtureDetails: async () => null,
+        getFixtureEvents: async () => [],
+        getStandings: async () => [],
+      };
+
+      const syncService = new SyncService(mockProvider);
+
+      // 4. Create FRESH repository and scheduler instance (simulating cold deployment/restart)
+      const freshRepo = new FixturesRepository();
+
+      // Verify getActiveSummary on cold instance
+      const summary = await freshRepo.getActiveSummary(testDate);
+      expect(summary.scheduleKnownForToday).toBe(true); // Recognized from existing ledger batches
+      expect(summary.stalePrematchCount).toBe(0); // Ancient fixture (> 24h) excluded from stale recovery
+      expect(summary.liveCount).toBe(0);
+
+      // Verify that ancient prematch fixture was locally swept to POSTPONED
+      const ancientFix = await db.query.fixtures.findFirst({
+        where: eq(schema.fixtures.id, 'fix_ancient_prematch_test'),
+      });
+      expect(ancientFix?.state).toBe('POSTPONED');
+
+      // 5. Execute single scheduler cycle on cold instance
+      const freshScheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: freshRepo,
+        providerName: testProvider,
+        targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        nowFn: () => testDate,
+        getBudgetContext: async () => {
+          const diag = await gateway.getDiagnostics(testProvider);
+          return {
+            allocatedDaily: diag.allocatedDaily,
+            consumedDaily: diag.consumedDaily,
+            remainingDaily: diag.remainingDaily,
+            isExhausted: diag.isExhausted,
+          };
+        },
+      });
+
+      const cycle = await freshScheduler.executeSingleCycle();
+      expect(cycle.plan.action).toBe('IDLE');
+      expect(providerCalls).toBe(0); // Strictly zero calls on deployment/restart!
+
+      // 6. Verify durable system marker was persisted
+      const marker = await pool.query(
+        `SELECT id, provider, operation, cost_units FROM api_request_ledger
+         WHERE provider = 'system' AND operation = 'DISCOVER_SCHEDULE' AND endpoint LIKE $1`,
+        [`%${todayStr}%`]
+      );
+      expect(marker.rows.length).toBeGreaterThanOrEqual(1);
+      expect(marker.rows[0].cost_units).toBe(0);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+    });
+
+    it('23. Invalidation Survives Restart: verifies that explicit invalidation survives process restart, triggers DISCOVER_SCHEDULE on next cycle, and upon completion of discovery, marks the date known and survives subsequent restart', async () => {
+      const testProvider = 'api_football';
+      const todayStr = '2026-09-05';
+      const t1 = new Date('2026-09-05T01:00:00.000Z');
+      const t2 = new Date('2026-09-05T02:00:00.000Z');
+      const t3 = new Date('2026-09-05T03:00:00.000Z');
+      const t4 = new Date('2026-09-05T04:00:00.000Z');
+
+      // Clean test ledger and fixtures
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+
+      const repo1 = new FixturesRepository();
+
+      // 1. Mark schedule discovered at T1
+      await repo1.markScheduleDiscovered(todayStr, t1);
+      expect(repo1.isScheduleDiscovered(todayStr)).toBe(true);
+
+      // 2. Explicitly invalidate schedule at T2 (T2 > T1)
+      await repo1.invalidateSchedule(todayStr, t2);
+      expect(repo1.isScheduleDiscovered(todayStr)).toBe(false);
+
+      // 3. First restart (T3): instantiate fresh repository instance
+      const restartRepo1 = new FixturesRepository();
+
+      // Invalidation must survive restart!
+      const summaryOnRestart = await restartRepo1.getActiveSummary(t3);
+      expect(summaryOnRestart.scheduleKnownForToday).toBe(false);
+      expect(restartRepo1.isScheduleDiscovered(todayStr)).toBe(false);
+
+      // 4. Run scheduler cycle on cold instance: must execute DISCOVER_SCHEDULE
+      let discoverCalls = 0;
+      const mockProvider: FootballProvider = {
+        providerName: testProvider,
+        getCompetitions: async () => [],
+        getFixtures: async (filter) => {
+          const count = filter?.competitionIds?.length ?? 1;
+          discoverCalls += count;
+          return [];
+        },
+        getFixtureDetails: async () => null,
+        getFixtureEvents: async () => [],
+        getStandings: async () => [],
+      };
+
+      const syncService = new SyncService(mockProvider);
+      const scheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: restartRepo1,
+        providerName: testProvider,
+        targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        nowFn: () => t3,
+        getBudgetContext: async () => ({
+          allocatedDaily: 100,
+          consumedDaily: 0,
+          remainingDaily: 100,
+          isExhausted: false,
+        }),
+      });
+
+      const cycle1 = await scheduler.executeSingleCycle();
+      expect(cycle1.plan.action).toBe('DISCOVER_SCHEDULE');
+      expect(discoverCalls).toBe(6); // exactly 6 discovery calls
+      expect(restartRepo1.isScheduleDiscovered(todayStr)).toBe(true);
+
+      // Next cycle at T3: must be IDLE
+      const cycle2 = await scheduler.executeSingleCycle();
+      expect(cycle2.plan.action).toBe('IDLE');
+      expect(discoverCalls).toBe(6); // zero new calls
+
+      // 5. Second restart (T4): instantiate another fresh repository instance
+      const restartRepo2 = new FixturesRepository();
+      const summaryOnRestart2 = await restartRepo2.getActiveSummary(t4);
+      expect(summaryOnRestart2.scheduleKnownForToday).toBe(true);
+      expect(restartRepo2.isScheduleDiscovered(todayStr)).toBe(true);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+    });
+
+    it('24. Genuine Stale Prematch Scoped Recovery: verifies fixture 5 hours past kickoff triggers RECOVER_STALE scoped strictly to its competition, never an unbounded 6-league query', async () => {
+      const testProvider = 'api_football';
+      const testDate = new Date('2026-09-04T15:00:00.000Z'); // 15:00 UTC
+      const kickoffTime = new Date('2026-09-04T10:00:00.000Z'); // 10:00 UTC (5 hours past kickoff, within [3h, 24h])
+      const todayStr = '2026-09-04';
+
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+
+      // Seed single competition for Premier League (comp_39)
+      await db.insert(schema.competitions).values({
+        id: 'comp_39',
+        name: 'Premier League',
+        code: 'PL',
+        country: 'England',
+      }).onConflictDoNothing();
+
+      await db.insert(schema.competitionSeasons).values({
+        id: 'season_39_2026',
+        competitionId: 'comp_39',
+        year: 2026,
+        displayYear: '2026',
+        startDate: new Date('2025-08-01'),
+        endDate: new Date('2026-05-31'),
+      }).onConflictDoNothing();
+
+      await db.insert(schema.teams).values([
+        { id: 'team_39_h', name: 'Arsenal', shortName: 'ARS' },
+        { id: 'team_39_a', name: 'Chelsea', shortName: 'CHE' },
+      ]).onConflictDoNothing();
+
+      // Insert genuine stale prematch fixture in comp_39
+      await db.insert(schema.fixtures).values({
+        id: 'fix_stale_prematch_39',
+        competitionId: 'comp_39',
+        seasonId: 'season_39_2026',
+        homeTeamId: 'team_39_h',
+        awayTeamId: 'team_39_a',
+        kickoffTime,
+        state: 'PREMATCH',
+        elapsedMinute: 0,
+      });
+
+      // Mark today's schedule as already discovered so DISCOVER_SCHEDULE does not preempt RECOVER_STALE
+      const repo = new FixturesRepository();
+      await repo.markScheduleDiscovered(todayStr, testDate);
+
+      // Verify active summary identifies exactly competition 39 as stale
+      const summary = await repo.getActiveSummary(testDate);
+      expect(summary.scheduleKnownForToday).toBe(true);
+      expect(summary.stalePrematchCount).toBe(1);
+      expect(summary.staleCompetitionIds).toEqual([39]);
+
+      // Mock provider tracking which leagues were queried
+      const queriedLeagues: number[] = [];
+      const mockProvider: FootballProvider = {
+        providerName: testProvider,
+        getCompetitions: async () => [],
+        getFixtures: async (filter) => {
+          if (filter?.competitionIds) {
+            queriedLeagues.push(...filter.competitionIds);
+          }
+          return [];
+        },
+        getFixtureDetails: async () => null,
+        getFixtureEvents: async () => [],
+        getStandings: async () => [],
+      };
+
+      const syncService = new SyncService(mockProvider);
+      const scheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: repo,
+        providerName: testProvider,
+        targetCompetitionIds: [39, 140, 78, 135, 61, 2], // 6 tracked leagues
+        nowFn: () => testDate,
+        getBudgetContext: async () => ({
+          allocatedDaily: 100,
+          consumedDaily: 6,
+          remainingDaily: 94,
+          isExhausted: false,
+        }),
+      });
+
+      const cycle = await scheduler.executeSingleCycle();
+      expect(cycle.plan.action).toBe('RECOVER_STALE');
+      // Must query ONLY competition 39, NEVER all 6 leagues!
+      expect(queriedLeagues).toEqual([39]);
+      expect(queriedLeagues.length).toBe(1);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+    });
+
+    it('25. System Markers Cost 0 & Provider Isolation: verifies system markers have cost_units = 0 and are never counted against api_football quota', async () => {
+      const testProvider = 'api_football';
+      const gateway = new RequestGateway(pool);
+      const testDate = new Date('2026-09-04T12:00:00.000Z');
+      const todayStr = '2026-09-04';
+
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      const repo = new FixturesRepository();
+
+      // Write multiple system markers (discovery and invalidation)
+      await repo.markScheduleDiscovered(todayStr, testDate);
+      await repo.invalidateSchedule(todayStr, new Date(testDate.getTime() + 1000));
+      await repo.markScheduleDiscovered(todayStr, new Date(testDate.getTime() + 2000));
+
+      // Verify system ledger rows have cost_units = 0
+      const systemRows = await pool.query(
+        `SELECT provider, operation, cost_units FROM api_request_ledger WHERE provider = 'system'`
+      );
+      expect(systemRows.rows.length).toBe(3);
+      for (const row of systemRows.rows) {
+        expect(row.cost_units).toBe(0);
+      }
+
+      // Check gateway diagnostics before reservation: consumed must be 0
+      const diagBefore = await gateway.getDiagnostics(testProvider);
+      expect(diagBefore.consumedDaily).toBe(0);
+      expect(diagBefore.remainingDaily).toBe(100);
+
+      // Check getDatabaseBudgetContext before reservation: consumedDaily must be 0
+      const budgetContextBefore = await getDatabaseBudgetContext(testProvider, testDate);
+      expect(budgetContextBefore.consumedDaily).toBe(0);
+      expect(budgetContextBefore.remainingDaily).toBe(100);
+      expect(budgetContextBefore.isExhausted).toBe(false);
+
+      // Reserve 1 slot: must consume exactly 1 slot (cost_units = 1)
+      const slot = await gateway.reserveSlot(testProvider, '/fixtures', 'get_fixtures', 'NORMAL');
+      expect(slot.allowed).toBe(true);
+      expect(slot.consumedDaily).toBe(1);
+      expect(slot.remainingDaily).toBe(99);
+
+      // Verify diagnostics shows exactly 1 consumed, completely ignoring the 3 system markers
+      const diagAfter = await gateway.getDiagnostics(testProvider);
+      expect(diagAfter.consumedDaily).toBe(1);
+      expect(diagAfter.remainingDaily).toBe(99);
+
+      const budgetAfter = await getDatabaseBudgetContext(testProvider, testDate);
+      expect(budgetAfter.consumedDaily).toBe(1);
+      expect(budgetAfter.remainingDaily).toBe(99);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
     });
   });
 });
