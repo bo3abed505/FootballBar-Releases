@@ -17,6 +17,8 @@
     Reverts the current active deployment to the previous known-good verified release and restarts the service.
 .PARAMETER SkipTaskUpdate
     Performs directory deployment and dependency installation without updating the scheduled task.
+.PARAMETER NoStart
+    Deploys, packages, activates the release junction, and updates the scheduled task definition without starting the backend service or performing HTTP health probes.
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -25,7 +27,8 @@ param (
     [string]$TargetDir = "C:\ProgramData\FootballTray\backend",
     [switch]$DryRun,
     [switch]$Rollback,
-    [switch]$SkipTaskUpdate
+    [switch]$SkipTaskUpdate,
+    [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +48,9 @@ Write-Host " Source Directory: $SourceDir"
 Write-Host " Target Directory: $TargetDir"
 if ($DryRun) {
     Write-Host " Mode: DRY-RUN (Simulation only — no system modifications)" -ForegroundColor Magenta
+}
+if ($NoStart) {
+    Write-Host " Mode: NO-START (Will package and configure release without starting service)" -ForegroundColor Yellow
 }
 
 # ----------------------------------------------------------------------
@@ -498,32 +504,37 @@ if ($Rollback) {
             Invoke-SchtasksChecked -Arguments @("/Create", "/TN", "FootballTray-Backend", "/XML", $restoreXmlPath, "/F") -Operation "Restore Task XML"
         }
 
-        # Restart and verify
-        Write-Host "Starting rolled-back service..."
-        Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Rolled-Back Service"
-        Start-Sleep -Seconds 4
+        if (-not $NoStart) {
+            # Restart and verify
+            Write-Host "Starting rolled-back service..."
+            Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Rolled-Back Service"
+            Start-Sleep -Seconds 4
 
-        # Health verification
-        Write-Host "Verifying health after rollback..."
-        $rollbackHealthy = $false
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        while ($sw.Elapsed.TotalSeconds -lt 25) {
-            try {
-                $h = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
-                if ($h.status -eq "ok" -and $h.database -eq "connected" -and $h.scheduler.running -eq $true) {
-                    $rollbackHealthy = $true
-                    break
+            # Health verification
+            Write-Host "Verifying health after rollback..."
+            $rollbackHealthy = $false
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($sw.Elapsed.TotalSeconds -lt 25) {
+                try {
+                    $h = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
+                    if ($h.status -eq "ok" -and $h.database -eq "connected" -and $h.scheduler.running -eq $true) {
+                        $rollbackHealthy = $true
+                        break
+                    }
+                } catch {
+                    Start-Sleep -Seconds 2
                 }
-            } catch {
-                Start-Sleep -Seconds 2
             }
-        }
 
-        if ($rollbackHealthy) {
-            Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back and verified healthy." -ForegroundColor Green
+            if ($rollbackHealthy) {
+                Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back and verified healthy." -ForegroundColor Green
+            } else {
+                Write-Host "CRITICAL: Rollback health verification failed! Service did not report healthy status." -ForegroundColor Red
+                throw "Rollback verification failed."
+            }
         } else {
-            Write-Host "CRITICAL: Rollback health verification failed! Service did not report healthy status." -ForegroundColor Red
-            throw "Rollback verification failed."
+            Write-Host "[-NoStart] Restored previous release configuration without starting the service." -ForegroundColor Yellow
+            Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back (service intentionally left stopped)." -ForegroundColor Green
         }
     } else {
         Write-Host "  [DryRun] Would redirect 'current' to $targetRelease, restore task XML, restart task, and verify /health." -ForegroundColor Gray
@@ -601,7 +612,17 @@ foreach ($item in $filesToCopy) {
 Write-Host "`n[3/6] Configuring production environment credentials..." -ForegroundColor Yellow
 $sourceEnvPath = Join-Path $SourceDir ".env.production.local"
 
-if (Test-Path $targetEnvPath) {
+$targetEnvExists = $false
+try {
+    $targetEnvExists = Test-Path -LiteralPath $targetEnvPath -ErrorAction Stop
+} catch [System.UnauthorizedAccessException] {
+    # Existing file is protected under strict SYSTEM/Admin ACLs
+    $targetEnvExists = $true
+} catch {
+    $targetEnvExists = $false
+}
+
+if ($targetEnvExists) {
     Write-Host "  Existing production configuration detected at '$targetEnvPath'. Re-applying strict ACLs..." -ForegroundColor Green
     if (-not $DryRun) {
         Set-SecureAcl -Path $targetEnvPath
@@ -677,6 +698,9 @@ $taskXml = New-BackendTaskXml -WorkingDir $currentJunction -EnvFilePath $targetE
 if ($DryRun) {
     Write-Host "`n=== [DryRun] Planned Task XML ===" -ForegroundColor Cyan
     Write-Host $taskXml
+    if ($NoStart) {
+        Write-Host "`n[DryRun] -NoStart flag is set: service startup and HTTP /health probe would be skipped." -ForegroundColor Yellow
+    }
     Write-Host "`n[DryRun] Simulation completed successfully. No system state was modified." -ForegroundColor Green
     exit 0
 }
@@ -748,9 +772,13 @@ if (-not $SkipTaskUpdate) {
         Remove-Item -Path $tempTaskXml -Force -ErrorAction SilentlyContinue
 
         # Start task
-        Write-Host "  Starting updated production backend..."
-        Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Updated Task"
-        Start-Sleep -Seconds 4
+        if (-not $NoStart) {
+            Write-Host "  Starting updated production backend..."
+            Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Updated Task"
+            Start-Sleep -Seconds 4
+        } else {
+            Write-Host "  [-NoStart] Skipping service startup (task remains in stopped state)." -ForegroundColor Yellow
+        }
 
         # --------------------------------------------------------------
         # Verification 1-7: Verify Deployment State Invariants
@@ -804,24 +832,36 @@ if (-not $SkipTaskUpdate) {
         # --------------------------------------------------------------
         # Verification 8: Health Validation
         # --------------------------------------------------------------
-        Write-Host "  Validating backend health..."
-        $healthy = $false
-        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        while ($stopwatch.Elapsed.TotalSeconds -lt 30) {
-            try {
-                $h = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
-                if ($h.status -eq "ok" -and $h.database -eq "connected" -and $h.scheduler.running -eq $true) {
-                    $healthy = $true
-                    Write-Host "  Backend health check verified: status=$($h.status), db=$($h.database), scheduler=$($h.scheduler.running)" -ForegroundColor Green
-                    break
+        if (-not $NoStart) {
+            Write-Host "  Validating backend health..."
+            $healthy = $false
+            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($stopwatch.Elapsed.TotalSeconds -lt 30) {
+                try {
+                    $h = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
+                    if ($h.status -eq "ok" -and $h.database -eq "connected" -and $h.scheduler.running -eq $true) {
+                        $healthy = $true
+                        Write-Host "  Backend health check verified: status=$($h.status), db=$($h.database), scheduler=$($h.scheduler.running)" -ForegroundColor Green
+                        break
+                    }
+                } catch {
+                    Start-Sleep -Seconds 2
                 }
-            } catch {
-                Start-Sleep -Seconds 2
             }
-        }
 
-        if (-not $healthy) {
-            throw "Health check probe timed out or returned non-healthy response within 30 seconds."
+            if (-not $healthy) {
+                throw "Health check probe timed out or returned non-healthy response within 30 seconds."
+            }
+        } else {
+            Write-Host "  [-NoStart] Skipping HTTP health validation probe (service intentionally stopped)." -ForegroundColor Yellow
+
+            # Confirm task is not running
+            $statusLines = Invoke-SchtasksChecked -Arguments @("/Query", "/TN", "FootballTray-Backend", "/FO", "CSV", "/NH") -Operation "Query Registered Task Status"
+            $statusCsv = $statusLines -join ""
+            if ($statusCsv -match '"Running"') {
+                throw "Task state verification failed: task is running despite -NoStart flag."
+            }
+            Write-Host "  Task state verified stopped/ready." -ForegroundColor Green
         }
 
         # --------------------------------------------------------------
@@ -861,9 +901,13 @@ if (-not $SkipTaskUpdate) {
         }
 
         # 5. Start restored task
-        Write-Host "  Starting restored backend service..."
-        Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Restored Backend Service"
-        Start-Sleep -Seconds 4
+        if (-not $NoStart) {
+            Write-Host "  Starting restored backend service..."
+            Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Restored Backend Service"
+            Start-Sleep -Seconds 4
+        } else {
+            Write-Host "  [-NoStart] Restored previous release configuration without starting the service." -ForegroundColor Yellow
+        }
 
         # 6. Verify restored task configuration
         $restoredQuery = Invoke-SchtasksChecked -Arguments @("/Query", "/TN", "FootballTray-Backend", "/XML") -Operation "Verify Restored Task XML"
@@ -873,27 +917,31 @@ if (-not $SkipTaskUpdate) {
         }
 
         # 7. Verify /health of restored service
-        Write-Host "  Verifying health of restored service..."
-        $rollbackHealthy = $false
-        $rbSw = [System.Diagnostics.Stopwatch]::StartNew()
-        while ($rbSw.Elapsed.TotalSeconds -lt 25) {
-            try {
-                $rh = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
-                if ($rh.status -eq "ok" -and $rh.database -eq "connected" -and $rh.scheduler.running -eq $true) {
-                    $rollbackHealthy = $true
-                    break
+        if (-not $NoStart) {
+            Write-Host "  Verifying health of restored service..."
+            $rollbackHealthy = $false
+            $rbSw = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($rbSw.Elapsed.TotalSeconds -lt 25) {
+                try {
+                    $rh = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
+                    if ($rh.status -eq "ok" -and $rh.database -eq "connected" -and $rh.scheduler.running -eq $true) {
+                        $rollbackHealthy = $true
+                        break
+                    }
+                } catch {
+                    Start-Sleep -Seconds 2
                 }
-            } catch {
-                Start-Sleep -Seconds 2
             }
-        }
 
-        # 8. Report rollback result
-        if ($rollbackHealthy) {
-            Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified service health." -ForegroundColor Yellow
+            # 8. Report rollback result
+            if ($rollbackHealthy) {
+                Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified service health." -ForegroundColor Yellow
+            } else {
+                Write-Host "CRITICAL: Rollback health verification failed! The previous service did not recover within the timeout period." -ForegroundColor Red
+                throw "Deployment failed and rollback service verification also failed."
+            }
         } else {
-            Write-Host "CRITICAL: Rollback health verification failed! The previous service did not recover within the timeout period." -ForegroundColor Red
-            throw "Deployment failed and rollback service verification also failed."
+            Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified task configuration (service stopped)." -ForegroundColor Yellow
         }
 
         throw "Deployment aborted due to verification failure ($($_.Exception.Message)). System was successfully rolled back to '$previousJunctionTarget'."
@@ -904,5 +952,8 @@ Write-Host "`n============================================================" -For
 Write-Host " Production Backend Deployment Completed Successfully!" -ForegroundColor Green
 Write-Host " Deployed Release: $releaseId (status: verified)" -ForegroundColor Green
 Write-Host " Active Path: $currentJunction" -ForegroundColor Green
+if ($NoStart) {
+    Write-Host " Service Status: STOPPED (-NoStart mode — ready for verification/audit)" -ForegroundColor Yellow
+}
 Write-Host "============================================================" -ForegroundColor Green
 exit 0

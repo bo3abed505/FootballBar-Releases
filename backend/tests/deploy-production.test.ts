@@ -486,3 +486,97 @@ $result | ConvertTo-Json
   });
 });
 
+describe('Production Backend Deployment -NoStart Mode Hardening (Milestone 16.5C)', () => {
+  const scriptsDir = path.resolve(__dirname, '../../scripts');
+  const deployScriptPath = path.join(scriptsDir, 'deploy-backend-production.ps1');
+
+  it('Test NS1: -NoStart switch parameter is defined and documented in script param block', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Documented in comment-based help
+    expect(scriptContent).toContain('.PARAMETER NoStart');
+
+    // Declared in param() block
+    expect(scriptContent).toMatch(/param\s*\([\s\S]*?\[switch\]\$NoStart[\s\S]*?\)/);
+  });
+
+  it('Test NS2: Service startup via schtasks /Run is skipped when -NoStart is supplied', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Normal deployment /Run is wrapped in if (-not $NoStart)
+    const runMatch = scriptContent.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)[\s\S]*?Start-Sleep/);
+    expect(runMatch).not.toBeNull();
+  });
+
+  it('Test NS3: HTTP /health probe is skipped when -NoStart is supplied', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Health check block is wrapped in if (-not $NoStart)
+    const healthMatch = scriptContent.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?http:\/\/127\.0\.0\.1:4000\/health[\s\S]*?throw "Health check probe timed out/);
+    expect(healthMatch).not.toBeNull();
+  });
+
+  it('Test NS4: Task stopped state invariant is explicitly validated when -NoStart is active', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // -NoStart branch verifies task is not in Running state
+    expect(scriptContent).toContain('Task state verification failed: task is running despite -NoStart flag');
+    expect(scriptContent).toContain('Query Registered Task Status');
+  });
+
+  it('Test NS5: Default deployment mode preserves original service start and /health verification', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Default mode retains Invoke-SchtasksChecked /Run
+    expect(scriptContent).toContain('Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Updated Task"');
+
+    // Default mode retains /health probe
+    expect(scriptContent).toContain('Invoke-RestMethod -Uri "http://127.0.0.1:4000/health"');
+
+    // Manifest marked verified after verification
+    expect(scriptContent).toContain('Set-DeploymentManifestStatus -ReleaseDir $releaseDir -Status "verified"');
+  });
+
+  it('Test NS6: Dual rollback path guards service start and health verification with -NoStart', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    const catchIndex = scriptContent.indexOf('Write-Host "CRITICAL: Deployment verification failed');
+    expect(catchIndex).toBeGreaterThan(0);
+    const catchBlock = scriptContent.substring(catchIndex);
+
+    // Rollback start is guarded by -not $NoStart
+    const rollbackRunMatch = catchBlock.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)\s+-Operation\s+"Start Restored Backend Service"/);
+    expect(rollbackRunMatch).not.toBeNull();
+
+    // Rollback health check is guarded by -not $NoStart
+    const rollbackHealthMatch = catchBlock.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?http:\/\/127\.0\.0\.1:4000\/health/);
+    expect(rollbackHealthMatch).not.toBeNull();
+
+    // Task XML restoration and validation still occur unconditionally in rollback
+    expect(catchBlock).toContain('Restore Task Definition from Backup');
+    expect(catchBlock).toContain('Verify Restored Task XML');
+  });
+
+  it('Test NS7: Manual -Rollback switch also supports -NoStart to prevent starting rolled-back service', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // In manual rollback block
+    const manualRollbackIndex = scriptContent.indexOf('[ROLLBACK] Initiating manual rollback');
+    expect(manualRollbackIndex).toBeGreaterThan(0);
+    const manualBlock = scriptContent.substring(manualRollbackIndex, scriptContent.indexOf('exit 0', manualRollbackIndex));
+
+    const manualRunMatch = manualBlock.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)\s+-Operation\s+"Start Rolled-Back Service"/);
+    expect(manualRunMatch).not.toBeNull();
+  });
+
+  it('Test NS8: DryRun execution with -NoStart completes successfully with exit code 0 and reports no-start mode', () => {
+    const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${deployScriptPath}" -DryRun -NoStart`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(stdout).toContain('Mode: NO-START');
+    expect(stdout).toContain('-NoStart flag is set: service startup and HTTP /health probe would be skipped');
+    expect(stdout).toContain('Simulation completed successfully');
+  });
+});
