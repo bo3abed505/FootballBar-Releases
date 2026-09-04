@@ -1,4 +1,4 @@
-import { eq, desc, or, and, gte, lte, inArray } from 'drizzle-orm';
+import { eq, desc, or, and, gte, lte, inArray, lt } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
 
@@ -72,10 +72,35 @@ export class FixturesRepository {
   }
 
   /**
+   * Reconciles expired LIVE fixtures locally without external provider calls.
+   * Any fixture remaining in an active live state beyond MAX_LIVE_MATCH_AGE_MS (3.5h)
+   * has conclusively finished play and is transitioned to FINISHED.
+   */
+  async reconcileExpiredLiveFixtures(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS);
+    const result = await db
+      .update(schema.fixtures)
+      .set({
+        state: 'FINISHED',
+        updatedAt: now,
+      })
+      .where(
+        and(
+          inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
+          lt(schema.fixtures.kickoffTime, cutoff)
+        )
+      );
+    return result.rowCount ?? 0;
+  }
+
+  /**
    * Retrieves active summary counts (live, approaching, recently finished, stale prematch)
    * by evaluating candidate database fixtures through AcquisitionPolicyEngine.
    */
   async getActiveSummary(now: Date = new Date()): Promise<FixturesSummary> {
+    // Automatically sweep and clean up any ancient LIVE fixtures without external calls
+    await this.reconcileExpiredLiveFixtures(now);
+
     const candidateFixtures = await db.query.fixtures.findMany({
       where: or(
         and(

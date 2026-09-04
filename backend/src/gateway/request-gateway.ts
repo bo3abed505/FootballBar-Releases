@@ -65,8 +65,45 @@ export class RequestGateway {
       if (!budget) {
         throw new Error(`[REQUEST_GATEWAY] Failed to initialize daily budget for provider: ${provider}`);
       }
-      const consumed = budget.consumed_calls;
-      const remaining = budget.remaining_calls;
+      let consumed = budget.consumed_calls;
+      let remaining = budget.remaining_calls;
+
+      // Self-heal budget if consumed_calls diverged from ledger due to midnight rollover lag
+      if (consumed > 10) {
+        const ledgerTodayRes = await client.query(
+          `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed
+           FROM api_request_ledger
+           WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
+          [provider]
+        );
+        const ledgerConsumed = parseInt(ledgerTodayRes.rows[0]?.ledger_consumed || '0', 10);
+
+        if (consumed - ledgerConsumed > 10) {
+          const ledgerYesterdayRes = await client.query(
+            `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed_yesterday
+             FROM api_request_ledger
+             WHERE provider = $1
+               AND requested_at >= ((NOW() AT TIME ZONE 'UTC')::date - INTERVAL '1 day')
+               AND requested_at < (NOW() AT TIME ZONE 'UTC')::date`,
+            [provider]
+          );
+          const ledgerYesterday = parseInt(ledgerYesterdayRes.rows[0]?.ledger_consumed_yesterday || '0', 10);
+
+          if (ledgerYesterday > 0 && Math.abs((consumed - ledgerConsumed) - ledgerYesterday) <= 10) {
+            consumed = ledgerConsumed;
+            remaining = Math.max(0, RequestGateway.HARD_DAILY_LIMIT - consumed);
+            await client.query(
+              `UPDATE provider_daily_budget
+               SET consumed_calls = $1,
+                   remaining_calls = $2,
+                   is_exhausted = false,
+                   updated_at = NOW()
+               WHERE id = $3`,
+              [consumed, remaining, budget.id]
+            );
+          }
+        }
+      }
 
       // 3. Evaluate daily limits
       if (priority === 'NORMAL' && consumed >= RequestGateway.OPERATIONAL_DAILY_LIMIT) {
@@ -202,6 +239,37 @@ export class RequestGateway {
     try {
       await client.query('BEGIN');
       const safeReported = Math.max(0, Math.min(RequestGateway.HARD_DAILY_LIMIT, providerReportedRemaining));
+
+      // Midnight rollover lag protection:
+      // In API-Football, server-side rate limit cache takes 2-5 minutes after 00:00:00 UTC to reset.
+      // If the provider reports remaining quota that implies heavy consumption (>10 calls above local ledger)
+      // while yesterday had heavy consumption matching the discrepancy, this is a lagging pre-reset header.
+      const ledgerTodayRes = await client.query(
+        `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed
+         FROM api_request_ledger
+         WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
+        [provider]
+      );
+      const ledgerConsumedToday = parseInt(ledgerTodayRes.rows[0]?.ledger_consumed || '0', 10);
+      const impliedConsumedToday = RequestGateway.HARD_DAILY_LIMIT - safeReported;
+
+      if (impliedConsumedToday - ledgerConsumedToday > 10) {
+        const ledgerYesterdayRes = await client.query(
+          `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed_yesterday
+           FROM api_request_ledger
+           WHERE provider = $1
+             AND requested_at >= ((NOW() AT TIME ZONE 'UTC')::date - INTERVAL '1 day')
+             AND requested_at < (NOW() AT TIME ZONE 'UTC')::date`,
+          [provider]
+        );
+        const ledgerYesterday = parseInt(ledgerYesterdayRes.rows[0]?.ledger_consumed_yesterday || '0', 10);
+
+        if (ledgerYesterday > 0 && Math.abs((impliedConsumedToday - ledgerConsumedToday) - ledgerYesterday) <= 10) {
+          // Ignore lagging pre-reset header across midnight rollover
+          await client.query('ROLLBACK');
+          return;
+        }
+      }
 
       await client.query(
         `UPDATE provider_daily_budget
@@ -430,15 +498,55 @@ export class RequestGateway {
       );
 
       const row = budgetRes.rows[0];
+      let consumedDaily = row ? row.consumed_calls : 0;
+      let remainingDaily = row ? row.remaining_calls : RequestGateway.HARD_DAILY_LIMIT;
+
+      // Self-heal budget in diagnostics if consumed_calls diverged from ledger due to midnight rollover lag
+      if (row && consumedDaily > 10) {
+        const ledgerTodayRes = await this.pool.query(
+          `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed
+           FROM api_request_ledger
+           WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
+          [provider]
+        );
+        const ledgerConsumed = parseInt(ledgerTodayRes.rows[0]?.ledger_consumed || '0', 10);
+
+        if (consumedDaily - ledgerConsumed > 10) {
+          const ledgerYesterdayRes = await this.pool.query(
+            `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed_yesterday
+             FROM api_request_ledger
+             WHERE provider = $1
+               AND requested_at >= ((NOW() AT TIME ZONE 'UTC')::date - INTERVAL '1 day')
+               AND requested_at < (NOW() AT TIME ZONE 'UTC')::date`,
+            [provider]
+          );
+          const ledgerYesterday = parseInt(ledgerYesterdayRes.rows[0]?.ledger_consumed_yesterday || '0', 10);
+
+          if (ledgerYesterday > 0 && Math.abs((consumedDaily - ledgerConsumed) - ledgerYesterday) <= 10) {
+            consumedDaily = ledgerConsumed;
+            remainingDaily = Math.max(0, RequestGateway.HARD_DAILY_LIMIT - consumedDaily);
+            await this.pool.query(
+              `UPDATE provider_daily_budget
+               SET consumed_calls = $1,
+                   remaining_calls = $2,
+                   is_exhausted = false,
+                   updated_at = NOW()
+               WHERE provider = $3 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+              [consumedDaily, remainingDaily, provider]
+            );
+          }
+        }
+      }
+
       const minuteCount = parseInt(countRes.rows[0]?.cnt || '0', 10);
       const lastReq = lastReqRes.rows[0]?.requested_at;
 
       return {
         provider,
         allocatedDaily: row ? row.allocated_calls : RequestGateway.HARD_DAILY_LIMIT,
-        consumedDaily: row ? row.consumed_calls : 0,
-        remainingDaily: row ? row.remaining_calls : RequestGateway.HARD_DAILY_LIMIT,
-        isExhausted: row ? row.is_exhausted : false,
+        consumedDaily,
+        remainingDaily,
+        isExhausted: remainingDaily <= 0,
         operationalLimit: RequestGateway.OPERATIONAL_DAILY_LIMIT,
         hardLimit: RequestGateway.HARD_DAILY_LIMIT,
         minuteCeiling: RequestGateway.MINUTE_CEILING,

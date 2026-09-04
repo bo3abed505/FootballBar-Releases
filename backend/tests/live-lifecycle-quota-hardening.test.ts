@@ -5,6 +5,7 @@ import { SyncService } from '../src/acquisition/sync.service.js';
 import { AcquisitionPolicyEngine, FixturesSummary, BudgetContext } from '../src/acquisition/acquisition-policy.js';
 import { FixturesRepository } from '../src/repositories/fixtures.repository.js';
 import { FootballProvider, ProviderFixture, ProviderEvent } from '../src/providers/football-provider.js';
+import { RequestGateway } from '../src/gateway/request-gateway.js';
 
 describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
   const TEST_COMP_ID = 'comp_m16_5';
@@ -499,6 +500,183 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       const budget: BudgetContext = { consumedDaily: 10, remainingDaily: 90 };
       const interval = AcquisitionPolicyEngine.calculateLivePollingInterval(budget.remainingDaily);
       expect(interval).toBe(180_000); // 180s (3m)
+    });
+
+    it('13. reconcileExpiredLiveFixtures transitions ancient LIVE fixtures to FINISHED locally without external calls', async () => {
+      const ancientKickoff = new Date(Date.now() - 5 * 60 * 60 * 1000); // 5 hours ago
+      await db.insert(schema.fixtures).values({
+        id: FIXTURE_ANCIENT,
+        competitionId: TEST_COMP_ID,
+        seasonId: TEST_SEASON_ID,
+        homeTeamId: TEST_HOME_ID,
+        awayTeamId: TEST_AWAY_ID,
+        kickoffTime: ancientKickoff,
+        state: 'LIVE',
+      });
+
+      const repo = new FixturesRepository();
+      const sweptCount = await repo.reconcileExpiredLiveFixtures();
+      expect(sweptCount).toBeGreaterThanOrEqual(1);
+
+      const check = await db.query.fixtures.findFirst({
+        where: eq(schema.fixtures.id, FIXTURE_ANCIENT),
+      });
+      expect(check?.state).toBe('FINISHED');
+    });
+
+    it('14. getActiveSummary sweeps stale LIVE rows so liveCount is 0 and idle is evaluated', async () => {
+      const ancientKickoff = new Date(Date.now() - 10 * 60 * 60 * 1000); // 10 hours ago
+      await db.insert(schema.fixtures).values({
+        id: FIXTURE_OLD,
+        competitionId: TEST_COMP_ID,
+        seasonId: TEST_SEASON_ID,
+        homeTeamId: TEST_HOME_ID,
+        awayTeamId: TEST_AWAY_ID,
+        kickoffTime: ancientKickoff,
+        state: 'LIVE',
+      });
+
+      const repo = new FixturesRepository();
+      const summary = await repo.getActiveSummary();
+      expect(summary.liveCount).toBe(0);
+
+      // Verify row in DB is now FINISHED
+      const check = await db.query.fixtures.findFirst({
+        where: eq(schema.fixtures.id, FIXTURE_OLD),
+      });
+      expect(check?.state).toBe('FINISHED');
+    });
+
+    it('15. Genuinely live match (within 3.5h) is not swept and increments liveCount', async () => {
+      const recentKickoff = new Date(Date.now() - 45 * 60 * 1000); // 45 minutes ago
+      await db.insert(schema.fixtures).values({
+        id: FIXTURE_RECENT,
+        competitionId: TEST_COMP_ID,
+        seasonId: TEST_SEASON_ID,
+        homeTeamId: TEST_HOME_ID,
+        awayTeamId: TEST_AWAY_ID,
+        kickoffTime: recentKickoff,
+        state: 'LIVE',
+      });
+
+      const repo = new FixturesRepository();
+      const summary = await repo.getActiveSummary();
+      expect(summary.liveCount).toBe(1);
+
+      const check = await db.query.fixtures.findFirst({
+        where: eq(schema.fixtures.id, FIXTURE_RECENT),
+      });
+      expect(check?.state).toBe('LIVE');
+    });
+
+    it('16. RequestGateway ignores lagging pre-reset headers across midnight rollover', async () => {
+      const gateway = new RequestGateway(pool);
+      const testProvider = 'test_rollover_lag_provider';
+
+      // Clean up test provider records
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // Seed yesterday's ledger with 77 requests
+      for (let i = 0; i < 5; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, http_status, success, cost_units, response_time_ms, requested_at
+           ) VALUES ($1, $2, '/fixtures', 'test', 'NORMAL', 200, true, 15, 120, (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '2 hours')`,
+          [`ledg_yesterday_${i}`, testProvider]
+        );
+      }
+      // Plus 2 single requests = 77 total cost units yesterday
+      await pool.query(
+        `INSERT INTO api_request_ledger (
+           id, provider, endpoint, operation, priority, http_status, success, cost_units, response_time_ms, requested_at
+         ) VALUES ('ledg_yesterday_5', $1, '/fixtures', 'test', 'NORMAL', 200, true, 2, 120, (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '2 hours')`,
+        [testProvider]
+      );
+
+      // Seed today's ledger with 6 requests
+      for (let i = 0; i < 6; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, http_status, success, cost_units, response_time_ms, requested_at
+           ) VALUES ($1, $2, '/fixtures', 'test', 'NORMAL', 200, true, 1, 120, NOW())`,
+          [`ledg_today_${i}`, testProvider]
+        );
+      }
+
+      // Initialize today's budget with 6 consumed, 94 remaining
+      await pool.query(
+        `INSERT INTO provider_daily_budget (
+           id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
+         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 6, 94, false, NOW())`,
+        [`budget_${testProvider}_today`, testProvider]
+      );
+
+      // Provider returns 17 remaining (reflecting 77 yesterday + 6 today = 83 consumed, lag before reset)
+      await (gateway as any).reconcileQuota(testProvider, 17);
+
+      // Budget should IGNORE the lagging header and remain at 6 consumed, 94 remaining
+      const check = await pool.query(
+        `SELECT consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(check.rows[0].consumed_calls).toBe(6);
+      expect(check.rows[0].remaining_calls).toBe(94);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+    });
+
+    it('17. RequestGateway self-heals budget row polluted by rollover lag in diagnostics and reservation', async () => {
+      const gateway = new RequestGateway(pool);
+      const testProvider = 'test_self_heal_provider';
+
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // Seed yesterday's ledger with 77 requests
+      await pool.query(
+        `INSERT INTO api_request_ledger (
+           id, provider, endpoint, operation, priority, http_status, success, cost_units, response_time_ms, requested_at
+         ) VALUES ('ledg_heal_yest', $1, '/fixtures', 'test', 'NORMAL', 200, true, 77, 120, (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '2 hours')`,
+        [testProvider]
+      );
+
+      // Seed today's ledger with 6 requests
+      for (let i = 0; i < 6; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, http_status, success, cost_units, response_time_ms, requested_at
+           ) VALUES ($1, $2, '/fixtures', 'test', 'NORMAL', 200, true, 1, 120, NOW())`,
+          [`ledg_heal_today_${i}`, testProvider]
+        );
+      }
+
+      // Seed polluted budget: 83 consumed, 17 remaining
+      await pool.query(
+        `INSERT INTO provider_daily_budget (
+           id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
+         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, 100, 83, 17, false, NOW())`,
+        [`budget_${testProvider}_today`, testProvider]
+      );
+
+      // getDiagnostics should self-heal and return 6 consumed, 94 remaining
+      const diag = await gateway.getDiagnostics(testProvider);
+      expect(diag.consumedDaily).toBe(6);
+      expect(diag.remainingDaily).toBe(94);
+
+      // Verify the row in PostgreSQL is also healed
+      const check = await pool.query(
+        `SELECT consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(check.rows[0].consumed_calls).toBe(6);
+      expect(check.rows[0].remaining_calls).toBe(94);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
     });
   });
 });
