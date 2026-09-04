@@ -785,13 +785,13 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
     });
 
-    it('19. Schedule discovery marks today as known, prevents hourly rediscovery loops, and rediscovers upon invalidation', async () => {
+    it('19. Part E Regression: UTC date = 2026-09-04 empty schedule discovery persists across cycles and backend restarts', async () => {
       await db.delete(schema.events);
       await db.delete(schema.fixtures);
+      await pool.query(`DELETE FROM api_request_ledger WHERE endpoint LIKE '%2026-09-04%'`);
 
-      const repo = new FixturesRepository();
-      const todayStr = new Date().toISOString().slice(0, 10);
-      repo.invalidateSchedule(todayStr);
+      const testDate = new Date('2026-09-04T12:00:00.000Z');
+      const todayStr = '2026-09-04';
 
       let discoverCallCount = 0;
       const mockProvider: FootballProvider = {
@@ -800,7 +800,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
         getFixtures: async (filter) => {
           const count = filter?.competitionIds?.length ?? 1;
           discoverCallCount += count;
-          return []; // Empty schedule today (0 fixtures returned)
+          return []; // Empty schedule today: returns ZERO fixtures for all 6 competitions
         },
         getFixtureDetails: async () => null,
         getFixtureEvents: async () => [],
@@ -808,11 +808,16 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       };
 
       const syncService = new SyncService(mockProvider);
+      const repo = new FixturesRepository();
+      // Ensure clean initial state for today
+      await repo.invalidateSchedule(todayStr);
+
       const scheduler = new AcquisitionScheduler({
         syncService,
         fixturesRepository: repo,
         providerName: 'mock_discovery_provider',
         targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        nowFn: () => testDate,
         getBudgetContext: async () => ({
           allocatedDaily: 100,
           consumedDaily: 0,
@@ -821,26 +826,351 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
         }),
       });
 
-      // Cycle 1: Schedule is not yet discovered for today
+      // Cycle 1:
+      // * DISCOVER_SCHEDULE
+      // * six provider requests
+      // * successful
+      // * marks date discovered
       const cycle1 = await scheduler.executeSingleCycle();
       expect(cycle1.plan.action).toBe('DISCOVER_SCHEDULE');
-      expect(discoverCallCount).toBe(6); // Called once per competition
+      expect(discoverCallCount).toBe(6); // exactly 6 provider requests
       expect(repo.isScheduleDiscovered(todayStr)).toBe(true);
 
-      // Cycle 2: Schedule is already known for today -> must NOT rediscover, action must be IDLE
+      // Cycle 2:
+      // * must NOT DISCOVER_SCHEDULE
+      // * zero provider calls
       const cycle2 = await scheduler.executeSingleCycle();
       expect(cycle2.plan.action).toBe('IDLE');
-      expect(discoverCallCount).toBe(6); // Still 6, no additional provider calls generated!
+      expect(discoverCallCount).toBe(6); // zero new calls
 
-      // Explicit invalidation triggers rediscovery
-      repo.invalidateSchedule(todayStr);
-      expect(repo.isScheduleDiscovered(todayStr)).toBe(false);
-
-      // Cycle 3: After invalidation, rediscovery occurs legitimately
+      // Cycle 3:
+      // * must NOT DISCOVER_SCHEDULE
+      // * zero provider calls
       const cycle3 = await scheduler.executeSingleCycle();
-      expect(cycle3.plan.action).toBe('DISCOVER_SCHEDULE');
-      expect(discoverCallCount).toBe(12); // Ran discovery again
-      expect(repo.isScheduleDiscovered(todayStr)).toBe(true);
+      expect(cycle3.plan.action).toBe('IDLE');
+      expect(discoverCallCount).toBe(6); // zero new calls
+
+      // Simulated backend restart / new repository instance:
+      // * date must still be known
+      // * zero discovery calls
+      const restartRepo = new FixturesRepository();
+      const restartScheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: restartRepo,
+        providerName: 'mock_discovery_provider',
+        targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        nowFn: () => testDate,
+        getBudgetContext: async () => ({
+          allocatedDaily: 100,
+          consumedDaily: 6,
+          remainingDaily: 94,
+          isExhausted: false,
+        }),
+      });
+
+      const restartCycle = await restartScheduler.executeSingleCycle();
+      expect(restartCycle.plan.action).toBe('IDLE');
+      expect(discoverCallCount).toBe(6); // zero discovery calls on restart!
+      expect(restartRepo.isScheduleDiscovered(todayStr)).toBe(true);
+
+      // Explicit invalidation:
+      // * discovery may run again
+      // * six calls maximum
+      await restartRepo.invalidateSchedule(todayStr);
+      expect(restartRepo.isScheduleDiscovered(todayStr)).toBe(false);
+
+      const invalidationCycle = await restartScheduler.executeSingleCycle();
+      expect(invalidationCycle.plan.action).toBe('DISCOVER_SCHEDULE');
+      expect(discoverCallCount).toBe(12); // exactly six calls on rediscovery (6 + 6 = 12)
+      expect(restartRepo.isScheduleDiscovered(todayStr)).toBe(true);
+    });
+
+    it('20. Explicit UTC Boundary & Cairo UTC+3 Rollover: verifies strict UTC midnight boundaries and exact two-batch rollover sequence', async () => {
+      const testProvider = 'api_football';
+      const gateway = new RequestGateway(pool);
+
+      // 1. Configure session timezone to Africa/Cairo (UTC+3)
+      await pool.query("SET TIME ZONE 'Africa/Cairo'");
+
+      // Clean test ledger and budget
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // 2. Insert edge timestamp: 2026-09-03T23:59:59Z (Sept 3 in UTC, but 02:59:59 Sept 4 in Cairo!)
+      await pool.query(
+        `INSERT INTO api_request_ledger (
+           id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+         ) VALUES ($1, $2, '/fixtures?date=2026-09-03', 'get_fixtures', 'NORMAL', true, 200, 50, 1, '2026-09-03 23:59:59+00')`,
+        ['ledg_edge_sept3', testProvider]
+      );
+
+      // Seed 76 more yesterday entries so yesterday total = 77
+      for (let i = 1; i <= 76; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+           ) VALUES ($1, $2, '/fixtures?date=2026-09-03', 'get_fixtures', 'NORMAL', true, 200, 50, 1, '2026-09-03 20:00:00+00')`,
+          [`ledg_yesterday_${i}`, testProvider]
+        );
+      }
+
+      // 3. Insert first timestamp of today: 2026-09-04T00:00:01Z (Sept 4 in UTC)
+      await pool.query(
+        `INSERT INTO api_request_ledger (
+           id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+         ) VALUES ($1, $2, '/fixtures?date=2026-09-04', 'get_fixtures', 'NORMAL', true, 200, 50, 1, '2026-09-04 00:00:01+00')`,
+        ['ledg_edge_sept4', testProvider]
+      );
+
+      // Verify UTC boundary query in RequestGateway
+      const { startOfTodayUtc, startOfTomorrowUtc, startOfYesterdayUtc } = RequestGateway.getUtcDayBoundaries(new Date('2026-09-04T00:30:00Z'));
+
+      const yesterdayRes = await pool.query(
+        `SELECT COUNT(*)::int as cnt FROM api_request_ledger WHERE provider = $1 AND requested_at >= $2 AND requested_at < $3`,
+        [testProvider, startOfYesterdayUtc, startOfTodayUtc]
+      );
+      expect(yesterdayRes.rows[0].cnt).toBe(77); // 76 + 1 edge timestamp at 23:59:59Z
+
+      const todayRes = await pool.query(
+        `SELECT COUNT(*)::int as cnt FROM api_request_ledger WHERE provider = $1 AND requested_at >= $2 AND requested_at < $3`,
+        [testProvider, startOfTodayUtc, startOfTomorrowUtc]
+      );
+      expect(todayRes.rows[0].cnt).toBe(1); // strictly 1 row for today so far
+
+      // 4. Now execute the exact production scenario:
+      // Clean ledger to test the two batches cleanly
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // Seed exactly 77 rows for yesterday
+      for (let i = 1; i <= 77; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+           ) VALUES ($1, $2, '/fixtures?date=2026-09-03', 'get_fixtures', 'NORMAL', true, 200, 50, 1, '2026-09-03 21:00:00+00')`,
+          [`ledg_prod_y_${i}`, testProvider]
+        );
+      }
+
+      // Batch 1 on 2026-09-04: 6 calls with stale provider headers 22..17
+      const staleHeaders = [22, 21, 20, 19, 18, 17];
+      for (let i = 0; i < 6; i++) {
+        const slot = await gateway.reserveSlot(testProvider, `/fixtures?date=2026-09-04&league=${i+1}`, 'get_fixtures', 'NORMAL');
+        expect(slot.allowed).toBe(true);
+
+        await gateway.finalizeLedgerAndReconcile(
+          slot.ledgerId!,
+          testProvider,
+          200,
+          100,
+          true,
+          staleHeaders[i], // stale remaining header from yesterday
+          10
+        );
+      }
+
+      // After Batch 1: today consumed must be 6, remaining must be 94 (stale headers 22..17 rejected!)
+      const diagAfterBatch1 = await gateway.getDiagnostics(testProvider);
+      expect(diagAfterBatch1.consumedDaily).toBe(6);
+      expect(diagAfterBatch1.remainingDaily).toBe(94);
+
+      // In production, Batch 2 occurred ~57 minutes after Batch 1 (00:00 UTC vs 00:57 UTC).
+      // Age Batch 1 ledger timestamps to 57 minutes ago so the 8/min rate limiter window is clear.
+      await pool.query(
+        `UPDATE api_request_ledger
+         SET requested_at = NOW() - INTERVAL '57 minutes'
+         WHERE provider = $1 AND requested_at >= $2`,
+        [testProvider, startOfTodayUtc]
+      );
+
+      // Batch 2 on 2026-09-04: 6 calls with correct provider headers 93..88
+      const correctHeaders = [93, 92, 91, 90, 89, 88];
+      for (let i = 0; i < 6; i++) {
+        const slot = await gateway.reserveSlot(testProvider, `/fixtures?date=2026-09-04&league=${i+10}`, 'get_fixtures', 'NORMAL');
+        expect(slot.allowed).toBe(true);
+
+        await gateway.finalizeLedgerAndReconcile(
+          slot.ledgerId!,
+          testProvider,
+          200,
+          100,
+          true,
+          correctHeaders[i], // correct new-day remaining header
+          10
+        );
+      }
+
+      // After Batch 2: today consumed must be exactly 12, remaining must be exactly 88!
+      const diagAfterBatch2 = await gateway.getDiagnostics(testProvider);
+      expect(diagAfterBatch2.consumedDaily).toBe(12);
+      expect(diagAfterBatch2.remainingDaily).toBe(88);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+      await pool.query("SET TIME ZONE 'UTC'");
+    });
+
+    it('21. Integrated Combined Regression: UTC+3, prior-day usage, empty schedule, stale headers, hourly wake, and stale LIVE cleanup', async () => {
+      const testProvider = 'api_football';
+      const gateway = new RequestGateway(pool);
+      const testDate = new Date('2026-09-04T00:30:00.000Z');
+
+      // 1. UTC+3 Environment
+      await pool.query("SET TIME ZONE 'Africa/Cairo'");
+
+      // Reset state
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      const repo = new FixturesRepository();
+      const todayStr = '2026-09-04';
+      await repo.invalidateSchedule(todayStr);
+
+      // 2. Previous-day provider activity (77 calls on Sept 3)
+      for (let i = 1; i <= 77; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
+           ) VALUES ($1, $2, '/fixtures?date=2026-09-03', 'get_fixtures', 'NORMAL', true, 200, 50, 1, '2026-09-03 21:00:00+00')`,
+          [`ledg_comb_prev_${i}`, testProvider]
+        );
+      }
+
+      // 3. Stale LIVE fixture (kickoff 6 hours ago on Sept 3)
+      await db.insert(schema.competitions).values({
+        id: 'comp_comb_1',
+        name: 'Combined Comp',
+        code: 'CC1',
+        country: 'England',
+      }).onConflictDoNothing();
+
+      await db.insert(schema.competitionSeasons).values({
+        id: 'season_comb_1',
+        competitionId: 'comp_comb_1',
+        year: 2026,
+        displayYear: '2026',
+        startDate: new Date('2025-08-01'),
+        endDate: new Date('2026-05-31'),
+      }).onConflictDoNothing();
+
+      await db.insert(schema.teams).values([
+        { id: 'team_comb_h', name: 'Home Comb', shortName: 'HC' },
+        { id: 'team_comb_a', name: 'Away Comb', shortName: 'AC' },
+      ]).onConflictDoNothing();
+
+      await db.insert(schema.fixtures).values({
+        id: 'fix_ancient_live_comb',
+        competitionId: 'comp_comb_1',
+        seasonId: 'season_comb_1',
+        homeTeamId: 'team_comb_h',
+        awayTeamId: 'team_comb_a',
+        kickoffTime: new Date('2026-09-03T18:30:00.000Z'),
+        state: 'LIVE',
+        elapsedMinute: 90,
+      });
+
+      // 4. Provider setup: returns 0 fixtures (empty day), routes through RequestGateway
+      let actualProviderCalls = 0;
+      const staleHeaders = [22, 21, 20, 19, 18, 17];
+      const mockProvider: FootballProvider = {
+        providerName: testProvider,
+        getCompetitions: async () => [],
+        getFixtures: async (filter) => {
+          const comps = filter?.competitionIds ?? [1, 2, 3, 4, 5, 6];
+          for (let i = 0; i < comps.length; i++) {
+            actualProviderCalls++;
+            const slot = await gateway.reserveSlot(testProvider, `/fixtures?date=2026-09-04&league=${comps[i]}`, 'get_fixtures', 'NORMAL');
+            await gateway.finalizeLedgerAndReconcile(
+              slot.ledgerId!,
+              testProvider,
+              200,
+              50,
+              true,
+              staleHeaders[i % staleHeaders.length],
+              10
+            );
+          }
+          return []; // Empty schedule today
+        },
+        getFixtureDetails: async () => null,
+        getFixtureEvents: async () => [],
+        getStandings: async () => [],
+      };
+
+      const syncService = new SyncService(mockProvider);
+
+      const scheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: repo,
+        providerName: testProvider,
+        targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        nowFn: () => testDate,
+        getBudgetContext: async () => {
+          const diag = await gateway.getDiagnostics(testProvider);
+          return {
+            allocatedDaily: diag.allocatedDaily,
+            consumedDaily: diag.consumedDaily,
+            remainingDaily: diag.remainingDaily,
+            isExhausted: diag.isExhausted,
+          };
+        },
+      });
+
+      // Cycle 1: Schedule discovery runs (6 calls)
+      const cycle1 = await scheduler.executeSingleCycle();
+      expect(cycle1.plan.action).toBe('DISCOVER_SCHEDULE');
+      expect(actualProviderCalls).toBe(6);
+
+      // Invariant Check 1 & 2:
+      // Today's ledger count = 6, provider budget consumed = 6, remaining = 94 (stale headers 22..17 ignored!)
+      const diag1 = await gateway.getDiagnostics(testProvider);
+      expect(diag1.consumedDaily).toBe(6);
+      expect(diag1.remainingDaily).toBe(94);
+
+      // Invariant Check 3:
+      // Stale LIVE fixture was automatically swept to FINISHED without external call
+      const ancientFix = await db.query.fixtures.findFirst({
+        where: eq(schema.fixtures.id, 'fix_ancient_live_comb'),
+      });
+      expect(ancientFix?.state).toBe('FINISHED');
+
+      // Cycle 2 (second hourly wake): must be IDLE, ZERO provider calls generated!
+      const cycle2 = await scheduler.executeSingleCycle();
+      expect(cycle2.plan.action).toBe('IDLE');
+      expect(actualProviderCalls).toBe(6); // strictly zero additional provider calls!
+
+      // Simulated process restart / cold instance
+      const restartRepo = new FixturesRepository();
+      const restartScheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: restartRepo,
+        providerName: testProvider,
+        targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        nowFn: () => testDate,
+        getBudgetContext: async () => {
+          const diag = await gateway.getDiagnostics(testProvider);
+          return {
+            allocatedDaily: diag.allocatedDaily,
+            consumedDaily: diag.consumedDaily,
+            remainingDaily: diag.remainingDaily,
+            isExhausted: diag.isExhausted,
+          };
+        },
+      });
+
+      const restartCycle = await restartScheduler.executeSingleCycle();
+      expect(restartCycle.plan.action).toBe('IDLE');
+      expect(actualProviderCalls).toBe(6); // strictly zero calls on restart!
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+      await pool.query("SET TIME ZONE 'UTC'");
     });
   });
 });

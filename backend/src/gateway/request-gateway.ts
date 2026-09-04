@@ -27,6 +27,26 @@ export class RequestGateway {
   }
 
   /**
+   * Computes deterministic, type-safe UTC date and timestamp boundaries.
+   * Prevents database session timezones (e.g. Africa/Cairo UTC+3) from misinterpreting
+   * UTC midnight when comparing TIMESTAMPTZ columns.
+   */
+  public static getUtcDayBoundaries(date: Date = new Date()): {
+    todayStr: string;
+    yesterdayStr: string;
+    startOfTodayUtc: Date;
+    startOfTomorrowUtc: Date;
+    startOfYesterdayUtc: Date;
+  } {
+    const todayStr = date.toISOString().slice(0, 10);
+    const startOfTodayUtc = new Date(todayStr + 'T00:00:00.000Z');
+    const startOfTomorrowUtc = new Date(startOfTodayUtc.getTime() + 24 * 60 * 60 * 1000);
+    const startOfYesterdayUtc = new Date(startOfTodayUtc.getTime() - 24 * 60 * 60 * 1000);
+    const yesterdayStr = startOfYesterdayUtc.toISOString().slice(0, 10);
+    return { todayStr, yesterdayStr, startOfTodayUtc, startOfTomorrowUtc, startOfYesterdayUtc };
+  }
+
+  /**
    * Transactionally reserves a single request quota slot against PostgreSQL.
    * Enforces daily operational/hard budget limits and the 8 requests/minute sliding window.
    * Releases all database locks immediately upon reservation completion.
@@ -41,35 +61,37 @@ export class RequestGateway {
     try {
       await client.query('BEGIN');
 
-      // 1. Ensure daily budget row exists for today (evaluated in UTC)
+      const { todayStr, startOfTodayUtc, startOfTomorrowUtc, startOfYesterdayUtc } = RequestGateway.getUtcDayBoundaries();
+
+      // 1. Ensure daily budget row exists for today (evaluated in explicit UTC)
       const budgetId = `budget_${provider}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       await client.query(
         `INSERT INTO provider_daily_budget (
            id, provider, budget_date, allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
-         ) VALUES ($1, $2, (NOW() AT TIME ZONE 'UTC')::date, $3, 0, $3, false, NOW())
+         ) VALUES ($1, $2, $3, $4, 0, $4, false, NOW())
          ON CONFLICT (provider, budget_date) DO NOTHING`,
-        [budgetId, provider, RequestGateway.HARD_DAILY_LIMIT]
+        [budgetId, provider, todayStr, RequestGateway.HARD_DAILY_LIMIT]
       );
 
       // 2. Lock the budget row for update
       const budgetRes = await client.query(
         `SELECT id, allocated_calls, consumed_calls, remaining_calls, is_exhausted
          FROM provider_daily_budget
-         WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date
+         WHERE provider = $1 AND budget_date = $2
          FOR UPDATE`,
-        [provider]
+        [provider, todayStr]
       );
 
       const budget = budgetRes.rows[0];
       if (!budget) {
         throw new Error(`[REQUEST_GATEWAY] Failed to initialize daily budget for provider: ${provider}`);
       }
-      // Query authoritative ledger ground truth for today
+      // Query authoritative ledger ground truth for today (bounded strictly within [startOfTodayUtc, startOfTomorrowUtc))
       const ledgerTodayRes = await client.query(
         `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed
          FROM api_request_ledger
-         WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
-        [provider]
+         WHERE provider = $1 AND requested_at >= $2 AND requested_at < $3`,
+        [provider, startOfTodayUtc, startOfTomorrowUtc]
       );
       const ledgerConsumed = parseInt(ledgerTodayRes.rows[0]?.ledger_consumed || '0', 10);
 
@@ -85,9 +107,9 @@ export class RequestGateway {
           `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed_yesterday
            FROM api_request_ledger
            WHERE provider = $1
-             AND requested_at >= ((NOW() AT TIME ZONE 'UTC')::date - INTERVAL '1 day')
-             AND requested_at < (NOW() AT TIME ZONE 'UTC')::date`,
-          [provider]
+             AND requested_at >= $2
+             AND requested_at < $3`,
+          [provider, startOfYesterdayUtc, startOfTodayUtc]
         );
         const ledgerYesterday = parseInt(ledgerYesterdayRes.rows[0]?.ledger_consumed_yesterday || '0', 10);
         if (ledgerYesterday > 0 && Math.abs((budget.consumed_calls - ledgerConsumed) - ledgerYesterday) <= 15) {
@@ -251,13 +273,14 @@ export class RequestGateway {
     try {
       await client.query('BEGIN');
       const safeReported = Math.max(0, Math.min(RequestGateway.HARD_DAILY_LIMIT, providerReportedRemaining));
+      const { todayStr, startOfTodayUtc, startOfTomorrowUtc, startOfYesterdayUtc } = RequestGateway.getUtcDayBoundaries();
 
-      // Query authoritative ground truth from today's ledger
+      // Query authoritative ground truth from today's ledger (strictly bounded to UTC day)
       const ledgerTodayRes = await client.query(
         `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed
          FROM api_request_ledger
-         WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
-        [provider]
+         WHERE provider = $1 AND requested_at >= $2 AND requested_at < $3`,
+        [provider, startOfTodayUtc, startOfTomorrowUtc]
       );
       const ledgerConsumedToday = parseInt(ledgerTodayRes.rows[0]?.ledger_consumed || '0', 10);
       const impliedConsumedToday = RequestGateway.HARD_DAILY_LIMIT - safeReported;
@@ -270,9 +293,9 @@ export class RequestGateway {
           `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed_yesterday
            FROM api_request_ledger
            WHERE provider = $1
-             AND requested_at >= ((NOW() AT TIME ZONE 'UTC')::date - INTERVAL '1 day')
-             AND requested_at < (NOW() AT TIME ZONE 'UTC')::date`,
-          [provider]
+             AND requested_at >= $2
+             AND requested_at < $3`,
+          [provider, startOfYesterdayUtc, startOfTodayUtc]
         );
         const ledgerYesterday = parseInt(ledgerYesterdayRes.rows[0]?.ledger_consumed_yesterday || '0', 10);
 
@@ -292,8 +315,8 @@ export class RequestGateway {
                  remaining_calls = $2,
                  is_exhausted = ($2 <= 0),
                  updated_at = NOW()
-             WHERE provider = $3 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
-            [ledgerConsumedToday, authRemaining, provider]
+             WHERE provider = $3 AND budget_date = $4`,
+            [ledgerConsumedToday, authRemaining, provider, todayStr]
           );
         }
         await client.query('COMMIT');
@@ -309,8 +332,8 @@ export class RequestGateway {
                remaining_calls = $2,
                is_exhausted = ($2 <= 0),
                updated_at = NOW()
-           WHERE provider = $3 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
-          [ledgerConsumedToday, authRemaining, provider]
+           WHERE provider = $3 AND budget_date = $4`,
+          [ledgerConsumedToday, authRemaining, provider, todayStr]
         );
       } else {
         // For test providers / generic providers:
@@ -321,8 +344,8 @@ export class RequestGateway {
                consumed_calls = GREATEST(consumed_calls, $2 - LEAST(remaining_calls, $1)),
                is_exhausted = (LEAST(remaining_calls, $1) <= 0),
                updated_at = NOW()
-           WHERE provider = $3 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
-          [safeReported, RequestGateway.HARD_DAILY_LIMIT, provider]
+           WHERE provider = $3 AND budget_date = $4`,
+          [safeReported, RequestGateway.HARD_DAILY_LIMIT, provider, todayStr]
         );
       }
 
@@ -519,11 +542,13 @@ export class RequestGateway {
     minuteWindowReservations: number;
   }> {
     try {
+      const { todayStr, startOfTodayUtc, startOfTomorrowUtc } = RequestGateway.getUtcDayBoundaries();
+
       const budgetRes = await this.pool.query(
         `SELECT allocated_calls, consumed_calls, remaining_calls, is_exhausted, updated_at
          FROM provider_daily_budget
-         WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
-        [provider]
+         WHERE provider = $1 AND budget_date = $2`,
+        [provider, todayStr]
       );
 
       const countRes = await this.pool.query(
@@ -544,12 +569,12 @@ export class RequestGateway {
 
       const row = budgetRes.rows[0];
 
-      // Query authoritative ground truth from today's ledger
+      // Query authoritative ground truth from today's ledger (strictly bounded to UTC day)
       const ledgerTodayRes = await this.pool.query(
         `SELECT COALESCE(SUM(cost_units), 0)::int as ledger_consumed
          FROM api_request_ledger
-         WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
-        [provider]
+         WHERE provider = $1 AND requested_at >= $2 AND requested_at < $3`,
+        [provider, startOfTodayUtc, startOfTomorrowUtc]
       );
       const ledgerConsumed = parseInt(ledgerTodayRes.rows[0]?.ledger_consumed || '0', 10);
 

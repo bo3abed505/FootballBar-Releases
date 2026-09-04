@@ -12,7 +12,7 @@
  *   - Never contains provider-specific logic, direct fetch, or hard-coded cadence thresholds.
  */
 
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, lt } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   AcquisitionPolicyEngine,
@@ -79,19 +79,21 @@ async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
  */
 export async function getDatabaseBudgetContext(provider = 'api_football'): Promise<BudgetContext> {
   const todayStr = new Date().toISOString().slice(0, 10);
+  const startOfDay = new Date(todayStr + 'T00:00:00.000Z');
+  const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
   // Authoritative daily accounting: query today's ledger for real ground truth
   try {
-    const startOfDay = new Date(todayStr + 'T00:00:00.000Z');
     const ledgerToday = await db.query.apiRequestLedger.findMany({
       where: and(
         eq(schema.apiRequestLedger.provider, provider),
-        gte(schema.apiRequestLedger.requestedAt, startOfDay)
+        gte(schema.apiRequestLedger.requestedAt, startOfDay),
+        lt(schema.apiRequestLedger.requestedAt, endOfDay)
       ),
       columns: { costUnits: true },
     });
-    const ledgerConsumed = ledgerToday.reduce((acc, r) => acc + (r.costUnits || 1), 0);
-    if (ledgerConsumed > 0) {
+    const ledgerConsumed = ledgerToday.reduce((acc, r) => acc + (r.costUnits ?? 1), 0);
+    if (ledgerConsumed > 0 || provider === 'api_football') {
       const remaining = Math.max(0, 100 - ledgerConsumed);
       return {
         allocatedDaily: 100,
@@ -291,7 +293,7 @@ export class AcquisitionScheduler {
 
         if (plan.action === 'DISCOVER_SCHEDULE') {
           if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
-            this.fixturesRepo.markScheduleDiscovered(todayDateStr);
+            await this.fixturesRepo.markScheduleDiscovered(todayDateStr);
           }
         }
 

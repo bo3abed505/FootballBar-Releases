@@ -1,4 +1,4 @@
-import { eq, desc, or, and, gte, lte, inArray, lt } from 'drizzle-orm';
+import { eq, desc, or, and, gte, lte, inArray, lt, like } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
 
@@ -99,24 +99,60 @@ export class FixturesRepository {
 
   /**
    * Marks schedule discovery as completed for a given UTC date string (YYYY-MM-DD).
+   * Persists a durable discovery record in api_request_ledger (0 cost units).
    */
-  markScheduleDiscovered(dateStr: string): void {
+  async markScheduleDiscovered(dateStr: string): Promise<void> {
     this.invalidatedDates.delete(dateStr);
     this.discoveredDates.add(dateStr);
+
+    try {
+      await db.insert(schema.apiRequestLedger).values({
+        id: `disc_${dateStr}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        provider: 'system',
+        endpoint: `/schedule?date=${dateStr}`,
+        operation: 'DISCOVER_SCHEDULE',
+        priority: 'NORMAL',
+        success: true,
+        httpStatus: 200,
+        responseTimeMs: 0,
+        costUnits: 0,
+        requestedAt: new Date(),
+      }).onConflictDoNothing();
+    } catch {
+      // Fallback gracefully if ledger write fails
+    }
   }
 
   /**
    * Explicitly invalidates schedule discovery state for a date (or all dates).
    * Forces next scheduler cycle to perform a discovery cycle.
    */
-  invalidateSchedule(dateStr?: string): void {
-    if (dateStr) {
-      this.discoveredDates.delete(dateStr);
-      this.invalidatedDates.add(dateStr);
-    } else {
-      this.discoveredDates.clear();
-      const today = new Date().toISOString().slice(0, 10);
-      this.invalidatedDates.add(today);
+  async invalidateSchedule(dateStr?: string): Promise<void> {
+    const targetDate = dateStr ?? new Date().toISOString().slice(0, 10);
+    this.discoveredDates.delete(targetDate);
+    this.invalidatedDates.add(targetDate);
+
+    try {
+      const startOfDay = new Date(targetDate + 'T00:00:00.000Z');
+      const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+      await db
+        .update(schema.apiRequestLedger)
+        .set({ success: false, errorMessage: 'SCHEDULE_INVALIDATED' })
+        .where(
+          and(
+            gte(schema.apiRequestLedger.requestedAt, startOfDay),
+            lt(schema.apiRequestLedger.requestedAt, nextDay),
+            or(
+              eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE'),
+              and(
+                eq(schema.apiRequestLedger.operation, 'get_fixtures'),
+                like(schema.apiRequestLedger.endpoint, `%date=${targetDate}%`)
+              )
+            )
+          )
+        );
+    } catch {
+      // Fallback gracefully if database update fails
     }
   }
 
@@ -194,11 +230,19 @@ export class FixturesRepository {
     if (!scheduleKnownForToday && !this.invalidatedDates.has(todayUtcPrefix)) {
       try {
         const startOfDay = new Date(todayUtcPrefix + 'T00:00:00.000Z');
+        const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
         const pastDiscovery = await db.query.apiRequestLedger.findFirst({
           where: and(
-            eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE'),
             eq(schema.apiRequestLedger.success, true),
-            gte(schema.apiRequestLedger.requestedAt, startOfDay)
+            gte(schema.apiRequestLedger.requestedAt, startOfDay),
+            lt(schema.apiRequestLedger.requestedAt, nextDay),
+            or(
+              eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE'),
+              and(
+                eq(schema.apiRequestLedger.operation, 'get_fixtures'),
+                like(schema.apiRequestLedger.endpoint, `%date=${todayUtcPrefix}%`)
+              )
+            )
           ),
         });
         if (pastDiscovery) {
