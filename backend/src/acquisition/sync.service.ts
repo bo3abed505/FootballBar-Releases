@@ -378,22 +378,22 @@ export class SyncService {
   /**
    * Synchronizes active live matches (consolidated single query).
    */
-  async syncLive(competitionIds?: number[]): Promise<SyncSummary> {
-    return this.sync({ liveOnly: true, competitionIds });
+  async syncLive(competitionIds?: number[], cycleId?: string): Promise<SyncSummary> {
+    return this.sync({ liveOnly: true, competitionIds, cycleId });
   }
 
   /**
    * Synchronizes daily match schedule for a specific date across target competitions.
    */
-  async syncSchedule(date: string, competitionIds?: number[]): Promise<SyncSummary> {
-    return this.sync({ date, competitionIds });
+  async syncSchedule(date: string, competitionIds?: number[], cycleId?: string): Promise<SyncSummary> {
+    return this.sync({ date, competitionIds, cycleId });
   }
 
   /**
    * Finalizes recently finished matches to capture final score and events.
    * Directly fetches fixture details for recently finished matches (bounded).
    */
-  async finalizeRecentlyFinished(competitionIds?: (string | number)[]): Promise<SyncSummary> {
+  async finalizeRecentlyFinished(competitionIds?: (string | number)[], cycleId?: string): Promise<SyncSummary> {
     const summary: SyncSummary = {
       provider: this.provider.providerName,
       fixturesDiscovered: 0,
@@ -425,7 +425,7 @@ export class SyncService {
 
     for (const fix of candidates) {
       try {
-        const details = await this.provider.getFixtureDetails(fix.id);
+        const details = await this.provider.getFixtureDetails(fix.id, cycleId);
         if (details) {
           await db
             .update(schema.fixtures)
@@ -481,7 +481,7 @@ export class SyncService {
   /**
    * Recovers stale prematch fixtures to check for postponement/cancellation.
    */
-  async recoverStale(options?: { date?: string; competitionIds?: number[] } | number[]): Promise<SyncSummary> {
+  async recoverStale(options?: { date?: string; competitionIds?: number[]; cycleId?: string } | number[], cycleId?: string): Promise<SyncSummary> {
     if (Array.isArray(options)) {
       if (options.length === 0) {
         return {
@@ -495,7 +495,7 @@ export class SyncService {
         };
       }
       const todayStr = new Date().toISOString().slice(0, 10);
-      return this.sync({ date: todayStr, competitionIds: options });
+      return this.sync({ date: todayStr, competitionIds: options, cycleId });
     }
 
     if (options?.competitionIds && options.competitionIds.length === 0) {
@@ -511,7 +511,7 @@ export class SyncService {
     }
 
     const todayStr = options?.date ?? new Date().toISOString().slice(0, 10);
-    return this.sync({ date: todayStr, competitionIds: options?.competitionIds });
+    return this.sync({ date: todayStr, competitionIds: options?.competitionIds, cycleId: options?.cycleId ?? cycleId });
   }
 
   /**
@@ -520,20 +520,21 @@ export class SyncService {
    */
   async syncWithPlan(
     plan: import('./acquisition-policy.js').SyncPlan,
-    options?: { date?: string; competitionIds?: number[] }
+    options?: { date?: string; competitionIds?: number[]; cycleId?: string }
   ): Promise<SyncSummary | null> {
     switch (plan.action) {
       case 'POLL_LIVE':
-        return this.syncLive(options?.competitionIds);
+        return this.syncLive(options?.competitionIds, options?.cycleId);
       case 'DISCOVER_SCHEDULE':
         return this.syncSchedule(
           options?.date ?? new Date().toISOString().slice(0, 10),
-          options?.competitionIds
+          options?.competitionIds,
+          options?.cycleId
         );
       case 'FINALIZE':
-        return this.finalizeRecentlyFinished(options?.competitionIds);
+        return this.finalizeRecentlyFinished(options?.competitionIds, options?.cycleId);
       case 'RECOVER_STALE':
-        return this.recoverStale(options);
+        return this.recoverStale(options, options?.cycleId);
       case 'IDLE':
       default:
         return null;

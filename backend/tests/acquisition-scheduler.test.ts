@@ -24,6 +24,16 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
     hasChanges: true,
   });
 
+  const createMockCyclesRepo = () => ({
+    generateCycleId: () => 'cycle_mock_test',
+    createCycle: vi.fn().mockResolvedValue({}),
+    finalizeCycle: vi.fn().mockResolvedValue({}),
+    recoverInterruptedCycles: vi.fn().mockResolvedValue(0),
+    getLatestCycle: vi.fn().mockResolvedValue(null),
+    getCorrelatedRequestStats: vi.fn().mockResolvedValue({ requestsCount: 0, requestsCost: 0 }),
+    pruneIdleCycles: vi.fn().mockResolvedValue(0),
+  });
+
   // ============================================================
   // 1. Lifecycle: start(), stop(), isRunning()
   // ============================================================
@@ -401,6 +411,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       const scheduler = new AcquisitionScheduler({
         syncService: mockSyncService,
         fixturesRepository: mockRepo,
+        schedulerCyclesRepository: createMockCyclesRepo() as any,
         getBudgetContext: async () => ({ consumedDaily: 10, remainingDaily: 90 }),
         logger: silentLogger,
       });
@@ -457,6 +468,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       const scheduler = new AcquisitionScheduler({
         syncService: mockSyncService,
         fixturesRepository: mockRepo,
+        schedulerCyclesRepository: createMockCyclesRepo() as any,
         getBudgetContext: async () => ({ consumedDaily: 10, remainingDaily: 90 }),
         sleepFn: customSleep,
         onError: (err) => {

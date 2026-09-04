@@ -72,29 +72,29 @@ export class AcquisitionService {
   /**
    * Acquires active live matches (consolidated single provider query).
    */
-  async acquireLive(competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
-    return this.acquireAll({ liveOnly: true, competitionIds });
+  async acquireLive(competitionIds?: number[], cycleId?: string): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ liveOnly: true, competitionIds, cycleId });
   }
 
   /**
    * Acquires full match schedule for a specific date across target competitions.
    */
-  async acquireScheduled(date: string, competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
-    return this.acquireAll({ date, competitionIds });
+  async acquireScheduled(date: string, competitionIds?: number[], cycleId?: string): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ date, competitionIds, cycleId });
   }
 
   /**
    * Acquires finalization data for recently completed matches.
    */
-  async acquireFinalization(competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
-    return this.acquireAll({ liveOnly: true, competitionIds });
+  async acquireFinalization(competitionIds?: number[], cycleId?: string): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ liveOnly: true, competitionIds, cycleId });
   }
 
   /**
    * Acquires updated status for stale prematch fixtures to check for postponement/cancellation.
    */
-  async acquireStaleRecovery(competitionIds?: number[]): Promise<NormalizedAcquisitionBatch> {
-    return this.acquireAll({ competitionIds });
+  async acquireStaleRecovery(competitionIds?: number[], cycleId?: string): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ competitionIds, cycleId });
   }
 }
 

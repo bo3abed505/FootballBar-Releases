@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, date, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, boolean, timestamp, date, jsonb, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // ----------------------------------------------------
@@ -229,9 +229,11 @@ export const acquisitionJobs = pgTable('acquisition_jobs', {
 // ----------------------------------------------------
 export const apiRequestLedger = pgTable('api_request_ledger', {
   id: text('id').primaryKey(),
+  cycleId: text('cycle_id'),
+  competitionId: text('competition_id'),
   provider: text('provider').default('api_football').notNull(),
   endpoint: text('endpoint').notNull(),
-  operation: text('operation').default('query').notNull(),
+  operation: text('operation').default('unknown').notNull(),
   priority: text('priority').default('NORMAL').notNull(), // NORMAL, CRITICAL
   success: boolean('success').default(true).notNull(),
   httpStatus: integer('http_status').notNull(),
@@ -244,6 +246,34 @@ export const apiRequestLedger = pgTable('api_request_ledger', {
 }, (table) => [
   index('ledger_requested_at_idx').on(table.requestedAt),
   index('ledger_provider_requested_idx').on(table.provider, table.requestedAt),
+  index('ledger_cycle_id_idx').on(table.cycleId),
+  index('ledger_competition_id_idx').on(table.competitionId),
+]);
+
+// ----------------------------------------------------
+// 12b. Scheduler Cycles
+// ----------------------------------------------------
+export const schedulerCycles = pgTable('scheduler_cycles', {
+  id: text('id').primaryKey(),
+  action: text('action').notNull(),
+  priority: text('priority').default('NORMAL').notNull(),
+  reason: text('reason').notNull(),
+  targetCompetitionIds: jsonb('target_competition_ids').$type<number[]>(),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  durationMs: integer('duration_ms'),
+  outcome: text('outcome'), // IDLE, SUCCESS, NO_OP, ERROR, QUOTA_BLOCKED, RATE_LIMITED (NULL while uncompleted)
+  providerRequestsCount: integer('provider_requests_count').default(0).notNull(),
+  providerRequestsCost: integer('provider_requests_cost').default(0).notNull(),
+  errorType: text('error_type'),
+  errorMessage: text('error_message'),
+  fixturesDiscovered: integer('fixtures_discovered').default(0).notNull(),
+  fixturesUpdated: integer('fixtures_updated').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('scheduler_cycles_started_idx').on(table.startedAt),
+  index('scheduler_cycles_action_idx').on(table.action, table.startedAt),
+  index('scheduler_cycles_pruning_idx').on(table.outcome, table.startedAt),
 ]);
 
 // ----------------------------------------------------

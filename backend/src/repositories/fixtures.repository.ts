@@ -117,13 +117,14 @@ export class FixturesRepository {
    * Marks schedule discovery as completed for a given UTC date string (YYYY-MM-DD).
    * Persists a durable discovery record in api_request_ledger (0 cost units, provider='system').
    */
-  async markScheduleDiscovered(dateStr: string, now: Date = new Date()): Promise<void> {
+  async markScheduleDiscovered(dateStr: string, now: Date = new Date(), cycleId?: string): Promise<void> {
     this.invalidatedDates.delete(dateStr);
     this.discoveredDates.add(dateStr);
 
     try {
       await db.insert(schema.apiRequestLedger).values({
         id: `disc_${dateStr}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        cycleId: cycleId ?? null,
         provider: 'system',
         endpoint: `/schedule?date=${dateStr}`,
         operation: 'DISCOVER_SCHEDULE',
@@ -145,7 +146,7 @@ export class FixturesRepository {
    * Forces next scheduler cycle to perform a discovery cycle even across restarts,
    * while completely preserving immutable historical provider audit logs.
    */
-  async invalidateSchedule(dateStr?: string, now: Date = new Date()): Promise<void> {
+  async invalidateSchedule(dateStr?: string, now: Date = new Date(), cycleId?: string): Promise<void> {
     const targetDate = dateStr ?? now.toISOString().slice(0, 10);
     this.discoveredDates.delete(targetDate);
     this.invalidatedDates.add(targetDate);
@@ -153,6 +154,7 @@ export class FixturesRepository {
     try {
       await db.insert(schema.apiRequestLedger).values({
         id: `inval_${targetDate}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        cycleId: cycleId ?? null,
         provider: 'system',
         endpoint: `/schedule?date=${targetDate}`,
         operation: 'INVALIDATE_SCHEDULE',

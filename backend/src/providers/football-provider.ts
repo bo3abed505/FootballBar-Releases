@@ -109,6 +109,7 @@ export interface FixtureFilter {
   competitionIds?: number[];
   date?: string;
   liveOnly?: boolean;
+  cycleId?: string;
 }
 
 /**
@@ -118,7 +119,7 @@ export interface FootballProvider {
   readonly providerName: string;
   getCompetitions(): Promise<ProviderCompetition[]>;
   getFixtures(filter?: FixtureFilter): Promise<ProviderFixture[]>;
-  getFixtureDetails(fixtureId: string): Promise<ProviderFixtureDetail | null>;
+  getFixtureDetails(fixtureId: string, cycleId?: string): Promise<ProviderFixtureDetail | null>;
   getFixtureEvents(fixtureId: string): Promise<ProviderEvent[]>;
   getStandings(competitionId: string, seasonYear: number): Promise<ProviderStanding[]>;
 }

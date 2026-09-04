@@ -15,6 +15,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const dbStatus = await checkDatabaseConnection();
     const scheduler: any = (fastify as any).scheduler;
     const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
+    const gateway = new RequestGateway();
+    const quotaDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
 
     return reply.status(200).send({
       status: 'ok',
@@ -23,13 +25,17 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       timestamp: new Date().toISOString(),
       version: '1.0.0',
       provider: process.env.FOOTBALL_PROVIDER || 'mock',
+      quotaMode: quotaDiag.mode,
+      quotaRemaining: quotaDiag.remainingDaily,
       scheduler: schedulerDiag
         ? {
             running: schedulerDiag.running,
+            lastCycleAction: schedulerDiag.lastCycleAction,
             lastCycleOutcome: schedulerDiag.lastCycleOutcome,
           }
         : {
             running: false,
+            lastCycleAction: null,
             lastCycleOutcome: null,
           },
       uptimeSeconds: Math.round(process.uptime()),
@@ -42,7 +48,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.get('/api/diagnostics', async (request, reply) => {
     const dbStatus = await checkDatabaseConnection();
     const gateway = new RequestGateway();
-    const budgetDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
+    const quotaDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
     const scheduler: any = (fastify as any).scheduler;
     const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
 
@@ -62,17 +68,27 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         connected: dbStatus.connected,
         latencyMs: dbStatus.latencyMs,
       },
+      quota: quotaDiag,
+      budget: quotaDiag, // backward compatibility alias
       scheduler: schedulerDiag ?? {
         running: false,
         executingCycle: false,
+        currentState: 'STOPPED',
         lastCycleAt: null,
         lastCycleAction: null,
         lastCycleDurationMs: null,
         lastCycleOutcome: null,
         consecutiveErrors: 0,
         nextRecommendedWakeAt: null,
+        nextPlannedAction: null,
+        lastCycle: null,
+        milestones: {
+          lastSuccessfulDiscovery: { cycleId: null, timestamp: null, date: null },
+          lastScheduleInvalidation: null,
+          lastLivePoll: null,
+          lastStaleRecovery: null,
+        },
       },
-      budget: budgetDiag,
       timestamp: new Date().toISOString(),
     });
   });

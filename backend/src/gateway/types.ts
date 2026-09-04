@@ -7,6 +7,8 @@ export interface GatewayRequestOptions {
   priority?: RequestPriority; // default 'NORMAL'
   timeoutMs?: number; // default 10000
   maxRetries?: number; // default 0 (explicit retries managed if specified)
+  cycleId?: string;
+  competitionId?: string;
 }
 
 export interface GatewayResponse<T = any> {

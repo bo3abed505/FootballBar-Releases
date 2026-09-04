@@ -33,10 +33,12 @@ export class ApiFootballProvider implements FootballProvider {
   }
 
   async getFixtures(filter?: FixtureFilter): Promise<ProviderFixture[]> {
+    const cycleId = filter?.cycleId;
+
     // --- Path 1: liveOnly with an allowlist ---
     // Use the single cheap "live=all" endpoint and post-filter in memory.
     if (filter?.liveOnly) {
-      const response = await this.client.getFixtures({ live: 'all' });
+      const response = await this.client.getFixtures({ live: 'all' }, 'NORMAL', cycleId);
       if (!response.success || !response.data?.response) {
         return [];
       }
@@ -59,7 +61,7 @@ export class ApiFootballProvider implements FootballProvider {
         const response = await this.client.getFixtures({
           league: numericLeagueId,
           date: dateStr,
-        });
+        }, 'NORMAL', cycleId, numericLeagueId.toString());
         if (!response.success || !response.data?.response) {
           // Log and continue — a single competition failure should not abort all others.
           continue;
@@ -81,7 +83,7 @@ export class ApiFootballProvider implements FootballProvider {
     const response = await this.client.getFixtures({
       league: isNaN(leagueId as any) ? undefined : leagueId,
       date: dateStr,
-    });
+    }, 'NORMAL', cycleId, leagueId ? leagueId.toString() : undefined);
 
     if (!response.success || !response.data?.response) {
       return [];
@@ -91,11 +93,11 @@ export class ApiFootballProvider implements FootballProvider {
   }
 
 
-  async getFixtureDetails(fixtureId: string): Promise<ProviderFixtureDetail | null> {
+  async getFixtureDetails(fixtureId: string, cycleId?: string): Promise<ProviderFixtureDetail | null> {
     const numericId = parseInt(fixtureId.replace(/^fix_/, ''), 10);
     if (isNaN(numericId)) return null;
 
-    const response = await this.client.getFixtures({ id: numericId });
+    const response = await this.client.getFixtures({ id: numericId }, 'NORMAL', cycleId);
     if (!response.success || !response.data?.response || response.data.response.length === 0) {
       return null;
     }

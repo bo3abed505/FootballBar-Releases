@@ -34,7 +34,9 @@ export class ApiFootballClient {
   private async executeRequest<T>(
     endpoint: string,
     operation: string,
-    priority: RequestPriority = 'NORMAL'
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string,
+    competitionId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<T>>> {
     const url = `${this.baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
@@ -44,6 +46,8 @@ export class ApiFootballClient {
         endpoint,
         operation,
         priority,
+        cycleId,
+        competitionId,
       },
       async () => {
         const response = await this.fetchFn(url, {
@@ -64,13 +68,14 @@ export class ApiFootballClient {
     );
   }
 
-  async getStatus(priority: RequestPriority = 'NORMAL'): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballStatusResponse>>> {
-    return this.executeRequest<ApiFootballStatusResponse>('/status', 'status_probe', priority);
+  async getStatus(priority: RequestPriority = 'NORMAL', cycleId?: string): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballStatusResponse>>> {
+    return this.executeRequest<ApiFootballStatusResponse>('/status', 'status_probe', priority, cycleId);
   }
 
   async getLeagues(
     params?: { id?: number; current?: boolean; season?: number },
-    priority: RequestPriority = 'NORMAL'
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballLeagueItem[]>>> {
     const query = new URLSearchParams();
     if (params?.id) query.set('id', params.id.toString());
@@ -79,12 +84,14 @@ export class ApiFootballClient {
 
     const qs = query.toString();
     const endpoint = `/leagues${qs ? `?${qs}` : ''}`;
-    return this.executeRequest<ApiFootballLeagueItem[]>(endpoint, 'get_leagues', priority);
+    return this.executeRequest<ApiFootballLeagueItem[]>(endpoint, 'get_leagues', priority, cycleId, params?.id ? params.id.toString() : undefined);
   }
 
   async getFixtures(
     params: { id?: number; date?: string; league?: number; season?: number; live?: string },
-    priority: RequestPriority = 'NORMAL'
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string,
+    competitionId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
     const query = new URLSearchParams();
     if (params.id) query.set('id', params.id.toString());
@@ -95,15 +102,17 @@ export class ApiFootballClient {
 
     const qs = query.toString();
     const endpoint = `/fixtures${qs ? `?${qs}` : ''}`;
-    return this.executeRequest<ApiFootballFixtureItem[]>(endpoint, 'get_fixtures', priority);
+    const effectiveCompId = competitionId ?? (params.league ? params.league.toString() : undefined);
+    return this.executeRequest<ApiFootballFixtureItem[]>(endpoint, 'get_fixtures', priority, cycleId, effectiveCompId);
   }
 
   async getStandings(
     league: number,
     season: number,
-    priority: RequestPriority = 'NORMAL'
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballStandingItem[]>>> {
     const endpoint = `/standings?league=${league}&season=${season}`;
-    return this.executeRequest<ApiFootballStandingItem[]>(endpoint, 'get_standings', priority);
+    return this.executeRequest<ApiFootballStandingItem[]>(endpoint, 'get_standings', priority, cycleId, league.toString());
   }
 }

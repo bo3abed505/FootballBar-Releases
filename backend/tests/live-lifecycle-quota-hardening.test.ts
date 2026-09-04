@@ -809,8 +809,8 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
       const syncService = new SyncService(mockProvider);
       const repo = new FixturesRepository();
-      // Ensure clean initial state for today
-      await repo.invalidateSchedule(todayStr);
+      // Ensure clean initial state for today (timestamped before testDate)
+      await repo.invalidateSchedule(todayStr, new Date(testDate.getTime() - 60000));
 
       const scheduler = new AcquisitionScheduler({
         syncService,
@@ -1166,7 +1166,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       expect(actualProviderCalls).toBe(6); // strictly zero calls on restart!
 
       // Cleanup
-      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
       await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
       await db.delete(schema.events);
       await db.delete(schema.fixtures);
@@ -1182,7 +1182,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       // Reset test state
       await db.delete(schema.events);
       await db.delete(schema.fixtures);
-      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
       await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
 
       // 1. Seed the exact three prior discovery batches from production (18 calls total)

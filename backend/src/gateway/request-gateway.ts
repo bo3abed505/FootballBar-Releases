@@ -55,7 +55,9 @@ export class RequestGateway {
     provider: string,
     endpoint: string,
     operation: string,
-    priority: 'NORMAL' | 'CRITICAL'
+    priority: 'NORMAL' | 'CRITICAL',
+    cycleId?: string,
+    competitionId?: string
   ): Promise<ReservationResult> {
     const client = await this.pool.connect();
     try {
@@ -184,9 +186,9 @@ export class RequestGateway {
 
       await client.query(
         `INSERT INTO api_request_ledger (
-           id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at
-         ) VALUES ($1, $2, $3, $4, $5, false, 0, 0, 1, NOW())`,
-        [ledgerId, provider, cleanEndpoint, operation, priority]
+           id, provider, endpoint, operation, priority, success, http_status, response_time_ms, cost_units, requested_at, cycle_id, competition_id
+         ) VALUES ($1, $2, $3, $4, $5, false, 0, 0, 1, NOW(), $6, $7)`,
+        [ledgerId, provider, cleanEndpoint, operation, priority, cycleId ?? null, competitionId ?? null]
       );
 
       // 6. Update consumed / remaining calls in budget
@@ -376,13 +378,27 @@ export class RequestGateway {
 
     while (attempt <= maxRetries) {
       // 1. Acquire reservation slot
-      let reservation = await this.reserveSlot(provider, options.endpoint, options.operation, priority);
+      let reservation = await this.reserveSlot(
+        provider,
+        options.endpoint,
+        options.operation,
+        priority,
+        options.cycleId,
+        options.competitionId
+      );
 
       // If minute rate limited, wait outside transaction and retry
       if (!reservation.allowed && reservation.reason === 'MINUTE_RATE_LIMIT' && reservation.waitMs) {
         if (reservation.waitMs < 65000) {
           await new Promise((res) => setTimeout(res, reservation.waitMs));
-          reservation = await this.reserveSlot(provider, options.endpoint, options.operation, priority);
+          reservation = await this.reserveSlot(
+            provider,
+            options.endpoint,
+            options.operation,
+            priority,
+            options.cycleId,
+            options.competitionId
+          );
         }
       }
 
@@ -531,15 +547,31 @@ export class RequestGateway {
    */
   async getDiagnostics(provider = 'api_football'): Promise<{
     provider: string;
+    mode: 'NORMAL' | 'APPROACHING_LIMIT' | 'RESERVE_MODE' | 'HARD_STOP';
     allocatedDaily: number;
     consumedDaily: number;
     remainingDaily: number;
     isExhausted: boolean;
     operationalLimit: number;
     hardLimit: number;
+    reserveLimit: number;
     minuteCeiling: number;
     lastRequestAt: string | null;
     minuteWindowReservations: number;
+    providerRequests: {
+      count: number;
+      cost: number;
+      byOperation: Record<string, number>;
+      byCompetition: Record<string, number>;
+    };
+    systemEvents: {
+      count: number;
+      cost: 0;
+      byMarker: {
+        DISCOVER_SCHEDULE: number;
+        INVALIDATE_SCHEDULE: number;
+      };
+    };
   }> {
     try {
       const { todayStr, startOfTodayUtc, startOfTomorrowUtc } = RequestGateway.getUtcDayBoundaries();
@@ -605,30 +637,117 @@ export class RequestGateway {
       const minuteCount = parseInt(countRes.rows[0]?.cnt || '0', 10);
       const lastReq = lastReqRes.rows[0]?.requested_at;
 
+      // Query breakdown of provider requests vs system events for today
+      const breakdownRes = await this.pool.query(
+        `SELECT provider, operation, competition_id, cost_units
+         FROM api_request_ledger
+         WHERE requested_at >= $1 AND requested_at < $2`,
+        [startOfTodayUtc, startOfTomorrowUtc]
+      );
+
+      const allRowsToday = breakdownRes.rows;
+      const providerRows = allRowsToday.filter(
+        (r: any) => r.provider === provider && (parseInt(r.cost_units, 10) || 0) > 0
+      );
+      const systemRows = allRowsToday.filter(
+        (r: any) => r.provider === 'system' || (parseInt(r.cost_units, 10) || 0) === 0
+      );
+
+      const providerOpBreakdown: Record<string, number> = {};
+      const providerCompBreakdown: Record<string, number> = {};
+
+      for (const r of providerRows) {
+        const op = r.operation || 'unknown';
+        providerOpBreakdown[op] = (providerOpBreakdown[op] || 0) + 1;
+
+        if (r.competition_id) {
+          const comp = String(r.competition_id);
+          providerCompBreakdown[comp] = (providerCompBreakdown[comp] || 0) + 1;
+        }
+      }
+
+      const systemMarkersBreakdown = {
+        DISCOVER_SCHEDULE: 0,
+        INVALIDATE_SCHEDULE: 0,
+      };
+
+      for (const r of systemRows) {
+        if (r.operation === 'DISCOVER_SCHEDULE') {
+          systemMarkersBreakdown.DISCOVER_SCHEDULE++;
+        } else if (r.operation === 'INVALIDATE_SCHEDULE') {
+          systemMarkersBreakdown.INVALIDATE_SCHEDULE++;
+        }
+      }
+
+      const providerCost = providerRows.reduce(
+        (acc: number, r: any) => acc + (parseInt(r.cost_units, 10) || 1),
+        0
+      );
+
+      let mode: 'NORMAL' | 'APPROACHING_LIMIT' | 'RESERVE_MODE' | 'HARD_STOP';
+      if (consumedDaily >= RequestGateway.HARD_DAILY_LIMIT) {
+        mode = 'HARD_STOP';
+      } else if (consumedDaily >= RequestGateway.OPERATIONAL_DAILY_LIMIT) {
+        mode = 'RESERVE_MODE';
+      } else if (consumedDaily >= 75) {
+        mode = 'APPROACHING_LIMIT';
+      } else {
+        mode = 'NORMAL';
+      }
+
       return {
         provider,
+        mode,
         allocatedDaily: row ? row.allocated_calls : RequestGateway.HARD_DAILY_LIMIT,
         consumedDaily,
         remainingDaily,
         isExhausted: remainingDaily <= 0,
         operationalLimit: RequestGateway.OPERATIONAL_DAILY_LIMIT,
         hardLimit: RequestGateway.HARD_DAILY_LIMIT,
+        reserveLimit: 10,
         minuteCeiling: RequestGateway.MINUTE_CEILING,
         lastRequestAt: lastReq ? new Date(lastReq).toISOString() : null,
         minuteWindowReservations: minuteCount,
+        providerRequests: {
+          count: providerRows.length,
+          cost: providerCost,
+          byOperation: providerOpBreakdown,
+          byCompetition: providerCompBreakdown,
+        },
+        systemEvents: {
+          count: systemRows.length,
+          cost: 0,
+          byMarker: systemMarkersBreakdown,
+        },
       };
     } catch {
       return {
         provider,
+        mode: 'NORMAL',
         allocatedDaily: RequestGateway.HARD_DAILY_LIMIT,
         consumedDaily: 0,
         remainingDaily: RequestGateway.HARD_DAILY_LIMIT,
         isExhausted: false,
         operationalLimit: RequestGateway.OPERATIONAL_DAILY_LIMIT,
         hardLimit: RequestGateway.HARD_DAILY_LIMIT,
+        reserveLimit: 10,
         minuteCeiling: RequestGateway.MINUTE_CEILING,
         lastRequestAt: null,
         minuteWindowReservations: 0,
+        providerRequests: {
+          count: 0,
+          cost: 0,
+          byOperation: {},
+          byCompetition: {},
+        },
+        systemEvents: {
+          count: 0,
+          cost: 0,
+          byMarker: {
+            DISCOVER_SCHEDULE: 0,
+            INVALIDATE_SCHEDULE: 0,
+          },
+        },
       };
     }
   }

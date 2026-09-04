@@ -12,7 +12,7 @@
  *   - Never contains provider-specific logic, direct fetch, or hard-coded cadence thresholds.
  */
 
-import { and, eq, gte, lt } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, or } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   AcquisitionPolicyEngine,
@@ -22,6 +22,11 @@ import {
 } from './acquisition-policy.js';
 import { SyncService, SyncSummary } from './sync.service.js';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
+import {
+  SchedulerCyclesRepository,
+  SchedulerCycleOutcome,
+  SchedulerErrorType,
+} from '../repositories/scheduler-cycles.repository.js';
 
 export interface SchedulerLogger {
   info(message: string, meta?: Record<string, unknown>): void;
@@ -29,20 +34,53 @@ export interface SchedulerLogger {
   error(message: string, meta?: Record<string, unknown>): void;
 }
 
+export interface SchedulerMilestones {
+  lastSuccessfulDiscovery: {
+    cycleId: string | null;
+    timestamp: string | null;
+    date: string | null;
+  };
+  lastScheduleInvalidation: {
+    cycleId: string | null;
+    timestamp: string | null;
+    reason: string | null;
+  } | null;
+  lastLivePoll: {
+    cycleId: string | null;
+    timestamp: string | null;
+    matchesUpdated: number;
+  } | null;
+  lastStaleRecovery: {
+    cycleId: string | null;
+    timestamp: string | null;
+    competitionsRecovered: number[];
+  } | null;
+}
+
 export interface SchedulerDiagnostics {
   running: boolean;
   executingCycle: boolean;
+  currentState: 'IDLE' | 'EXECUTING' | 'SLEEPING' | 'STOPPED';
   lastCycleAt: string | null;
   lastCycleAction: string | null;
   lastCycleDurationMs: number | null;
-  lastCycleOutcome: 'success' | 'error' | 'idle' | null;
+  lastCycleOutcome: SchedulerCycleOutcome | null;
   consecutiveErrors: number;
   nextRecommendedWakeAt: string | null;
+  nextPlannedAction: {
+    action: string;
+    cadenceMs: number | null;
+    wakeAt: string | null;
+    reason: string;
+  } | null;
+  lastCycle: any | null;
+  milestones: SchedulerMilestones;
 }
 
 export interface SchedulerDependencies {
   syncService: SyncService;
   fixturesRepository: FixturesRepository;
+  schedulerCyclesRepository?: SchedulerCyclesRepository;
   getBudgetContext?: (provider?: string, now?: Date) => Promise<BudgetContext>;
   nowFn?: () => Date;
   sleepFn?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -134,6 +172,7 @@ export async function getDatabaseBudgetContext(provider = 'api_football', now = 
 export class AcquisitionScheduler {
   private readonly syncService: SyncService;
   private readonly fixturesRepo: FixturesRepository;
+  private readonly cyclesRepo: SchedulerCyclesRepository;
   private readonly getBudget: (provider?: string, now?: Date) => Promise<BudgetContext>;
   private readonly now: () => Date;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -153,9 +192,26 @@ export class AcquisitionScheduler {
   private lastCycleAt: Date | null = null;
   private lastCycleAction: string | null = null;
   private lastCycleDurationMs: number | null = null;
-  private lastCycleOutcome: 'success' | 'error' | 'idle' | null = null;
+  private lastCycleOutcome: SchedulerCycleOutcome | null = null;
   private consecutiveErrors = 0;
   private nextRecommendedWakeAt: Date | null = null;
+  private nextPlannedAction: {
+    action: string;
+    cadenceMs: number | null;
+    wakeAt: string | null;
+    reason: string;
+  } | null = null;
+  private lastCycleRecord: any | null = null;
+  private milestones: SchedulerMilestones = {
+    lastSuccessfulDiscovery: {
+      cycleId: null,
+      timestamp: null,
+      date: null,
+    },
+    lastScheduleInvalidation: null,
+    lastLivePoll: null,
+    lastStaleRecovery: null,
+  };
 
   // Default fallback sleep when policy returns IDLE with no recommended delay (e.g., 5 minutes)
   static readonly DEFAULT_IDLE_DELAY_MS = 300_000;
@@ -165,6 +221,7 @@ export class AcquisitionScheduler {
   constructor(deps: SchedulerDependencies) {
     this.syncService = deps.syncService;
     this.fixturesRepo = deps.fixturesRepository;
+    this.cyclesRepo = deps.schedulerCyclesRepository ?? new SchedulerCyclesRepository();
     this.getBudget = deps.getBudgetContext ?? getDatabaseBudgetContext;
     this.now = deps.nowFn ?? (() => new Date());
     this.sleep = deps.sleepFn ?? defaultSleep;
@@ -180,18 +237,77 @@ export class AcquisitionScheduler {
   }
 
   /**
+   * Hydrates scheduler state, historical cycles, and milestones from PostgreSQL.
+   * Recovers any unfinished cycles left by an unexpected process restart.
+   */
+  async hydrateStateFromDatabase(): Promise<void> {
+    try {
+      // 1. Recover any unfinished cycles (completed_at IS NULL -> ERROR, CRASH_RECOVERED)
+      const recoveredCount = await this.cyclesRepo.recoverInterruptedCycles(this.now());
+      if (recoveredCount > 0) {
+        this.logger.warn(`Recovered ${recoveredCount} interrupted cycle(s) from previous process crash/restart.`);
+      }
+
+      // 2. Fetch latest cycle
+      const latest = await this.cyclesRepo.getLatestCycle();
+      if (latest) {
+        this.lastCycleRecord = latest;
+        this.lastCycleAt = new Date(latest.startedAt);
+        this.lastCycleAction = latest.action;
+        this.lastCycleDurationMs = latest.durationMs;
+        this.lastCycleOutcome = (latest.outcome as any) ?? null;
+      }
+
+      // 3. Hydrate milestones from database
+      const todayStr = this.now().toISOString().slice(0, 10);
+      const latestDiscovery = await this.cyclesRepo.getLatestSuccessfulDiscovery?.(this.now());
+      if (latestDiscovery) {
+        this.milestones.lastSuccessfulDiscovery = {
+          cycleId: latestDiscovery.cycleId ?? null,
+          timestamp: new Date(latestDiscovery.requestedAt).toISOString(),
+          date: todayStr,
+        };
+      }
+
+      const latestInvalidation = await this.cyclesRepo.getLatestScheduleInvalidation?.();
+      if (latestInvalidation) {
+        this.milestones.lastScheduleInvalidation = {
+          cycleId: latestInvalidation.cycleId ?? null,
+          timestamp: new Date(latestInvalidation.requestedAt).toISOString(),
+          reason: latestInvalidation.errorMessage ?? 'SCHEDULE_INVALIDATED',
+        };
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not hydrate scheduler state from database: ${err?.message}`);
+    }
+  }
+
+  /**
    * Returns a diagnostic snapshot of the scheduler.
    */
   getDiagnostics(): SchedulerDiagnostics {
+    let currentState: 'IDLE' | 'EXECUTING' | 'SLEEPING' | 'STOPPED' = 'IDLE';
+    if (!this.running) {
+      currentState = 'STOPPED';
+    } else if (this.executingCycle) {
+      currentState = 'EXECUTING';
+    } else if (this.nextRecommendedWakeAt && this.nextRecommendedWakeAt.getTime() > this.now().getTime()) {
+      currentState = 'SLEEPING';
+    }
+
     return {
       running: this.running,
       executingCycle: this.executingCycle,
+      currentState,
       lastCycleAt: this.lastCycleAt ? this.lastCycleAt.toISOString() : null,
       lastCycleAction: this.lastCycleAction,
       lastCycleDurationMs: this.lastCycleDurationMs,
       lastCycleOutcome: this.lastCycleOutcome,
       consecutiveErrors: this.consecutiveErrors,
       nextRecommendedWakeAt: this.nextRecommendedWakeAt ? this.nextRecommendedWakeAt.toISOString() : null,
+      nextPlannedAction: this.nextPlannedAction,
+      lastCycle: this.lastCycleRecord,
+      milestones: this.milestones,
     };
   }
 
@@ -262,6 +378,11 @@ export class AcquisitionScheduler {
 
     const startTime = Date.now();
     this.executingCycle = true;
+    let cycleId: string | undefined;
+    let plan: SyncPlan | undefined;
+    let syncSummary: SyncSummary | null = null;
+    let targetComps = this.targetCompetitionIds;
+
     try {
       const currentDate = this.now();
       const todayDateStr = currentDate.toISOString().slice(0, 10);
@@ -273,9 +394,25 @@ export class AcquisitionScheduler {
       const summary = await this.fixturesRepo.getActiveSummary(currentDate);
 
       // 3. Evaluate pure acquisition policy
-      const plan = AcquisitionPolicyEngine.evaluateSyncPlan(budget, summary, currentDate);
+      plan = AcquisitionPolicyEngine.evaluateSyncPlan(budget, summary, currentDate);
+
+      // 4. Generate cycleId and create record in DB (completed_at and outcome remain NULL in-flight)
+      cycleId = this.cyclesRepo.generateCycleId(currentDate);
+      try {
+        await this.cyclesRepo.createCycle({
+          id: cycleId,
+          action: plan.action,
+          priority: plan.priority,
+          reason: plan.reason,
+          targetCompetitionIds: targetComps,
+          startedAt: currentDate,
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to create scheduler cycle record in database: ${err?.message}`);
+      }
 
       this.logger.info(`Evaluated sync plan: ${plan.action}`, {
+        cycleId,
         action: plan.action,
         priority: plan.priority,
         recommendedNextPollMs: plan.recommendedNextPollMs,
@@ -283,22 +420,16 @@ export class AcquisitionScheduler {
         remainingBudget: budget.remainingDaily,
       });
 
-      // 4. Dispatch action via SyncService
-      let syncSummary: SyncSummary | null = null;
+      // 5. Dispatch action via SyncService
       if (plan.action !== 'IDLE') {
-        let targetComps = this.targetCompetitionIds;
-
         if (plan.action === 'RECOVER_STALE') {
           if (summary.staleCompetitionIds && summary.staleCompetitionIds.length > 0) {
             targetComps = summary.staleCompetitionIds.filter(
               (id) => !this.targetCompetitionIds || this.targetCompetitionIds.includes(id)
             );
           } else if (summary.staleCompetitionIds && summary.staleCompetitionIds.length === 0) {
-            // Safety: stale fixtures cannot be mapped to any target competitions,
-            // avoid issuing an unbounded 6-league query.
             targetComps = [];
           } else {
-            // summary.staleCompetitionIds was not provided (e.g. mocked in unit tests)
             targetComps = this.targetCompetitionIds;
           }
         }
@@ -310,16 +441,18 @@ export class AcquisitionScheduler {
           syncSummary = await this.syncService.syncWithPlan(plan, {
             date: todayDateStr,
             competitionIds: targetComps,
+            cycleId,
           });
         }
 
         if (plan.action === 'DISCOVER_SCHEDULE') {
           if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
-            await this.fixturesRepo.markScheduleDiscovered(todayDateStr, currentDate);
+            await this.fixturesRepo.markScheduleDiscovered(todayDateStr, currentDate, cycleId);
           }
         }
 
         this.logger.info(`Sync cycle completed for ${plan.action}`, {
+          cycleId,
           fixturesDiscovered: syncSummary?.fixturesDiscovered ?? 0,
           fixturesInserted: syncSummary?.fixturesInserted ?? 0,
           fixturesUpdated: syncSummary?.fixturesUpdated ?? 0,
@@ -329,22 +462,127 @@ export class AcquisitionScheduler {
         this.logger.info(`System idle: ${plan.reason}`);
       }
 
-      // Update diagnostic metrics
+      // 6. Determine final cycle outcome (strictly one of the 6 defined outcomes)
+      let outcome: SchedulerCycleOutcome;
+      if (plan.action === 'IDLE') {
+        if (budget.remainingDaily <= 10 || plan.reason.includes('reserve')) {
+          outcome = 'QUOTA_BLOCKED';
+        } else {
+          outcome = 'IDLE';
+        }
+      } else {
+        // Formal outcome semantics:
+        // - SUCCESS: Provider action completed successfully and resulted in meaningful domain/entity mutations (fixtures/events inserted or updated).
+        // - NO_OP: Provider action completed successfully but produced no meaningful domain/entity mutation.
+        //   (Note: NO_OP does NOT mean 'no database write occurred', because system markers and cycle records are written).
+        const hasMutations =
+          (syncSummary?.fixturesInserted ?? 0) > 0 ||
+          (syncSummary?.fixturesUpdated ?? 0) > 0 ||
+          (syncSummary?.eventsInserted ?? 0) > 0;
+        outcome = hasMutations ? 'SUCCESS' : 'NO_OP';
+      }
+
+      // 7. Finalize cycle in DB
+      let finalizedRecord = null;
+      try {
+        finalizedRecord = await this.cyclesRepo.finalizeCycle(cycleId, {
+          completedAt: this.now(),
+          durationMs: Date.now() - startTime,
+          outcome,
+          fixturesDiscovered: syncSummary?.fixturesDiscovered ?? 0,
+          fixturesUpdated: (syncSummary?.fixturesUpdated ?? 0) + (syncSummary?.fixturesInserted ?? 0),
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to finalize scheduler cycle in database: ${err?.message}`);
+      }
+
+      // 8. Update milestone metrics
+      if (plan.action === 'DISCOVER_SCHEDULE' && (outcome === 'SUCCESS' || outcome === 'NO_OP')) {
+        this.milestones.lastSuccessfulDiscovery = {
+          cycleId,
+          timestamp: currentDate.toISOString(),
+          date: todayDateStr,
+        };
+      } else if (plan.action === 'POLL_LIVE') {
+        this.milestones.lastLivePoll = {
+          cycleId,
+          timestamp: currentDate.toISOString(),
+          matchesUpdated: syncSummary?.fixturesUpdated ?? 0,
+        };
+      } else if (plan.action === 'RECOVER_STALE') {
+        this.milestones.lastStaleRecovery = {
+          cycleId,
+          timestamp: currentDate.toISOString(),
+          competitionsRecovered: targetComps ?? [],
+        };
+      }
+
+      // Update in-memory state metrics
       this.lastCycleAt = currentDate;
       this.lastCycleAction = plan.action;
       this.lastCycleDurationMs = Date.now() - startTime;
-      this.lastCycleOutcome = plan.action === 'IDLE' ? 'idle' : 'success';
+      this.lastCycleOutcome = outcome;
+      this.lastCycleRecord = finalizedRecord ?? {
+        id: cycleId,
+        action: plan.action,
+        priority: plan.priority,
+        reason: plan.reason,
+        targetCompetitionIds: targetComps,
+        startedAt: currentDate.toISOString(),
+        completedAt: this.now().toISOString(),
+        durationMs: Date.now() - startTime,
+        outcome,
+        providerRequestsCount: 0,
+        providerRequestsCost: 0,
+        errorType: null,
+        errorMessage: null,
+        fixturesDiscovered: syncSummary?.fixturesDiscovered ?? 0,
+        fixturesUpdated: (syncSummary?.fixturesUpdated ?? 0) + (syncSummary?.fixturesInserted ?? 0),
+      };
       this.consecutiveErrors = 0;
 
-      // 5. Notify cycle complete callback
+      // 9. Notify cycle complete callback
       this.onCycleComplete?.(plan, syncSummary);
 
       return { plan, summary: syncSummary };
     } catch (err: any) {
       this.consecutiveErrors++;
+      const durationMs = Date.now() - startTime;
       this.lastCycleAt = this.now();
-      this.lastCycleDurationMs = Date.now() - startTime;
-      this.lastCycleOutcome = 'error';
+      this.lastCycleDurationMs = durationMs;
+      this.lastCycleOutcome = 'ERROR';
+
+      // Classify error type
+      const errMsg = err?.message || String(err);
+      let errorType: SchedulerErrorType = 'PROVIDER_ERROR';
+      let outcome: SchedulerCycleOutcome = 'ERROR';
+
+      if (errMsg.includes('RATE_LIMIT') || errMsg.includes('MINUTE_CEILING')) {
+        errorType = 'RATE_LIMITED';
+        outcome = 'RATE_LIMITED';
+      } else if (errMsg.includes('BUDGET') || errMsg.includes('QUOTA') || errMsg.includes('EXHAUSTED')) {
+        errorType = 'QUOTA_EXHAUSTED';
+        outcome = 'QUOTA_BLOCKED';
+      } else if (errMsg.includes('database') || errMsg.includes('postgres') || errMsg.includes('pool') || errMsg.includes('connection')) {
+        errorType = 'DATABASE_ERROR';
+        outcome = 'ERROR';
+      }
+
+      if (cycleId) {
+        try {
+          const finalizedRecord = await this.cyclesRepo.finalizeCycle(cycleId, {
+            completedAt: this.now(),
+            durationMs,
+            outcome,
+            errorType,
+            errorMessage: errMsg,
+          });
+          this.lastCycleRecord = finalizedRecord;
+        } catch {
+          // ignore DB error while logging cycle error
+        }
+      }
+
       throw err;
     } finally {
       this.executingCycle = false;
@@ -352,9 +590,21 @@ export class AcquisitionScheduler {
   }
 
   /**
+   * Explicitly prunes old IDLE cycles based on retention policy.
+   */
+  async pruneIdleCycles(olderThanDays = 7): Promise<number> {
+    const pruned = await this.cyclesRepo.pruneIdleCycles(olderThanDays, this.now());
+    this.logger.info(`Pruned ${pruned} IDLE cycle(s) older than ${olderThanDays} days.`);
+    return pruned;
+  }
+
+  /**
    * Internal autonomous background loop.
    */
   private async runLoop(signal: AbortSignal): Promise<void> {
+    // 1. Initial hydration and recovery on boot
+    await this.hydrateStateFromDatabase();
+
     while (this.running && !signal.aborted) {
       let nextWaitMs = AcquisitionScheduler.DEFAULT_IDLE_DELAY_MS;
 
@@ -367,6 +617,13 @@ export class AcquisitionScheduler {
         } else {
           nextWaitMs = AcquisitionScheduler.DEFAULT_IDLE_DELAY_MS;
         }
+
+        this.nextPlannedAction = {
+          action: plan.action,
+          cadenceMs: nextWaitMs,
+          wakeAt: new Date(this.now().getTime() + nextWaitMs).toISOString(),
+          reason: plan.reason,
+        };
       } catch (err: any) {
         const error = err instanceof Error ? err : new Error(String(err));
         this.logger.error(`Error during scheduler execution cycle: ${error.message}`, {
@@ -378,6 +635,12 @@ export class AcquisitionScheduler {
 
         // Safe error backoff to prevent tight retry loops on error
         nextWaitMs = AcquisitionScheduler.DEFAULT_ERROR_BACKOFF_MS;
+        this.nextPlannedAction = {
+          action: 'ERROR_BACKOFF',
+          cadenceMs: nextWaitMs,
+          wakeAt: new Date(this.now().getTime() + nextWaitMs).toISOString(),
+          reason: `Error backoff: ${error.message}`,
+        };
       }
 
       if (!this.running || signal.aborted) {
