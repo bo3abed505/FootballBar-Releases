@@ -93,6 +93,41 @@ export class FixturesRepository {
     return result.rowCount ?? 0;
   }
 
+  // Tracks dates for which schedule discovery has been executed
+  private discoveredDates = new Set<string>();
+  private invalidatedDates = new Set<string>();
+
+  /**
+   * Marks schedule discovery as completed for a given UTC date string (YYYY-MM-DD).
+   */
+  markScheduleDiscovered(dateStr: string): void {
+    this.invalidatedDates.delete(dateStr);
+    this.discoveredDates.add(dateStr);
+  }
+
+  /**
+   * Explicitly invalidates schedule discovery state for a date (or all dates).
+   * Forces next scheduler cycle to perform a discovery cycle.
+   */
+  invalidateSchedule(dateStr?: string): void {
+    if (dateStr) {
+      this.discoveredDates.delete(dateStr);
+      this.invalidatedDates.add(dateStr);
+    } else {
+      this.discoveredDates.clear();
+      const today = new Date().toISOString().slice(0, 10);
+      this.invalidatedDates.add(today);
+    }
+  }
+
+  /**
+   * Returns true if schedule discovery has been executed for the given date and not invalidated.
+   */
+  isScheduleDiscovered(dateStr: string): boolean {
+    if (this.invalidatedDates.has(dateStr)) return false;
+    return this.discoveredDates.has(dateStr);
+  }
+
   /**
    * Retrieves active summary counts (live, approaching, recently finished, stale prematch)
    * by evaluating candidate database fixtures through AcquisitionPolicyEngine.
@@ -127,9 +162,13 @@ export class FixturesRepository {
     let stalePrematchCount = 0;
     let scheduleKnownForToday = false;
 
+    if (!this.invalidatedDates.has(todayUtcPrefix) && this.discoveredDates.has(todayUtcPrefix)) {
+      scheduleKnownForToday = true;
+    }
+
     for (const f of candidateFixtures) {
       const kickoffStr = f.kickoffTime instanceof Date ? f.kickoffTime.toISOString() : String(f.kickoffTime);
-      if (kickoffStr.slice(0, 10) === todayUtcPrefix) {
+      if (kickoffStr.slice(0, 10) === todayUtcPrefix && !this.invalidatedDates.has(todayUtcPrefix)) {
         scheduleKnownForToday = true;
       }
 
@@ -148,6 +187,26 @@ export class FixturesRepository {
         recentlyFinishedCount++;
       } else if (classification === 'STALE_PREMATCH') {
         stalePrematchCount++;
+      }
+    }
+
+    // If still not known and not explicitly invalidated, check persistent ledger for previous successful discovery today
+    if (!scheduleKnownForToday && !this.invalidatedDates.has(todayUtcPrefix)) {
+      try {
+        const startOfDay = new Date(todayUtcPrefix + 'T00:00:00.000Z');
+        const pastDiscovery = await db.query.apiRequestLedger.findFirst({
+          where: and(
+            eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE'),
+            eq(schema.apiRequestLedger.success, true),
+            gte(schema.apiRequestLedger.requestedAt, startOfDay)
+          ),
+        });
+        if (pastDiscovery) {
+          scheduleKnownForToday = true;
+          this.discoveredDates.add(todayUtcPrefix);
+        }
+      } catch {
+        // Fallback gracefully if ledger query is unavailable
       }
     }
 

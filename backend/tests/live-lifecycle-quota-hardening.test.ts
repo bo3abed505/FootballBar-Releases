@@ -3,6 +3,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { db, schema, pool } from '../src/db/index.js';
 import { SyncService } from '../src/acquisition/sync.service.js';
 import { AcquisitionPolicyEngine, FixturesSummary, BudgetContext } from '../src/acquisition/acquisition-policy.js';
+import { AcquisitionScheduler } from '../src/acquisition/acquisition-scheduler.js';
 import { FixturesRepository } from '../src/repositories/fixtures.repository.js';
 import { FootballProvider, ProviderFixture, ProviderEvent } from '../src/providers/football-provider.js';
 import { RequestGateway } from '../src/gateway/request-gateway.js';
@@ -677,6 +678,169 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       // Cleanup
       await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
       await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+    });
+
+    it('18. Exact production sequence: 77 requests yesterday -> Batch 1 headers 22..17 -> Batch 2 headers 93..88 -> ledger authoritative 12 consumed, 88 remaining', async () => {
+      const gateway = new RequestGateway(pool);
+      const testProvider = 'test_prod_sequence_provider';
+
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+
+      // Seed yesterday's ledger with 77 requests
+      for (let i = 0; i < 7; i++) {
+        await pool.query(
+          `INSERT INTO api_request_ledger (
+             id, provider, endpoint, operation, priority, http_status, success, cost_units, response_time_ms, requested_at
+           ) VALUES ($1, $2, '/fixtures', 'DISCOVER_SCHEDULE', 'NORMAL', 200, true, 11, 100, (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '2 hours')`,
+          [`ledg_yest_${i}`, testProvider]
+        );
+      }
+
+      // New UTC day starts: today ledger = 0
+      // First 6 requests: provider remaining headers = 22, 21, 20, 19, 18, 17
+      const batch1Headers = [22, 21, 20, 19, 18, 17];
+      for (let i = 0; i < batch1Headers.length; i++) {
+        const headerRemaining = batch1Headers[i];
+        const res = await gateway.execute(
+          { provider: testProvider, endpoint: `/fixtures?league=${i + 1}`, operation: 'DISCOVER_SCHEDULE' },
+          async () => ({
+            status: 200,
+            headers: { 'x-ratelimit-requests-remaining': String(headerRemaining) },
+            data: { response: [] },
+          })
+        );
+        expect(res.success).toBe(true);
+      }
+
+      // After first batch:
+      // today ledger = 6
+      const ledgerRes1 = await pool.query(
+        `SELECT COUNT(*)::int as cnt FROM api_request_ledger WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(ledgerRes1.rows[0].cnt).toBe(6);
+
+      // budget must be: consumed = 6, remaining = 94
+      const budget1 = await pool.query(
+        `SELECT consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(budget1.rows[0].consumed_calls).toBe(6);
+      expect(budget1.rows[0].remaining_calls).toBe(94);
+
+      // In production, Batch 2 occurred ~57 minutes after Batch 1 (00:00 UTC vs 00:57 UTC).
+      // Age Batch 1 ledger timestamps to 57 minutes ago so the 8/min rate limiter window is clear.
+      await pool.query(
+        `UPDATE api_request_ledger
+         SET requested_at = NOW() - INTERVAL '57 minutes'
+         WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+
+      // Second 6 requests: provider remaining headers = 93, 92, 91, 90, 89, 88
+      const batch2Headers = [93, 92, 91, 90, 89, 88];
+      for (let i = 0; i < batch2Headers.length; i++) {
+        const headerRemaining = batch2Headers[i];
+        const res = await gateway.execute(
+          { provider: testProvider, endpoint: `/fixtures?league=${i + 1}`, operation: 'DISCOVER_SCHEDULE' },
+          async () => ({
+            status: 200,
+            headers: { 'x-ratelimit-requests-remaining': String(headerRemaining) },
+            data: { response: [] },
+          })
+        );
+        expect(res.success).toBe(true);
+      }
+
+      // After second batch:
+      // today ledger = 12
+      const ledgerRes2 = await pool.query(
+        `SELECT COUNT(*)::int as cnt FROM api_request_ledger WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(ledgerRes2.rows[0].cnt).toBe(12);
+
+      // budget must be: consumed = 12, remaining = 88
+      const budget2 = await pool.query(
+        `SELECT consumed_calls, remaining_calls FROM provider_daily_budget WHERE provider = $1 AND budget_date = (NOW() AT TIME ZONE 'UTC')::date`,
+        [testProvider]
+      );
+      expect(budget2.rows[0].consumed_calls).toBe(12);
+      expect(budget2.rows[0].remaining_calls).toBe(88);
+
+      // Verify diagnostics reports the ledger-derived current-day usage
+      const diag = await gateway.getDiagnostics(testProvider);
+      expect(diag.consumedDaily).toBe(12);
+      expect(diag.remainingDaily).toBe(88);
+
+      // Verify reserveSlot() never allows consumed > today's ledger + current request
+      const nextReservation = await gateway.reserveSlot(testProvider, '/fixtures', 'DISCOVER_SCHEDULE', 'NORMAL');
+      expect(nextReservation.allowed).toBe(true);
+      expect(nextReservation.consumedDaily).toBe(13);
+      expect(nextReservation.remainingDaily).toBe(87);
+
+      // Cleanup
+      await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1`, [testProvider]);
+      await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
+    });
+
+    it('19. Schedule discovery marks today as known, prevents hourly rediscovery loops, and rediscovers upon invalidation', async () => {
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
+
+      const repo = new FixturesRepository();
+      const todayStr = new Date().toISOString().slice(0, 10);
+      repo.invalidateSchedule(todayStr);
+
+      let discoverCallCount = 0;
+      const mockProvider: FootballProvider = {
+        providerName: 'mock_discovery_provider',
+        getCompetitions: async () => [],
+        getFixtures: async (filter) => {
+          const count = filter?.competitionIds?.length ?? 1;
+          discoverCallCount += count;
+          return []; // Empty schedule today (0 fixtures returned)
+        },
+        getFixtureDetails: async () => null,
+        getFixtureEvents: async () => [],
+        getStandings: async () => [],
+      };
+
+      const syncService = new SyncService(mockProvider);
+      const scheduler = new AcquisitionScheduler({
+        syncService,
+        fixturesRepository: repo,
+        providerName: 'mock_discovery_provider',
+        targetCompetitionIds: [1, 2, 3, 4, 5, 6],
+        getBudgetContext: async () => ({
+          allocatedDaily: 100,
+          consumedDaily: 0,
+          remainingDaily: 100,
+          isExhausted: false,
+        }),
+      });
+
+      // Cycle 1: Schedule is not yet discovered for today
+      const cycle1 = await scheduler.executeSingleCycle();
+      expect(cycle1.plan.action).toBe('DISCOVER_SCHEDULE');
+      expect(discoverCallCount).toBe(6); // Called once per competition
+      expect(repo.isScheduleDiscovered(todayStr)).toBe(true);
+
+      // Cycle 2: Schedule is already known for today -> must NOT rediscover, action must be IDLE
+      const cycle2 = await scheduler.executeSingleCycle();
+      expect(cycle2.plan.action).toBe('IDLE');
+      expect(discoverCallCount).toBe(6); // Still 6, no additional provider calls generated!
+
+      // Explicit invalidation triggers rediscovery
+      repo.invalidateSchedule(todayStr);
+      expect(repo.isScheduleDiscovered(todayStr)).toBe(false);
+
+      // Cycle 3: After invalidation, rediscovery occurs legitimately
+      const cycle3 = await scheduler.executeSingleCycle();
+      expect(cycle3.plan.action).toBe('DISCOVER_SCHEDULE');
+      expect(discoverCallCount).toBe(12); // Ran discovery again
+      expect(repo.isScheduleDiscovered(todayStr)).toBe(true);
     });
   });
 });

@@ -12,7 +12,7 @@
  *   - Never contains provider-specific logic, direct fetch, or hard-coded cadence thresholds.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   AcquisitionPolicyEngine,
@@ -79,6 +79,31 @@ async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
  */
 export async function getDatabaseBudgetContext(provider = 'api_football'): Promise<BudgetContext> {
   const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Authoritative daily accounting: query today's ledger for real ground truth
+  try {
+    const startOfDay = new Date(todayStr + 'T00:00:00.000Z');
+    const ledgerToday = await db.query.apiRequestLedger.findMany({
+      where: and(
+        eq(schema.apiRequestLedger.provider, provider),
+        gte(schema.apiRequestLedger.requestedAt, startOfDay)
+      ),
+      columns: { costUnits: true },
+    });
+    const ledgerConsumed = ledgerToday.reduce((acc, r) => acc + (r.costUnits || 1), 0);
+    if (ledgerConsumed > 0) {
+      const remaining = Math.max(0, 100 - ledgerConsumed);
+      return {
+        allocatedDaily: 100,
+        consumedDaily: ledgerConsumed,
+        remainingDaily: remaining,
+        isExhausted: remaining <= 0,
+      };
+    }
+  } catch {
+    // If ledger query fails, fallback to provider_daily_budget table
+  }
+
   const row = await db.query.providerDailyBudget.findFirst({
     where: and(
       eq(schema.providerDailyBudget.provider, provider),
@@ -263,6 +288,12 @@ export class AcquisitionScheduler {
           date: todayDateStr,
           competitionIds: this.targetCompetitionIds,
         });
+
+        if (plan.action === 'DISCOVER_SCHEDULE') {
+          if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+            this.fixturesRepo.markScheduleDiscovered(todayDateStr);
+          }
+        }
 
         this.logger.info(`Sync cycle completed for ${plan.action}`, {
           fixturesDiscovered: syncSummary?.fixturesDiscovered ?? 0,
