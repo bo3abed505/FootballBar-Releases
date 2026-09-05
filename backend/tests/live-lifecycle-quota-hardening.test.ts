@@ -1489,8 +1489,8 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
     it('25. System Markers Cost 0 & Provider Isolation: verifies system markers have cost_units = 0 and are never counted against api_football quota', async () => {
       const testProvider = 'api_football';
       const gateway = new RequestGateway(pool);
-      const testDate = new Date('2026-09-04T12:00:00.000Z');
-      const todayStr = '2026-09-04';
+      const testDate = new Date();
+      const todayStr = testDate.toISOString().slice(0, 10);
 
       await pool.query(`DELETE FROM api_request_ledger WHERE provider = $1 OR provider = 'system'`, [testProvider]);
       await pool.query(`DELETE FROM provider_daily_budget WHERE provider = $1`, [testProvider]);
