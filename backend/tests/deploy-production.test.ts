@@ -24,6 +24,8 @@ describe('Production Backend Deployment & Packaging Logic', () => {
       'dist/server.js',
       'dist/gateway/request-gateway.js',
       'dist/diagnostics/logger.js',
+      'dist/db/migrate-prod.js',
+      'drizzle/meta/_journal.json',
     ];
 
     for (const rel of requiredFiles) {
@@ -196,8 +198,9 @@ describe('Production Backend Deployment & Packaging Logic', () => {
     expect(scriptContent).toContain('$targetEnvPath = Join-Path $configDir ".env.production.local"');
     expect(scriptContent).not.toContain('Join-Path $releaseDir ".env.production.local"');
 
-    // Files copied to releaseDir are strictly dist, package.json, package-lock.json
+    // Files copied to releaseDir are strictly dist, drizzle, package.json, package-lock.json
     expect(scriptContent).toContain('Join-Path $SourceDir "dist"');
+    expect(scriptContent).toContain('Join-Path $SourceDir "drizzle"');
     expect(scriptContent).toContain('Join-Path $SourceDir "package.json"');
     expect(scriptContent).toContain('Join-Path $SourceDir "package-lock.json"');
   });
@@ -578,5 +581,118 @@ describe('Production Backend Deployment -NoStart Mode Hardening (Milestone 16.5C
     expect(stdout).toContain('Mode: NO-START');
     expect(stdout).toContain('-NoStart flag is set: service startup and HTTP /health probe would be skipped');
     expect(stdout).toContain('Simulation completed successfully');
+  });
+});
+
+describe('Phase 2A Production Database Migration Deployment Integration', () => {
+  const scriptsDir = path.resolve(__dirname, '../../scripts');
+  const deployScriptPath = path.join(scriptsDir, 'deploy-backend-production.ps1');
+
+  it('Test PM1: Assert-SourceValid validates dist/db/migrate-prod.js and drizzle/meta/_journal.json', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    expect(scriptContent).toContain('dist\\db\\migrate-prod.js');
+    expect(scriptContent).toContain('drizzle\\meta\\_journal.json');
+  });
+
+  it('Test PM2: Drizzle directory is packaged in $filesToCopy alongside dist and packages', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    expect(scriptContent).toContain('Join-Path $SourceDir "drizzle"');
+    expect(scriptContent).toContain('Join-Path $releaseDir "drizzle"');
+  });
+
+  it('Test PM3: -BaselineLegacySchema parameter is declared in param() and documented', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    expect(scriptContent).toContain('.PARAMETER BaselineLegacySchema');
+    expect(scriptContent).toMatch(/param\s*\([\s\S]*?\[switch\]\$BaselineLegacySchema[\s\S]*?\)/);
+  });
+
+  it('Test PM4: DryRun outputs planned migration details with zero database connection', () => {
+    const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${deployScriptPath}" -DryRun -NoStart`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(stdout).toContain('=== [DryRun] Planned Database Migration ===');
+    expect(stdout).toContain('Script: dist\\db\\migrate-prod.js');
+    expect(stdout).toContain('Target Database: footballtray_prod (enforced by production entrypoint)');
+    expect(stdout).toContain('Legacy Baseline Mode: DISABLED (Standard mode)');
+    expect(stdout).toContain('Database Connection: SKIPPED in -DryRun mode (zero database queries executed).');
+  });
+
+  it('Test PM5: DryRun with -BaselineLegacySchema reports Legacy Baseline Mode: ENABLED', () => {
+    const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${deployScriptPath}" -DryRun -NoStart -BaselineLegacySchema`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(stdout).toContain('Legacy Baseline Mode: ENABLED (--baseline-legacy-schema will be passed)');
+  });
+
+  it('Test PM6: Migration runner execution is strictly ordered after stopping backend and before junction switch', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    const stopBackendIdx = scriptContent.indexOf('Invoke-SchtasksChecked -Arguments @("/End", "/TN", "FootballTray-Backend") -Operation "Stop Current Backend"');
+    const migrationIdx = scriptContent.indexOf('Executing production database migration runner');
+    const junctionSwitchIdx = scriptContent.indexOf('Junction \'current\' updated to point to $releaseDir');
+
+    expect(stopBackendIdx).toBeGreaterThan(0);
+    expect(migrationIdx).toBeGreaterThan(stopBackendIdx);
+    expect(junctionSwitchIdx).toBeGreaterThan(migrationIdx);
+  });
+
+  it('Test PM7: Migration runner passes --baseline-legacy-schema flag only when requested', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    expect(scriptContent).toContain('if ($BaselineLegacySchema)');
+    expect(scriptContent).toContain('$migrateArgs += "--baseline-legacy-schema"');
+  });
+
+  it('Test PM8: Deployment script parses machine-readable MIGRATION_STATE protocol marker and never relies on human log text', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Must NOT rely on matching human log text
+    expect(scriptContent).not.toContain('$migText -match "Drizzle migrate() completed"');
+    expect(scriptContent).not.toContain('$migText -match "Drizzle migrate\\(\\) completed"');
+
+    // Must parse machine-readable state protocol marker
+    expect(scriptContent).toContain('$migrationState = "NO_DB_CHANGE"');
+    expect(scriptContent).toContain('^MIGRATION_STATE=(NO_DB_CHANGE|BASELINE_COMMITTED|MIGRATION_COMMITTED)$');
+    expect(scriptContent).toContain('MIGRATION_COMMITTED');
+    expect(scriptContent).toContain('BASELINE_COMMITTED');
+  });
+
+  it('Test PM8B: Rollback error reporting distinguishes MIGRATION_COMMITTED, BASELINE_COMMITTED, and NO_DB_CHANGE', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // MIGRATION_COMMITTED warning
+    expect(scriptContent).toContain('database schema may already be forward-migrated, and no automatic database down-migration was attempted');
+
+    // BASELINE_COMMITTED warning
+    expect(scriptContent).toContain('Legacy baseline metadata (migrations 0000 and 0001) was committed to drizzle.__drizzle_migrations, but the subsequent Phase 2A migration (0002) rolled back');
+    expect(scriptContent).toContain('Verified legacy baseline metadata remains committed in the database');
+    expect(scriptContent).toContain('No automatic database down-migration or baseline deletion was attempted');
+
+    // Error message distinguishes states
+    expect(scriptContent).toContain('Application service was rolled back to \'$previousJunctionTarget\', but database schema may already be forward-migrated');
+    expect(scriptContent).toContain('Phase 2A database migration rolled back, but verified legacy baseline metadata remains committed in the database');
+    expect(scriptContent).toContain('System was successfully rolled back to \'$previousJunctionTarget\' (database unchanged)');
+  });
+
+  it('Test PM9: No automatic database down-migration is attempted under any circumstance', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    expect(scriptContent).not.toContain('migrate:down');
+    expect(scriptContent).not.toContain('drizzle-kit drop');
+    expect(scriptContent).not.toContain('DROP TABLE');
+  });
+
+  it('Test PM10: Both pwsh and powershell.exe parse the script cleanly with zero non-ASCII characters', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    for (let i = 0; i < scriptContent.length; i++) {
+      expect(scriptContent.charCodeAt(i)).toBeLessThanOrEqual(127);
+    }
   });
 });

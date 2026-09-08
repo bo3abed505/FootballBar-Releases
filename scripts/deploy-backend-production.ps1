@@ -19,6 +19,8 @@
     Performs directory deployment and dependency installation without updating the scheduled task.
 .PARAMETER NoStart
     Deploys, packages, activates the release junction, and updates the scheduled task definition without starting the backend service or performing HTTP health probes.
+.PARAMETER BaselineLegacySchema
+    Instructs the production migration runner to perform the one-time legacy baseline verification and transactional baseline metadata insertion before applying pending migrations.
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -28,7 +30,8 @@ param (
     [switch]$DryRun,
     [switch]$Rollback,
     [switch]$SkipTaskUpdate,
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$BaselineLegacySchema
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,12 +45,12 @@ if ([string]::IsNullOrWhiteSpace($SourceDir)) {
 }
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " FootballTray — Production Backend Deployment Tool" -ForegroundColor Cyan
+Write-Host " FootballTray -- Production Backend Deployment Tool" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Source Directory: $SourceDir"
 Write-Host " Target Directory: $TargetDir"
 if ($DryRun) {
-    Write-Host " Mode: DRY-RUN (Simulation only — no system modifications)" -ForegroundColor Magenta
+    Write-Host " Mode: DRY-RUN (Simulation only -- no system modifications)" -ForegroundColor Magenta
 }
 if ($NoStart) {
     Write-Host " Mode: NO-START (Will package and configure release without starting service)" -ForegroundColor Yellow
@@ -95,7 +98,7 @@ function Assert-SourceValid {
         throw "Source directory not found: $Path"
     }
 
-    $requiredSourceFiles = @("package.json", "package-lock.json", "dist\server.js")
+    $requiredSourceFiles = @("package.json", "package-lock.json", "dist\server.js", "dist\db\migrate-prod.js", "drizzle\meta\_journal.json")
     foreach ($rel in $requiredSourceFiles) {
         $full = Join-Path $Path $rel
         if (-not (Test-Path $full)) {
@@ -588,6 +591,7 @@ if (-not $DryRun) {
 Write-Host "`n[2/6] Copying production backend payload..." -ForegroundColor Yellow
 $filesToCopy = @(
     @{ Source = (Join-Path $SourceDir "dist"); Target = (Join-Path $releaseDir "dist"); IsDir = $true },
+    @{ Source = (Join-Path $SourceDir "drizzle"); Target = (Join-Path $releaseDir "drizzle"); IsDir = $true },
     @{ Source = (Join-Path $SourceDir "package.json"); Target = (Join-Path $releaseDir "package.json"); IsDir = $false },
     @{ Source = (Join-Path $SourceDir "package-lock.json"); Target = (Join-Path $releaseDir "package-lock.json"); IsDir = $false }
 )
@@ -696,6 +700,18 @@ if (-not $DryRun) {
 $taskXml = New-BackendTaskXml -WorkingDir $currentJunction -EnvFilePath $targetEnvPath
 
 if ($DryRun) {
+    Write-Host "`n=== [DryRun] Planned Database Migration ===" -ForegroundColor Cyan
+    Write-Host "  Executable: node"
+    Write-Host "  Script: dist\db\migrate-prod.js"
+    Write-Host "  Target Database: footballtray_prod (enforced by production entrypoint)"
+    if ($BaselineLegacySchema) {
+        Write-Host "  Legacy Baseline Mode: ENABLED (--baseline-legacy-schema will be passed)" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Legacy Baseline Mode: DISABLED (Standard mode)" -ForegroundColor Gray
+    }
+    Write-Host "  State Protocol: Machine-readable marker MIGRATION_STATE=(NO_DB_CHANGE|BASELINE_COMMITTED|MIGRATION_COMMITTED)"
+    Write-Host "  Database Connection: SKIPPED in -DryRun mode (zero database queries executed)." -ForegroundColor Green
+
     Write-Host "`n=== [DryRun] Planned Task XML ===" -ForegroundColor Cyan
     Write-Host $taskXml
     if ($NoStart) {
@@ -750,13 +766,58 @@ if (-not $SkipTaskUpdate) {
     # ------------------------------------------------------------------
     # Execute Switch with Enclosing Try/Catch for Dual Rollback
     # ------------------------------------------------------------------
+    $migrationState = "NO_DB_CHANGE"
     try {
-        # Stop current running backend
+        # 1. Stop current running backend before database migration
         Write-Host "  Stopping running FootballTray-Backend task..."
         Invoke-SchtasksChecked -Arguments @("/End", "/TN", "FootballTray-Backend") -Operation "Stop Current Backend"
         Start-Sleep -Seconds 2
 
-        # Switch junction
+        # 2. Execute production database migration before junction activation
+        Write-Host "  Executing production database migration runner..." -ForegroundColor Yellow
+        $migrateScriptRel = "dist\db\migrate-prod.js"
+        $migrateScriptFull = Join-Path $releaseDir $migrateScriptRel
+        if (-not (Test-Path $migrateScriptFull)) {
+            throw "Production migration runner not found at '$migrateScriptFull'."
+        }
+
+        $nodeExe = "C:\Program Files\nodejs\node.exe"
+        if (-not (Test-Path $nodeExe)) {
+            $nodeExe = (Get-Command "node").Source
+        }
+
+        $migrateArgs = @("--env-file=$targetEnvPath", $migrateScriptRel)
+        if ($BaselineLegacySchema) {
+            $migrateArgs += "--baseline-legacy-schema"
+            Write-Host "  Passing --baseline-legacy-schema flag to migration runner." -ForegroundColor Yellow
+        }
+
+        Push-Location $releaseDir
+        try {
+            $migOutput = & $nodeExe @migrateArgs 2>&1
+            $migExit = $LASTEXITCODE
+
+            $migText = ($migOutput -join "`n")
+            Write-Host $migText
+
+            # Parse machine-readable migration state protocol marker
+            $stateMatch = $migOutput | Where-Object { $_ -match "^MIGRATION_STATE=(NO_DB_CHANGE|BASELINE_COMMITTED|MIGRATION_COMMITTED)$" } | Select-Object -Last 1
+            if ($stateMatch) {
+                $migrationState = ($stateMatch -replace "^MIGRATION_STATE=", "").Trim()
+            } elseif ($migExit -eq 2) {
+                # Exit code 2 is strictly reserved for post-verification failure after migration commit
+                $migrationState = "MIGRATION_COMMITTED"
+            }
+
+            if ($migExit -ne 0) {
+                throw "Production database migration failed with exit code $migExit (state=$migrationState)."
+            }
+        } finally {
+            Pop-Location
+        }
+        Write-Host "  Production database migration and verification completed successfully (state=$migrationState)." -ForegroundColor Green
+
+        # 3. Switch junction
         if (Test-Path $currentJunction) {
             cmd /c "rmdir `"$currentJunction`"" | Out-Null
         }
@@ -873,6 +934,12 @@ if (-not $SkipTaskUpdate) {
     } catch {
         Write-Host "CRITICAL: Deployment verification failed ($($_.Exception.Message))! Initiating automatic two-way rollback..." -ForegroundColor Red
 
+        if ($migrationState -eq "MIGRATION_COMMITTED") {
+            Write-Warning "CRITICAL WARNING: The database migration had already committed before failure occurred. The database schema may already be forward-migrated, and no automatic database down-migration was attempted. Automatic database down-migration is never performed under any circumstance."
+        } elseif ($migrationState -eq "BASELINE_COMMITTED") {
+            Write-Warning "CRITICAL WARNING: Legacy baseline metadata (migrations 0000 and 0001) was committed to drizzle.__drizzle_migrations, but the subsequent Phase 2A migration (0002) rolled back. Verified legacy baseline metadata remains committed in the database. Phase 2A schema changes were not applied. No automatic database down-migration or baseline deletion was attempted."
+        }
+
         # 1. Stop failed task
         try {
             Invoke-SchtasksChecked -Arguments @("/End", "/TN", "FootballTray-Backend") -Operation "Stop Failed Task"
@@ -944,7 +1011,13 @@ if (-not $SkipTaskUpdate) {
             Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified task configuration (service stopped)." -ForegroundColor Yellow
         }
 
-        throw "Deployment aborted due to verification failure ($($_.Exception.Message)). System was successfully rolled back to '$previousJunctionTarget'."
+        if ($migrationState -eq "MIGRATION_COMMITTED") {
+            throw "Deployment aborted due to verification failure ($($_.Exception.Message)). Application service was rolled back to '$previousJunctionTarget', but database schema may already be forward-migrated and no automatic database down-migration was attempted."
+        } elseif ($migrationState -eq "BASELINE_COMMITTED") {
+            throw "Deployment aborted due to verification failure ($($_.Exception.Message)). Application service was rolled back to '$previousJunctionTarget'. Phase 2A database migration rolled back, but verified legacy baseline metadata remains committed in the database. No automatic database down-migration or baseline deletion was attempted."
+        } else {
+            throw "Deployment aborted due to verification failure ($($_.Exception.Message)). System was successfully rolled back to '$previousJunctionTarget' (database unchanged)."
+        }
     }
 }
 
@@ -953,7 +1026,7 @@ Write-Host " Production Backend Deployment Completed Successfully!" -ForegroundC
 Write-Host " Deployed Release: $releaseId (status: verified)" -ForegroundColor Green
 Write-Host " Active Path: $currentJunction" -ForegroundColor Green
 if ($NoStart) {
-    Write-Host " Service Status: STOPPED (-NoStart mode — ready for verification/audit)" -ForegroundColor Yellow
+    Write-Host " Service Status: STOPPED (-NoStart mode -- ready for verification/audit)" -ForegroundColor Yellow
 }
 Write-Host "============================================================" -ForegroundColor Green
 exit 0

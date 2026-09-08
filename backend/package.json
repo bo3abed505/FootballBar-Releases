@@ -11,6 +11,7 @@
     "test": "vitest run --fileParallelism=false",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:prod": "node dist/db/migrate-prod.js",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
     "db:test:setup": "tsx src/db/setup-test-db.ts",
