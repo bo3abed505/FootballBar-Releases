@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
@@ -191,8 +192,15 @@ public class SyncService : ISyncService
                     _lastKnownEtag = response.ETag;
                 }
 
-                // Update cache validation timestamp
-                await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
+                // Update cache validation timestamp (secondary non-critical persistence)
+                try
+                {
+                    await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn("Sync", "CacheTouchFailed", $"Failed to update cache validation timestamp on 304: [{ex.GetType().Name}] {ex.Message}", ex: ex);
+                }
 
                 AppLogger.Info("Sync", "PollNotModified", $"Backend returned 304 Not Modified ({_lastRefreshDurationMs}ms). Cache revalidated.");
                 PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
@@ -243,7 +251,9 @@ public class SyncService : ISyncService
         {
             sw.Stop();
             _lastRefreshDurationMs = sw.ElapsedMilliseconds;
-            AppLogger.Warn("Sync", "PollException", $"Network sync failed ({_lastRefreshDurationMs}ms): {ex.Message}. Falling back to offline cache.", ex: ex);
+            string hresultHex = $"0x{ex.HResult:X8}";
+            string messageDetail = !string.IsNullOrWhiteSpace(ex.Message) ? $"{ex.Message} " : string.Empty;
+            AppLogger.Warn("Sync", "PollException", $"Network sync failed ({_lastRefreshDurationMs}ms): [{ex.GetType().Name}] {messageDetail}({hresultHex}). Falling back to offline cache.", ex: ex);
             return HandleOfflineFallback();
         }
         finally
@@ -286,7 +296,7 @@ public class SyncService : ISyncService
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[SYNC] Periodic loop error: {ex.Message}");
+                AppLogger.Error("Sync", "PeriodicLoopError", $"Periodic polling loop encountered unexpected error: [{ex.GetType().Name}] {ex.Message}", ex: ex);
                 HandleOfflineFallback();
             }
         }
@@ -297,7 +307,7 @@ public class SyncService : ISyncService
         var connectionState = MapToConnectionState(freshness);
         var preferences = _preferencesService?.GetPreferences();
         var formatted = TrayTickerFormatter.FormatTicker(data, freshness, preferences);
-        TrayUpdated?.Invoke(this, new TrayUpdateEventArgs
+        var args = new TrayUpdateEventArgs
         {
             TrayData = data,
             FreshnessState = freshness,
@@ -306,7 +316,31 @@ public class SyncService : ISyncService
             Version = version,
             ETag = etag,
             LastValidatedAt = lastValidated,
-        });
+        };
+
+        var handler = TrayUpdated;
+        if (handler != null)
+        {
+            foreach (var del in handler.GetInvocationList())
+            {
+                try
+                {
+                    if (del is EventHandler<TrayUpdateEventArgs> typedHandler)
+                    {
+                        typedHandler(this, args);
+                    }
+                    else
+                    {
+                        del.DynamicInvoke(this, args);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    var actualEx = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
+                    AppLogger.Error("Sync", "SubscriberError", $"TrayUpdated subscriber '{del.Method.DeclaringType?.Name}.{del.Method.Name}' failed: [{actualEx.GetType().Name}] {actualEx.Message}", ex: actualEx);
+                }
+            }
+        }
     }
 
     private static TickerConnectionState MapToConnectionState(DataFreshnessState freshness) =>

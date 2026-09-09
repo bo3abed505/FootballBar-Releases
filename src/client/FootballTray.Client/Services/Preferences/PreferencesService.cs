@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using FootballTray.Client.Serialization;
 using FootballTray.Client.Services.Notifications;
 
 namespace FootballTray.Client.Services.Preferences;
@@ -296,7 +297,7 @@ public sealed class PreferencesService : IPreferencesService
                 return defaults;
             }
 
-            var loaded = JsonSerializer.Deserialize<UserPreferences>(json);
+            var loaded = JsonSerializer.Deserialize(json, FootballJsonSerializerContext.Default.UserPreferences);
             if (loaded == null)
             {
                 var defaults = DefaultPreferences.CreateDefault();
@@ -336,7 +337,7 @@ public sealed class PreferencesService : IPreferencesService
         var tempFile = $"{_filePath}.{Guid.NewGuid():N}.tmp";
         try
         {
-            var json = JsonSerializer.Serialize(preferences, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(preferences, FootballJsonSerializerContext.Default.UserPreferences);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
 
             using (var stream = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true))

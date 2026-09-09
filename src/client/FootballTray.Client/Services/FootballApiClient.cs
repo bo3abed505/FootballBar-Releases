@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using FootballTray.Client.Serialization;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.Services;
@@ -49,6 +50,7 @@ public class FootballApiClient : IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = FootballJsonSerializerContext.Default,
     };
 
     public static string GetDefaultBaseUrl()
@@ -115,7 +117,7 @@ public class FootballApiClient : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                var envelope = await JsonSerializer.DeserializeAsync<ApiResponseEnvelope<TrayDataDto>>(contentStream, JsonOptions, cancellationToken);
+                var envelope = await JsonSerializer.DeserializeAsync(contentStream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeTrayDataDto, cancellationToken);
 
                 if (envelope == null)
                 {
@@ -160,7 +162,7 @@ public class FootballApiClient : IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                var envelope = await JsonSerializer.DeserializeAsync<ApiResponseEnvelope<MatchDetailDto>>(contentStream, JsonOptions, cancellationToken);
+                var envelope = await JsonSerializer.DeserializeAsync(contentStream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto, cancellationToken);
 
                 if (envelope == null || envelope.Data == null)
                 {

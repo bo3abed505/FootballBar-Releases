@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace FootballTray.Client.Services.Preferences;
@@ -25,7 +26,7 @@ public sealed record UserPreferences
     public NotificationPreferences Notifications { get; init; } = new();
 
     [JsonExtensionData]
-    public Dictionary<string, object>? ExtensionData { get; init; }
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 
     /// <summary>
     /// Returns pre-computed lookup set containing canonical IDs, numeric forms, and mock aliases for O(1) matching.

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using FootballTray.Client.Serialization;
 
 namespace FootballTray.Client.Services.Notifications;
 
@@ -102,10 +103,7 @@ public sealed class NotificationDeduplicationStore
                 return;
             }
 
-            var model = JsonSerializer.Deserialize<NotificationHistoryModel>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            var model = JsonSerializer.Deserialize(json, FootballJsonSerializerContext.Default.NotificationHistoryModel);
 
             if (model?.NotifiedKeys != null)
             {
@@ -156,11 +154,7 @@ public sealed class NotificationDeduplicationStore
                 };
             }
 
-            string json = JsonSerializer.Serialize(model, new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                PropertyNameCaseInsensitive = true
-            });
+            string json = JsonSerializer.Serialize(model, FootballJsonSerializerContext.Default.NotificationHistoryModel);
 
             string tempFilePath = Path.Combine(_storageDirectory, $"notifications_{Guid.NewGuid():N}.tmp");
 

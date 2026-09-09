@@ -22,7 +22,13 @@ public record DiagnosticLogEntry
         string ts = Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff");
         string levelStr = Level.ToString().ToUpperInvariant();
         string corr = string.IsNullOrWhiteSpace(CorrelationId) ? string.Empty : $"[{CorrelationId}] ";
-        string ex = string.IsNullOrWhiteSpace(ExceptionMessage) ? string.Empty : $" | Exception: {ExceptionType}: {ExceptionMessage}";
+        string ex = string.Empty;
+        if (!string.IsNullOrWhiteSpace(ExceptionType) || !string.IsNullOrWhiteSpace(ExceptionMessage))
+        {
+            string typePart = !string.IsNullOrWhiteSpace(ExceptionType) ? ExceptionType : "Exception";
+            string msgPart = !string.IsNullOrWhiteSpace(ExceptionMessage) ? $": {ExceptionMessage}" : string.Empty;
+            ex = $" | Exception: {typePart}{msgPart}";
+        }
         return $"[{ts}][{levelStr}][{Component}][{EventName}] {corr}{Message}{ex}";
     }
 }

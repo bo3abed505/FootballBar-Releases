@@ -59,7 +59,15 @@ public static class AppLogger
         {
             string sanitizedMsg = Sanitize(message);
             string? exType = ex?.GetType().Name;
-            string? exMsg = ex != null ? Sanitize(ex.Message) : null;
+            string? exMsg = null;
+            if (ex != null)
+            {
+                string hresultHex = $"0x{ex.HResult:X8}";
+                string rawMsg = !string.IsNullOrWhiteSpace(ex.Message)
+                    ? $"{ex.Message} (HResult: {hresultHex})"
+                    : $"HResult: {hresultHex}";
+                exMsg = Sanitize(rawMsg);
+            }
 
             var entry = new DiagnosticLogEntry
             {

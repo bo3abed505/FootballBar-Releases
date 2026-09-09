@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using FootballTray.Client.Serialization;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.Services;
@@ -23,6 +24,7 @@ public class LocalCacheService
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = FootballJsonSerializerContext.Default,
     };
 
     public LocalCacheService(string? customDirectory = null)
@@ -49,7 +51,7 @@ public class LocalCacheService
             }
 
             using var stream = new FileStream(_cacheFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var payload = await JsonSerializer.DeserializeAsync<CachedTrayPayload>(stream, JsonOptions, cancellationToken);
+            var payload = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.CachedTrayPayload, cancellationToken);
 
             if (payload?.Envelope == null)
             {
@@ -104,7 +106,7 @@ public class LocalCacheService
 
             await using (var stream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                await JsonSerializer.SerializeAsync(stream, payload, JsonOptions, cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, payload, FootballJsonSerializerContext.Default.CachedTrayPayload, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
 
@@ -138,7 +140,7 @@ public class LocalCacheService
     /// <summary>
     /// Updates the LastValidatedAt timestamp for the current cached payload upon receiving HTTP 304.
     /// </summary>
-    public async Task<bool> TouchLastValidatedAsync(string? etag, CancellationToken cancellationToken = default)
+    public virtual async Task<bool> TouchLastValidatedAsync(string? etag, CancellationToken cancellationToken = default)
     {
         try
         {

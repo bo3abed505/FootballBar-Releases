@@ -20,54 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarGeometry.cs" Link="TaskbarGeometry.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarNativeMethods.cs" Link="TaskbarNativeMethods.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarLogger.cs" Link="TaskbarLogger.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Taskbar\TaskbarInjection.cs" Link="TaskbarInjection.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\DataFreshnessState.cs" Link="DataFreshnessState.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\TrayPayloadValidator.cs" Link="TrayPayloadValidator.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\FootballApiClient.cs" Link="FootballApiClient.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\LocalCacheService.cs" Link="LocalCacheService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\TrayTickerFormatter.cs" Link="TrayTickerFormatter.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\SyncService.cs" Link="SyncService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationType.cs" Link="Notifications\NotificationType.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationCandidate.cs" Link="Notifications\NotificationCandidate.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationPayload.cs" Link="Notifications\NotificationPayload.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\INotificationRenderer.cs" Link="Notifications\INotificationRenderer.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationPayloadFormatter.cs" Link="Notifications\NotificationPayloadFormatter.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationDeduplicationStore.cs" Link="Notifications\NotificationDeduplicationStore.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationEngine.cs" Link="Notifications\NotificationEngine.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationActivationHandler.cs" Link="Notifications\NotificationActivationHandler.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\WindowsAppNotificationRenderer.cs" Link="Notifications\WindowsAppNotificationRenderer.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\NotificationService.cs" Link="Notifications\NotificationService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Notifications\AppNotificationRegistrationManager.cs" Link="Notifications\AppNotificationRegistrationManager.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\ISyncService.cs" Link="ISyncService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\CanonicalEntityIds.cs" Link="Preferences\CanonicalEntityIds.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FollowedTeam.cs" Link="Preferences\FollowedTeam.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FollowedCompetition.cs" Link="Preferences\FollowedCompetition.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\NotificationPreferences.cs" Link="Preferences\NotificationPreferences.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\UserPreferences.cs" Link="Preferences\UserPreferences.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\DefaultPreferences.cs" Link="Preferences\DefaultPreferences.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\IPreferencesService.cs" Link="Preferences\IPreferencesService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\PreferencesService.cs" Link="Preferences\PreferencesService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Services\Preferences\FixtureRelevanceEngine.cs" Link="Preferences\FixtureRelevanceEngine.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MatchFilterType.cs" Link="ViewModels\MatchFilterType.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MatchItemViewModel.cs" Link="ViewModels\MatchItemViewModel.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\FollowedTeamItemViewModel.cs" Link="ViewModels\FollowedTeamItemViewModel.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\FollowedCompetitionItemViewModel.cs" Link="ViewModels\FollowedCompetitionItemViewModel.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\NotificationCategoryItemViewModel.cs" Link="ViewModels\NotificationCategoryItemViewModel.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\ViewModels\MainViewModel.cs" Link="ViewModels\MainViewModel.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\DiagnosticLogLevel.cs" Link="Diagnostics\DiagnosticLogLevel.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\ApplicationHealthState.cs" Link="Diagnostics\ApplicationHealthState.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\DiagnosticLogEntry.cs" Link="Diagnostics\DiagnosticLogEntry.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\FileLogSink.cs" Link="Diagnostics\FileLogSink.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\AppLogger.cs" Link="Diagnostics\AppLogger.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\ClientHealthSnapshot.cs" Link="Diagnostics\ClientHealthSnapshot.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\IDiagnosticsService.cs" Link="Diagnostics\IDiagnosticsService.cs" />
-    <Compile Include="..\..\src\client\FootballTray.Client\Diagnostics\DiagnosticsService.cs" Link="Diagnostics\DiagnosticsService.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <ProjectReference Include="..\..\src\client\FootballTray.Client\FootballTray.Client.csproj" />
     <ProjectReference Include="..\..\src\client\FootballTray.Core\FootballTray.Core.csproj" />
   </ItemGroup>
 </Project>

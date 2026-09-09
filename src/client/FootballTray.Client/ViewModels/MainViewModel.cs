@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using Microsoft.UI.Dispatching;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
@@ -20,6 +21,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly ISyncService? _syncService;
     private readonly IPreferencesService _preferencesService;
     private readonly Diagnostics.IDiagnosticsService _diagnosticsService;
+    private readonly DispatcherQueue? _dispatcherQueue;
 
     private MatchFilterType _activeFilter = MatchFilterType.All;
     private string _connectionStatusText = "Connecting...";
@@ -138,11 +140,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public MainViewModel(
         IPreferencesService preferencesService,
         ISyncService? syncService = null,
-        Diagnostics.IDiagnosticsService? diagnosticsService = null)
+        Diagnostics.IDiagnosticsService? diagnosticsService = null,
+        DispatcherQueue? dispatcherQueue = null)
     {
         _preferencesService = preferencesService ?? throw new ArgumentNullException(nameof(preferencesService));
         _syncService = syncService;
         _diagnosticsService = diagnosticsService ?? new Diagnostics.DiagnosticsService(_syncService, _preferencesService);
+        _dispatcherQueue = dispatcherQueue ?? DispatcherQueue.GetForCurrentThread();
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -387,16 +391,48 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ActiveFilter = filter;
     }
 
+    private void RunOnUiSafe(Action action, string actionName)
+    {
+        if (_dispatcherQueue == null || _dispatcherQueue.HasThreadAccess)
+        {
+            action();
+            return;
+        }
+
+        bool enqueued = _dispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.AppLogger.Error("UI", "DispatchExecutionError", $"Failed executing UI action '{actionName}': [{ex.GetType().Name}] {ex.Message}", ex: ex);
+            }
+        });
+
+        if (!enqueued)
+        {
+            Diagnostics.AppLogger.Warn("UI", "DispatchEnqueueFailed", $"DispatcherQueue.TryEnqueue returned false for '{actionName}'. UI dispatcher may be shutting down.");
+        }
+    }
+
     private void OnTrayUpdated(object? sender, TrayUpdateEventArgs e)
     {
-        _latestTrayData = e.TrayData;
-        RefreshMatches(e.TrayData, e.FreshnessState, e.ConnectionState);
+        RunOnUiSafe(() =>
+        {
+            _latestTrayData = e.TrayData;
+            RefreshMatches(e.TrayData, e.FreshnessState, e.ConnectionState);
+        }, nameof(OnTrayUpdated));
     }
 
     private void OnPreferencesChanged(object? sender, UserPreferences prefs)
     {
-        PopulatePreferenceCollections(prefs);
-        ReapplyRelevanceAndFilters();
+        RunOnUiSafe(() =>
+        {
+            PopulatePreferenceCollections(prefs);
+            ReapplyRelevanceAndFilters();
+        }, nameof(OnPreferencesChanged));
     }
 
     public void RefreshMatches(TrayDataDto? trayData, DataFreshnessState freshnessState, TickerConnectionState connectionState)
