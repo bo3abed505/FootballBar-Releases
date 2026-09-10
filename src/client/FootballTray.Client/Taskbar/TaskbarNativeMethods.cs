@@ -42,6 +42,12 @@ public static class TaskbarNativeMethods
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint SWP_HIDEWINDOW = 0x0080;
 
+    // SetWindowPos Special HWND Handles (Z-Order)
+    public static readonly IntPtr HWND_TOP = IntPtr.Zero;
+    public static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+
     // Window Messages
     public const uint WM_DESTROY = 0x0002;
     public const uint WM_SIZE = 0x0005;
@@ -51,6 +57,11 @@ public static class TaskbarNativeMethods
     public const uint WM_DPICHANGED = 0x02E0;
     public const uint WM_NCDESTROY = 0x0082;
     public const uint WM_ERASEBKGND = 0x0014;
+
+    // ChangeWindowMessageFilterEx Actions
+    public const uint MSGFLT_RESET = 0;
+    public const uint MSGFLT_ALLOW = 1;
+    public const uint MSGFLT_DISALLOW = 2;
 
     // AppBar Messages & Edges
     public const uint ABM_GETTASKBARPOS = 0x00000005;
@@ -192,6 +203,18 @@ public static class TaskbarNativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     public static extern uint RegisterWindowMessage(string lpString);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ChangeWindowMessageFilterEx(
+        IntPtr hWnd,
+        uint message,
+        uint action,
+        IntPtr pChangeFilterStruct);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("shell32.dll", SetLastError = true)]
     public static extern IntPtr SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);

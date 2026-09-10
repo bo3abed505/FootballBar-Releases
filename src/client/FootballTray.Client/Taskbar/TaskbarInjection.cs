@@ -9,11 +9,19 @@ namespace FootballTray.Client.Taskbar;
 /// </summary>
 public static class TaskbarInjection
 {
+    internal static Func<IntPtr>? FindPrimaryTaskbarHook { get; set; }
+    internal static Func<IntPtr, IntPtr, int, int, int, int, uint, bool>? SetWindowPosHook { get; set; }
+
     /// <summary>
     /// Finds the primary Windows 11 taskbar window handle (Shell_TrayWnd).
     /// </summary>
     public static IntPtr FindPrimaryTaskbar()
     {
+        if (FindPrimaryTaskbarHook != null)
+        {
+            return FindPrimaryTaskbarHook();
+        }
+
         IntPtr hwnd = FindWindow(ShellTrayWndClass, null);
         if (hwnd == IntPtr.Zero)
         {
@@ -57,15 +65,17 @@ public static class TaskbarInjection
             int childExStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
             SetWindowLongPtr(hostHwnd, GWL_EXSTYLE, new IntPtr(childExStyle));
 
-            // 4. Position and show host
-            bool posResult = SetWindowPos(
-                hostHwnd,
-                IntPtr.Zero,
-                placement.X,
-                placement.Y,
-                placement.Width,
-                placement.Height,
-                SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+            // 4. Position, show host, and assert HWND_TOP sibling Z-order
+            bool posResult = SetWindowPosHook != null
+                ? SetWindowPosHook(hostHwnd, HWND_TOP, placement.X, placement.Y, placement.Width, placement.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED)
+                : SetWindowPos(
+                    hostHwnd,
+                    HWND_TOP,
+                    placement.X,
+                    placement.Y,
+                    placement.Width,
+                    placement.Height,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 
             if (!posResult)
             {
@@ -113,14 +123,16 @@ public static class TaskbarInjection
     {
         if (hostHwnd == IntPtr.Zero) return false;
 
-        bool result = SetWindowPos(
-            hostHwnd,
-            IntPtr.Zero,
-            placement.X,
-            placement.Y,
-            placement.Width,
-            placement.Height,
-            SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        bool result = SetWindowPosHook != null
+            ? SetWindowPosHook(hostHwnd, HWND_TOP, placement.X, placement.Y, placement.Width, placement.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+            : SetWindowPos(
+                hostHwnd,
+                HWND_TOP,
+                placement.X,
+                placement.Y,
+                placement.Width,
+                placement.Height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
         if (!result)
         {

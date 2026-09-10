@@ -37,6 +37,10 @@ public sealed class TaskbarHost : IDisposable
     private bool _hostClassRegistered;
     private uint _taskbarCreatedMsgId;
     private bool _isAttached;
+    private bool _isIntentionalHostTeardown;
+    private int _stabilizationGeneration;
+    private CancellationTokenSource? _stabilizationCts;
+    private static readonly int[] PostRecoveryStabilizationDelaysMs = [250, 750, 1500, 3000];
 
     public bool IsAttached => _isAttached;
     public IntPtr MessageReceiverHwnd => _messageReceiverHwnd;
@@ -84,6 +88,13 @@ public sealed class TaskbarHost : IDisposable
         {
             return await RecreateAndAttachAsync();
         });
+        _recovery.RecoveryCompleted += success =>
+        {
+            if (!success && !_isAttached)
+            {
+                AttachmentChanged?.Invoke(false);
+            }
+        };
 
         // 3. Initialize Taskbar Watcher
         _watcher = new TaskbarWatcher(_dispatcherQueue);
@@ -104,6 +115,26 @@ public sealed class TaskbarHost : IDisposable
     public async Task<bool> RecreateAndAttachAsync()
     {
         if (_isDisposed) return false;
+
+        // 0. Idempotency check: If a valid host is already attached to the current valid Shell_TrayWnd, do not duplicate
+        IntPtr currentShellTray = TaskbarInjection.FindPrimaryTaskbar();
+        bool isHostValid = IsWindowTestHook?.Invoke(_hostHwnd) ?? IsWindow(_hostHwnd);
+        bool isTrayValid = IsWindowTestHook?.Invoke(currentShellTray) ?? IsWindow(currentShellTray);
+        IntPtr parent = GetParentTestHook?.Invoke(_hostHwnd) ?? GetParent(_hostHwnd);
+
+        if (currentShellTray != IntPtr.Zero &&
+            _isAttached &&
+            _hostHwnd != IntPtr.Zero &&
+            _taskbarHwnd == currentShellTray &&
+            isHostValid &&
+            isTrayValid &&
+            parent == currentShellTray)
+        {
+            TaskbarLogger.Info($"[RECOVERY] Host 0x{_hostHwnd.ToInt64():X} is already attached and valid on current Shell_TrayWnd 0x{currentShellTray.ToInt64():X}. Skipping duplicate creation.");
+            Reposition();
+            EnsureHostZOrder();
+            return true;
+        }
 
         IntPtr oldHost = _hostHwnd;
         IntPtr oldTaskbar = _taskbarHwnd;
@@ -130,9 +161,11 @@ public sealed class TaskbarHost : IDisposable
             }
         }
 
-        // 3. Detach and destroy old host HWND if it still exists
+        // 3. Detach and destroy old host HWND if it still exists (mark intentional teardown to prevent re-entrant recovery)
+        CancelPostRecoveryStabilization();
         if (_hostHwnd != IntPtr.Zero)
         {
+            _isIntentionalHostTeardown = true;
             try
             {
                 TaskbarInjection.Detach(_hostHwnd);
@@ -146,12 +179,21 @@ public sealed class TaskbarHost : IDisposable
             finally
             {
                 _hostHwnd = IntPtr.Zero;
+                _isIntentionalHostTeardown = false;
             }
+        }
+        else
+        {
+            _isIntentionalHostTeardown = false;
         }
 
         // 4. Find the current/new primary Shell_TrayWnd
-        IntPtr newShellTray = TaskbarInjection.FindPrimaryTaskbar();
-        if (newShellTray == IntPtr.Zero)
+        if (currentShellTray == IntPtr.Zero)
+        {
+            currentShellTray = TaskbarInjection.FindPrimaryTaskbar();
+        }
+
+        if (currentShellTray == IntPtr.Zero)
         {
             TaskbarLogger.Warn("[RECOVERY] Primary taskbar (Shell_TrayWnd) not found. Awaiting recovery retry...");
             _taskbarHwnd = IntPtr.Zero;
@@ -160,7 +202,7 @@ public sealed class TaskbarHost : IDisposable
             return false;
         }
 
-        _taskbarHwnd = newShellTray;
+        _taskbarHwnd = currentShellTray;
         TaskbarLogger.Info($"[RECOVERY] Discovered primary Shell_TrayWnd HWND: 0x{_taskbarHwnd.ToInt64():X}");
 
         // 5. Calculate fresh taskbar geometry
@@ -212,11 +254,13 @@ public sealed class TaskbarHost : IDisposable
 
         // 8. Attach fresh host HWND into Shell_TrayWnd
         bool attached = TaskbarInjection.Attach(_hostHwnd, _taskbarHwnd, placement);
-        if (attached)
+        if (attached && IsWindow(_taskbarHwnd) && IsWindow(_hostHwnd) && GetParent(_hostHwnd) == _taskbarHwnd)
         {
             _isAttached = true;
             ShowWindow(_hostHwnd, 5 /* SW_SHOW */);
+            EnsureHostZOrder();
             _watcher?.Start(_taskbarHwnd);
+            StartPostRecoveryStabilization(_hostHwnd, _taskbarHwnd);
 
             TaskbarLogger.Info($"[RECOVERY] RecreateAndAttachAsync completed successfully. Host 0x{_hostHwnd.ToInt64():X} docked into Shell_TrayWnd 0x{_taskbarHwnd.ToInt64():X}.");
             AttachmentChanged?.Invoke(true);
@@ -226,7 +270,8 @@ public sealed class TaskbarHost : IDisposable
         {
             _isAttached = false;
             AttachmentChanged?.Invoke(false);
-            TaskbarLogger.Warn("[RECOVERY] TaskbarInjection.Attach failed during RecreateAndAttachAsync.");
+            TaskbarLogger.Warn("[RECOVERY] TaskbarInjection.Attach failed or taskbar window invalidated during RecreateAndAttachAsync.");
+            attached = false;
         }
 
         await Task.CompletedTask;
@@ -235,6 +280,7 @@ public sealed class TaskbarHost : IDisposable
 
     /// <summary>
     /// Recalculates geometry and updates the host's position inside the taskbar.
+    /// Also reasserts HWND_TOP sibling Z-order on successful repositioning.
     /// </summary>
     public bool Reposition()
     {
@@ -246,12 +292,17 @@ public sealed class TaskbarHost : IDisposable
             if (_taskbarHwnd == IntPtr.Zero) return false;
         }
 
-        if (TaskbarGeometry.TryGetPrimaryTaskbarPlacement(_taskbarHwnd, out TaskbarPlacement placement))
+        bool placementFound = TryGetPlacementHook != null
+            ? TryGetPlacementHook(_taskbarHwnd, out TaskbarPlacement placement)
+            : TaskbarGeometry.TryGetPrimaryTaskbarPlacement(_taskbarHwnd, out placement);
+
+        if (placementFound)
         {
             bool moved = TaskbarInjection.UpdatePosition(_hostHwnd, placement);
             if (moved)
             {
                 UpdateHostSize(placement.Width, placement.Height);
+                EnsureHostZOrder();
                 Repositioned?.Invoke();
             }
             return moved;
@@ -340,6 +391,29 @@ public sealed class TaskbarHost : IDisposable
             }
 
             TaskbarLogger.Info($"[RECEIVER] Persistent MessageReceiver HWND created: 0x{_messageReceiverHwnd.ToInt64():X}");
+
+            // Defensive UIPI message filter configuration for TaskbarCreated broadcast
+            if (_taskbarCreatedMsgId != 0)
+            {
+                try
+                {
+                    bool filtered = ChangeWindowMessageFilterEx(_messageReceiverHwnd, _taskbarCreatedMsgId, MSGFLT_ALLOW, IntPtr.Zero);
+                    if (filtered)
+                    {
+                        TaskbarLogger.Info($"[RECEIVER] ChangeWindowMessageFilterEx successfully allowed TaskbarCreated message (Msg=0x{_taskbarCreatedMsgId:X}).");
+                    }
+                    else
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        TaskbarLogger.Warn($"[RECEIVER] ChangeWindowMessageFilterEx returned false for TaskbarCreated (Msg=0x{_taskbarCreatedMsgId:X}). Win32Error={err}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    TaskbarLogger.Warn($"[RECEIVER] Non-fatal exception calling ChangeWindowMessageFilterEx: {ex.Message}");
+                }
+            }
+
             return true;
         }
         catch (Exception ex)
@@ -418,8 +492,8 @@ public sealed class TaskbarHost : IDisposable
     {
         if (msg == _taskbarCreatedMsgId && _taskbarCreatedMsgId != 0)
         {
-            TaskbarLogger.Info($"[RECEIVER] Caught TaskbarCreated broadcast (Msg=0x{msg:X}) on MessageReceiver HWND 0x{hWnd.ToInt64():X}");
-            _recovery?.HandleTaskbarCreated(hWnd, msg);
+            TaskbarLogger.Info($"[RECEIVER] Caught TaskbarCreated broadcast (Msg=0x{msg:X}) on MessageReceiver HWND 0x{hWnd.ToInt64():X}. Requesting recovery.");
+            _recovery?.RequestRecovery("MessageReceiver:TaskbarCreatedBroadcast");
             return IntPtr.Zero;
         }
 
@@ -456,10 +530,23 @@ public sealed class TaskbarHost : IDisposable
                 return IntPtr.Zero;
 
             case WM_NCDESTROY:
-                TaskbarLogger.Debug($"[HOST] Ephemeral Host HWND 0x{hWnd.ToInt64():X} received WM_NCDESTROY.");
-                if (_hostHwnd == hWnd)
+                bool isMatchingHost = (_hostHwnd == hWnd);
+                bool isIntentional = _isIntentionalHostTeardown;
+                bool isDisposing = _isDisposed;
+
+                TaskbarLogger.Info($"[HOST] Ephemeral Host HWND 0x{hWnd.ToInt64():X} received WM_NCDESTROY (MatchingHost={isMatchingHost}, Intentional={isIntentional}, Disposing={isDisposing}).");
+
+                if (isMatchingHost)
                 {
                     _hostHwnd = IntPtr.Zero;
+                }
+
+                if (!isDisposing && !isIntentional && isMatchingHost)
+                {
+                    _isAttached = false;
+                    AttachmentChanged?.Invoke(false);
+                    TaskbarLogger.Warn("[HOST] Unexpected active host destruction detected. Requesting Explorer recovery pipeline.");
+                    _recovery?.RequestRecovery("HostWndProc:UnexpectedWM_NCDESTROY");
                 }
                 return IntPtr.Zero;
         }
@@ -467,10 +554,145 @@ public sealed class TaskbarHost : IDisposable
         return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 
+    /// <summary>
+    /// Reasserts the active host window at the top of the Shell_TrayWnd child sibling Z-order.
+    /// Validates handle liveness and parent relationship before invoking SetWindowPos(HWND_TOP).
+    /// </summary>
+    public bool EnsureHostZOrder()
+    {
+        if (_isDisposed || _hostHwnd == IntPtr.Zero || _taskbarHwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        bool isHostValid = IsWindowTestHook?.Invoke(_hostHwnd) ?? IsWindow(_hostHwnd);
+        bool isTaskbarValid = IsWindowTestHook?.Invoke(_taskbarHwnd) ?? IsWindow(_taskbarHwnd);
+        if (!isHostValid || !isTaskbarValid)
+        {
+            return false;
+        }
+
+        IntPtr parent = GetParentTestHook?.Invoke(_hostHwnd) ?? GetParent(_hostHwnd);
+        if (parent != _taskbarHwnd)
+        {
+            return false;
+        }
+
+        bool success;
+        if (SetWindowPosTestHook != null)
+        {
+            success = SetWindowPosTestHook(_hostHwnd, HWND_TOP, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+        else
+        {
+            success = SetWindowPos(
+                _hostHwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+
+        if (success)
+        {
+            TaskbarLogger.Debug($"[ZORDER] Successfully asserted host 0x{_hostHwnd.ToInt64():X} to HWND_TOP in Shell_TrayWnd 0x{_taskbarHwnd.ToInt64():X}.");
+        }
+        else
+        {
+            int err = Marshal.GetLastWin32Error();
+            TaskbarLogger.Warn($"[ZORDER] SetWindowPos(HWND_TOP) failed for host 0x{_hostHwnd.ToInt64():X}. Win32Error={err}");
+        }
+
+        return success;
+    }
+
+    private void StartPostRecoveryStabilization(IntPtr targetHost, IntPtr targetTaskbar)
+    {
+        if (_isDisposed || targetHost == IntPtr.Zero || targetTaskbar == IntPtr.Zero)
+        {
+            return;
+        }
+
+        CancelPostRecoveryStabilization();
+
+        int gen = Interlocked.Increment(ref _stabilizationGeneration);
+        var cts = new CancellationTokenSource();
+        _stabilizationCts = cts;
+        var token = cts.Token;
+        int[] delays = CustomStabilizationDelaysMsForTesting ?? PostRecoveryStabilizationDelaysMs;
+
+        Action work = async () =>
+        {
+            foreach (int delayMs in delays)
+            {
+                try
+                {
+                    await Task.Delay(delayMs, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (_isDisposed || token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                // Guard against stale callbacks targeting an older/replaced host
+                if (_stabilizationGeneration != gen || _hostHwnd != targetHost || _taskbarHwnd != targetTaskbar)
+                {
+                    TaskbarLogger.Debug("[ZORDER] Stabilization aborted: host generation or HWND identity changed.");
+                    return;
+                }
+
+                if (!EnsureHostZOrder())
+                {
+                    TaskbarLogger.Debug("[ZORDER] Stabilization aborted: host or taskbar handle no longer valid/parented.");
+                    return;
+                }
+
+                StabilizationTickForTesting?.Invoke(gen);
+            }
+        };
+
+        if (CustomDispatcherForTesting != null)
+        {
+            CustomDispatcherForTesting(work);
+        }
+        else if (_dispatcherQueue != null)
+        {
+            _dispatcherQueue.TryEnqueue(() => work());
+        }
+        else
+        {
+            Task.Run(work);
+        }
+    }
+
+    private void CancelPostRecoveryStabilization()
+    {
+        Interlocked.Increment(ref _stabilizationGeneration);
+        try
+        {
+            _stabilizationCts?.Cancel();
+            _stabilizationCts?.Dispose();
+        }
+        catch { }
+        finally
+        {
+            _stabilizationCts = null;
+        }
+    }
+
     public void Dispose()
     {
         if (_isDisposed) return;
+        CancelPostRecoveryStabilization();
         _isDisposed = true;
+        _isIntentionalHostTeardown = true;
 
         TaskbarLogger.Info("[SHUTDOWN] Disposing TaskbarHost, MessageReceiver, and cleaning up taskbar hooks...");
 
@@ -524,4 +746,24 @@ public sealed class TaskbarHost : IDisposable
             TaskbarLogger.Error("[SHUTDOWN] Exception during TaskbarHost disposal.", ex);
         }
     }
+
+    internal delegate bool TryGetPlacementDelegate(IntPtr taskbarHwnd, out TaskbarPlacement placement);
+    internal TryGetPlacementDelegate? TryGetPlacementHook { get; set; }
+    internal Func<IntPtr, bool>? IsWindowTestHook { get; set; }
+    internal Func<IntPtr, IntPtr>? GetParentTestHook { get; set; }
+    internal Action<Action>? CustomDispatcherForTesting { get; set; }
+    internal int[]? CustomStabilizationDelaysMsForTesting { get; set; }
+    internal event Action<int>? StabilizationTickForTesting;
+    internal void SetHostHwndForTesting(IntPtr hwnd) => _hostHwnd = hwnd;
+    internal void SetTaskbarHwndForTesting(IntPtr hwnd) => _taskbarHwnd = hwnd;
+    internal void SetIsAttachedForTesting(bool isAttached) => _isAttached = isAttached;
+    internal void SetRecoveryForTesting(ExplorerRecovery recovery) => _recovery = recovery;
+    internal void SetIntentionalTeardownForTesting(bool intentional) => _isIntentionalHostTeardown = intentional;
+    internal int StabilizationGenerationForTesting => _stabilizationGeneration;
+    internal bool HasPendingStabilizationForTesting => _stabilizationCts != null && !_stabilizationCts.IsCancellationRequested;
+    internal void StartPostRecoveryStabilizationForTesting(IntPtr host, IntPtr taskbar) => StartPostRecoveryStabilization(host, taskbar);
+    internal void CancelPostRecoveryStabilizationForTesting() => CancelPostRecoveryStabilization();
+    internal Func<IntPtr, IntPtr, uint, bool>? SetWindowPosTestHook { get; set; }
+    internal IntPtr HandleHostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam) => HostWndProc(hWnd, msg, wParam, lParam);
+    internal IntPtr HandleReceiverMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam) => MessageReceiverWndProc(hWnd, msg, wParam, lParam);
 }

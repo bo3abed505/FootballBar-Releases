@@ -103,6 +103,11 @@ public partial class App : Application
             _taskbarHost = new TaskbarHost();
             CurrentTaskbarHost = _taskbarHost;
 
+            _taskbarHost.AttachmentChanged += attached =>
+            {
+                _diagnosticsService.RecordTaskbarStatus(attached ? "Attached" : "Detached (Recovering)");
+            };
+
             _tickerControl = new TaskbarTicker();
             bool initialized = await _taskbarHost.InitializeAsync(_tickerControl);
 
