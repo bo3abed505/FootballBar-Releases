@@ -7,12 +7,15 @@
     Optional version string. Defaults to the version found in the root VERSION file.
 .PARAMETER SkipArchive
     If specified, skips creating the .zip archive.
+.PARAMETER UpdateDownloadUrl
+    Optional HTTPS download URL for generating release-manifest.json for automatic update discovery.
 #>
 
 [CmdletBinding()]
 param (
     [string]$Version,
-    [switch]$SkipArchive
+    [switch]$SkipArchive,
+    [string]$UpdateDownloadUrl
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,9 +42,95 @@ $PublishDir = Join-Path $ReleaseBaseDir "win-x64"
 $ProjectFile = Join-Path $RootDir "src\client\FootballTray.Client\FootballTray.Client.csproj"
 $ArchiveFile = Join-Path $ReleaseBaseDir "FootballTray-v$Version-win-x64.zip"
 $ChecksumFile = Join-Path $ReleaseBaseDir "SHA256SUMS.txt"
+$ManifestFile = Join-Path $ReleaseBaseDir "release-manifest.json"
+
+# Validate -UpdateDownloadUrl early (fail-fast)
+$hasUpdateUrl = $PSBoundParameters.ContainsKey('UpdateDownloadUrl')
+if ($hasUpdateUrl) {
+    if ([string]::IsNullOrWhiteSpace($UpdateDownloadUrl)) {
+        Write-Error "CRITICAL: -UpdateDownloadUrl was supplied but is empty or whitespace."
+        exit 1
+    }
+
+    if ($SkipArchive) {
+        Write-Error "CRITICAL: Cannot generate release manifest when -SkipArchive is specified."
+        exit 1
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($UpdateDownloadUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+        Write-Error "CRITICAL: -UpdateDownloadUrl '$UpdateDownloadUrl' is not a valid absolute URI."
+        exit 1
+    }
+
+    if ($uri.Scheme -ne [System.Uri]::UriSchemeHttps) {
+        Write-Error "CRITICAL: -UpdateDownloadUrl must use HTTPS scheme. Insecure or non-web scheme '$($uri.Scheme)' is rejected."
+        exit 1
+    }
+
+    $expectedZipName = [System.IO.Path]::GetFileName($ArchiveFile)
+    $urlFileName = [System.IO.Path]::GetFileName($uri.AbsolutePath)
+    if ($urlFileName -cne $expectedZipName) {
+        Write-Error "CRITICAL: -UpdateDownloadUrl filename '$urlFileName' does not match the generated release archive filename '$expectedZipName'."
+        exit 1
+    }
+}
+
+function New-ReleaseManifest {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)][string]$Version,
+        [Parameter(Mandatory=$true)][string]$DownloadUrl,
+        [Parameter(Mandatory=$true)][string]$ArchiveFile,
+        [Parameter(Mandatory=$false)][string]$ReleaseNotesFile,
+        [Parameter(Mandatory=$true)][string]$ManifestFile,
+        [string]$Architecture = "win-x64"
+    )
+
+    $MaxReleaseNotesLength = 10000
+
+    if (-not (Test-Path -LiteralPath $ArchiveFile)) {
+        throw "CRITICAL: Release archive not found at '$ArchiveFile'."
+    }
+
+    $zipHash = (Get-FileHash -LiteralPath $ArchiveFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    $archiveSizeBytes = (Get-Item -LiteralPath $ArchiveFile).Length
+
+    $releaseNotesContent = $null
+    if ($ReleaseNotesFile -and (Test-Path -LiteralPath $ReleaseNotesFile)) {
+        $releaseNotesContent = Get-Content -LiteralPath $ReleaseNotesFile -Raw
+        if ($releaseNotesContent.Length -gt $MaxReleaseNotesLength) {
+            throw "CRITICAL: Release notes length ($($releaseNotesContent.Length) characters) exceeds maximum allowed length of $MaxReleaseNotesLength characters."
+        }
+    }
+
+    $publishedAt = (Get-Date).ToUniversalTime().ToString(
+        "yyyy-MM-ddTHH:mm:ssZ",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+
+    $manifestObj = [ordered]@{
+        schemaVersion = "1.0"
+        version       = $Version
+        publishedAt   = $publishedAt
+        architecture  = $Architecture
+        downloadUrl   = $DownloadUrl
+        sha256        = $zipHash
+        sizeBytes     = $archiveSizeBytes
+        releaseNotes  = $releaseNotesContent
+    }
+
+    $manifestJson = $manifestObj | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($ManifestFile, $manifestJson + "`n", [System.Text.UTF8Encoding]::new($false))
+}
+
+# If script is dot-sourced (e.g. for testing New-ReleaseManifest), do not execute the build workflow
+if ($MyInvocation.InvocationName -eq '.') {
+    return
+}
 
 # 1. Clean previous release artifacts for this version
-Write-Host "`n[1/7] Cleaning previous publish artifacts..." -ForegroundColor Yellow
+Write-Host "`n[1/8] Cleaning previous publish artifacts..." -ForegroundColor Yellow
 if (Test-Path $PublishDir) {
     Remove-Item -Path $PublishDir -Recurse -Force
 }
@@ -51,10 +140,13 @@ if (Test-Path $ArchiveFile) {
 if (Test-Path $ChecksumFile) {
     Remove-Item -Path $ChecksumFile -Force
 }
+if (Test-Path $ManifestFile) {
+    Remove-Item -Path $ManifestFile -Force
+}
 New-Item -ItemType Directory -Path $PublishDir -Force | Out-Null
 
 # 2. Restore NuGet dependencies
-Write-Host "`n[2/7] Restoring dependencies..." -ForegroundColor Yellow
+Write-Host "`n[2/8] Restoring dependencies..." -ForegroundColor Yellow
 $restoreOutput = dotnet restore $ProjectFile -r win-x64 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Error "dotnet restore failed with exit code $LASTEXITCODE`n$restoreOutput"
@@ -62,7 +154,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 3. Publish self-contained x64 release
-Write-Host "`n[3/7] Publishing self-contained x64 Release..." -ForegroundColor Yellow
+Write-Host "`n[3/8] Publishing self-contained x64 Release..." -ForegroundColor Yellow
 $publishArgs = @(
     "publish", $ProjectFile,
     "-c", "Release",
@@ -81,7 +173,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 4. Generate VERSION.txt and RELEASE_NOTES.txt
-Write-Host "`n[4/7] Generating release metadata..." -ForegroundColor Yellow
+Write-Host "`n[4/8] Generating release metadata..." -ForegroundColor Yellow
 $versionTxtPath = Join-Path $PublishDir "VERSION.txt"
 $releaseNotesPath = Join-Path $PublishDir "RELEASE_NOTES.txt"
 
@@ -114,7 +206,7 @@ Copy-Item -Path $versionTxtPath -Destination (Join-Path $ReleaseBaseDir "VERSION
 Copy-Item -Path $releaseNotesPath -Destination (Join-Path $ReleaseBaseDir "RELEASE_NOTES.txt") -Force
 
 # 5. Validate published output integrity
-Write-Host "`n[5/7] Validating published output..." -ForegroundColor Yellow
+Write-Host "`n[5/8] Validating published output..." -ForegroundColor Yellow
 $exePath = Join-Path $PublishDir "FootballTray.exe"
 if (-not (Test-Path $exePath)) {
     Write-Error "CRITICAL: Published executable not found at '$exePath'!"
@@ -146,16 +238,16 @@ if ($forbiddenFiles.Count -gt 0) {
 
 # 6. Create Zip Archive
 if (-not $SkipArchive) {
-    Write-Host "`n[6/7] Creating release archive: $ArchiveFile..." -ForegroundColor Yellow
+    Write-Host "`n[6/8] Creating release archive: $ArchiveFile..." -ForegroundColor Yellow
     Compress-Archive -Path "$PublishDir\*" -DestinationPath $ArchiveFile -Force
     $archiveSizeMb = [math]::Round(((Get-Item $ArchiveFile).Length / 1MB), 2)
     Write-Host "Archive created successfully ($archiveSizeMb MB)." -ForegroundColor Green
 } else {
-    Write-Host "`n[6/7] Skipping archive creation (-SkipArchive was specified)." -ForegroundColor Gray
+    Write-Host "`n[6/8] Skipping archive creation (-SkipArchive was specified)." -ForegroundColor Gray
 }
 
 # 7. Compute SHA-256 Checksums
-Write-Host "`n[7/7] Generating SHA-256 checksums..." -ForegroundColor Yellow
+Write-Host "`n[7/8] Generating SHA-256 checksums..." -ForegroundColor Yellow
 $checksumEntries = [System.Collections.Generic.List[string]]::new()
 
 if (Test-Path $ArchiveFile) {
@@ -170,8 +262,32 @@ Write-Host "  $exeHash  win-x64/FootballTray.exe" -ForegroundColor Cyan
 
 Set-Content -Path $ChecksumFile -Value ($checksumEntries -join "`n")
 
+# 8. Generate Release Manifest (Optional)
+if ($hasUpdateUrl) {
+    Write-Host "`n[8/8] Generating release manifest: $ManifestFile..." -ForegroundColor Yellow
+    try {
+        $notesFile = $releaseNotesPath
+        New-ReleaseManifest `
+            -Version $Version `
+            -DownloadUrl $UpdateDownloadUrl `
+            -ArchiveFile $ArchiveFile `
+            -ReleaseNotesFile $notesFile `
+            -ManifestFile $ManifestFile `
+            -Architecture "win-x64"
+        Write-Host "  Manifest generated successfully: $ManifestFile" -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to generate release manifest: $_"
+        exit 1
+    }
+} else {
+    Write-Host "`n[8/8] Skipping release manifest (-UpdateDownloadUrl was not specified)." -ForegroundColor Gray
+}
+
 Write-Host "`n============================================================" -ForegroundColor Green
 Write-Host " Release v$Version published successfully!" -ForegroundColor Green
 Write-Host " Artifacts directory: $ReleaseBaseDir" -ForegroundColor Green
+if ($hasUpdateUrl) {
+    Write-Host " Manifest:            $ManifestFile" -ForegroundColor Green
+}
 Write-Host "============================================================" -ForegroundColor Green
 exit 0

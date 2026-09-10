@@ -49,7 +49,7 @@ $ArchiveFilePath = Join-Path $ReleaseDir "FootballTray-v$Version-win-x64.zip"
 $validationErrors = [System.Collections.Generic.List[string]]::new()
 
 # 1. Verify Executable Exists
-Write-Host "`n[1/7] Checking executable existence..." -ForegroundColor Yellow
+Write-Host "`n[1/8] Checking executable existence..." -ForegroundColor Yellow
 if (-not (Test-Path $ExePath)) {
     $validationErrors.Add("Missing main executable: $ExePath")
 } else {
@@ -58,7 +58,7 @@ if (-not (Test-Path $ExePath)) {
 }
 
 # 2. Verify Architecture is 64-bit
-Write-Host "`n[2/7] Validating executable architecture (x64)..." -ForegroundColor Yellow
+Write-Host "`n[2/8] Validating executable architecture (x64)..." -ForegroundColor Yellow
 if (Test-Path $ExePath) {
     try {
         $bytes = [System.IO.File]::ReadAllBytes($ExePath)
@@ -77,7 +77,7 @@ if (Test-Path $ExePath) {
 }
 
 # 3. Verify Required Windows App SDK and Application DLLs
-Write-Host "`n[3/7] Validating required runtime DLLs..." -ForegroundColor Yellow
+Write-Host "`n[3/8] Validating required runtime DLLs..." -ForegroundColor Yellow
 $requiredDlls = @(
     "FootballTray.dll",
     "FootballTray.Core.dll",
@@ -96,7 +96,7 @@ foreach ($dll in $requiredDlls) {
 }
 
 # 4. Verify VERSION.txt
-Write-Host "`n[4/7] Checking VERSION.txt metadata..." -ForegroundColor Yellow
+Write-Host "`n[4/8] Checking VERSION.txt metadata..." -ForegroundColor Yellow
 if (-not (Test-Path $VersionTxtPath)) {
     $validationErrors.Add("Missing VERSION.txt in publish folder")
 } else {
@@ -109,7 +109,7 @@ if (-not (Test-Path $VersionTxtPath)) {
 }
 
 # 5. Verify Checksums
-Write-Host "`n[5/7] Verifying SHA-256 checksums..." -ForegroundColor Yellow
+Write-Host "`n[5/8] Verifying SHA-256 checksums..." -ForegroundColor Yellow
 if (-not (Test-Path $ChecksumFilePath)) {
     $validationErrors.Add("Missing SHA256SUMS.txt in $ReleaseDir")
 } else {
@@ -137,7 +137,7 @@ if (-not (Test-Path $ChecksumFilePath)) {
 }
 
 # 6. Security & Secret Boundary Audit
-Write-Host "`n[6/7] Performing security boundary scan on release files..." -ForegroundColor Yellow
+Write-Host "`n[6/8] Performing security boundary scan on release files..." -ForegroundColor Yellow
 $forbiddenKeywords = @(
     "API_FOOTBALL_KEY",
     "x-apisports-key",
@@ -158,7 +158,7 @@ foreach ($file in $textFiles) {
 }
 
 # 7. Verify Absence of Test / Development Files
-Write-Host "`n[7/7] Verifying absence of test and development files..." -ForegroundColor Yellow
+Write-Host "`n[7/8] Verifying absence of test and development files..." -ForegroundColor Yellow
 $leakedDevFiles = @(Get-ChildItem -Path $PublishDir -Recurse -Include "*.Tests.dll", "*.cs", "*.ts", ".env*", "*.mock-state.json")
 if ($leakedDevFiles.Count -gt 0) {
     foreach ($lf in $leakedDevFiles) {
@@ -166,6 +166,148 @@ if ($leakedDevFiles.Count -gt 0) {
     }
 } else {
     Write-Host "  Zero development/test artifacts detected in release output." -ForegroundColor Green
+}
+
+# 8. Verify Release Manifest (if present)
+$ManifestFilePath = Join-Path $ReleaseDir "release-manifest.json"
+Write-Host "`n[8/8] Checking release manifest (optional)..." -ForegroundColor Yellow
+if (-not (Test-Path $ManifestFilePath)) {
+    Write-Host "  No release-manifest.json found (optional artifact; skipped)." -ForegroundColor Gray
+} else {
+    try {
+        $manifestJson = Get-Content -Path $ManifestFilePath -Raw
+        $doc = [System.Text.Json.JsonDocument]::Parse($manifestJson)
+        try {
+            $root = $doc.RootElement
+            $props = [System.Collections.Generic.Dictionary[string, System.Text.Json.JsonElement]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($p in $root.EnumerateObject()) {
+                $props[$p.Name] = $p.Value
+            }
+
+            # 1. Schema Version
+            if (-not $props.ContainsKey("schemaVersion") -or $props["schemaVersion"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("release-manifest.json: schemaVersion is missing or not a string.")
+            } else {
+                $schemaVer = $props["schemaVersion"].GetString()
+                if ($schemaVer -cne "1.0") {
+                    $validationErrors.Add("release-manifest.json: Unsupported schemaVersion '$schemaVer'. Expected '1.0'.")
+                }
+            }
+
+            # 2. Version
+            if (-not $props.ContainsKey("version") -or $props["version"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("release-manifest.json: version is missing or not a string.")
+            } else {
+                $ver = $props["version"].GetString()
+                if ($ver -cne $Version) {
+                    $validationErrors.Add("release-manifest.json: Version '$ver' does not match expected release version '$Version'.")
+                }
+            }
+
+            # 3. Architecture
+            if (-not $props.ContainsKey("architecture") -or $props["architecture"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("release-manifest.json: architecture is missing or not a string.")
+            } else {
+                $arch = $props["architecture"].GetString()
+                if ($arch -cne "win-x64") {
+                    $validationErrors.Add("release-manifest.json: Incompatible architecture '$arch'. Expected 'win-x64'.")
+                }
+            }
+
+            # 4. Download URL (absolute HTTPS, matching archive filename)
+            if (-not $props.ContainsKey("downloadUrl") -or $props["downloadUrl"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("release-manifest.json: downloadUrl is missing or not a string.")
+            } else {
+                $dlUrl = $props["downloadUrl"].GetString()
+                $uri = $null
+                if ([string]::IsNullOrWhiteSpace($dlUrl) -or -not [System.Uri]::TryCreate($dlUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+                    $validationErrors.Add("release-manifest.json: downloadUrl '$dlUrl' is not a valid absolute URI.")
+                } elseif ($uri.Scheme -ne [System.Uri]::UriSchemeHttps) {
+                    $validationErrors.Add("release-manifest.json: downloadUrl must use HTTPS scheme. Insecure scheme '$($uri.Scheme)' is rejected.")
+                } else {
+                    $expectedZipName = [System.IO.Path]::GetFileName($ArchiveFilePath)
+                    $urlFileName = [System.IO.Path]::GetFileName($uri.AbsolutePath)
+                    if ($urlFileName -cne $expectedZipName) {
+                        $validationErrors.Add("release-manifest.json: downloadUrl filename '$urlFileName' does not match archive filename '$expectedZipName'.")
+                    } else {
+                        Write-Host "  Manifest downloadUrl matches archive filename: $urlFileName" -ForegroundColor Green
+                    }
+                }
+            }
+
+            # 5. SHA-256 Checksum (valid hex and matches actual ZIP)
+            if (-not $props.ContainsKey("sha256") -or $props["sha256"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("release-manifest.json: sha256 is missing or not a string.")
+            } else {
+                $sha = $props["sha256"].GetString()
+                if ([string]::IsNullOrWhiteSpace($sha) -or $sha -notmatch '^[a-fA-F0-9]{64}$') {
+                    $validationErrors.Add("release-manifest.json: sha256 must be exactly 64 hexadecimal characters. Received '$sha'.")
+                } elseif (Test-Path $ArchiveFilePath) {
+                    $actualZipHash = (Get-FileHash -Path $ArchiveFilePath -Algorithm SHA256).Hash.ToLowerInvariant()
+                    if ($sha.ToLowerInvariant() -ne $actualZipHash) {
+                        $validationErrors.Add("release-manifest.json: sha256 mismatch! Manifest: $sha, Actual ZIP: $actualZipHash")
+                    } else {
+                        Write-Host "  Manifest SHA-256 matches release archive ($actualZipHash)" -ForegroundColor Green
+                    }
+                }
+            }
+
+            # 6. Size Bytes (matches actual ZIP byte length)
+            if (-not $props.ContainsKey("sizeBytes") -or $props["sizeBytes"].ValueKind -ne [System.Text.Json.JsonValueKind]::Number) {
+                $validationErrors.Add("release-manifest.json: sizeBytes is missing or not a number.")
+            } else {
+                $sizeBytes = $props["sizeBytes"].GetInt64()
+                if (Test-Path $ArchiveFilePath) {
+                    $actualSizeBytes = (Get-Item $ArchiveFilePath).Length
+                    if ($sizeBytes -ne $actualSizeBytes) {
+                        $validationErrors.Add("release-manifest.json: sizeBytes mismatch! Manifest: $sizeBytes, Actual ZIP: $actualSizeBytes")
+                    } else {
+                        Write-Host "  Manifest sizeBytes matches release archive ($actualSizeBytes bytes)" -ForegroundColor Green
+                    }
+                }
+            }
+
+            # 7. PublishedAt (explicit timezone indication and valid ISO 8601)
+            if (-not $props.ContainsKey("publishedAt") -or $props["publishedAt"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("release-manifest.json: publishedAt is missing or not a string.")
+            } else {
+                $pubAt = $props["publishedAt"].GetString()
+                if ([string]::IsNullOrWhiteSpace($pubAt)) {
+                    $validationErrors.Add("release-manifest.json: publishedAt is missing or empty.")
+                } else {
+                    $trimmedPubAt = $pubAt.Trim()
+                    if ($trimmedPubAt -notmatch '(?:[zZ]|[+-]\d{2}(?::?\d{2})?)$') {
+                        $validationErrors.Add("release-manifest.json: publishedAt '$pubAt' must include an explicit UTC 'Z' or timezone offset.")
+                    } else {
+                        $dto = [System.DateTimeOffset]::MinValue
+                        $styles = [System.Globalization.DateTimeStyles]::RoundtripKind -bor [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+                        if (-not [System.DateTimeOffset]::TryParse($trimmedPubAt, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$dto)) {
+                            $validationErrors.Add("release-manifest.json: publishedAt '$pubAt' is not a valid ISO 8601 timestamp.")
+                        } else {
+                            Write-Host "  Manifest publishedAt is valid explicit-offset timestamp: $pubAt" -ForegroundColor Green
+                        }
+                    }
+                }
+            }
+
+            # 8. Release Notes (optional, bounded length, string or null)
+            if ($props.ContainsKey("releaseNotes")) {
+                $rnElem = $props["releaseNotes"]
+                if ($rnElem.ValueKind -eq [System.Text.Json.JsonValueKind]::String) {
+                    $rn = $rnElem.GetString()
+                    if ($rn -and $rn.Length -gt 10000) {
+                        $validationErrors.Add("release-manifest.json: releaseNotes exceeds maximum allowed length of 10000 characters ($($rn.Length)).")
+                    }
+                } elseif ($rnElem.ValueKind -ne [System.Text.Json.JsonValueKind]::Null) {
+                    $validationErrors.Add("release-manifest.json: releaseNotes must be a string or null if present. Found '$($rnElem.ValueKind)'.")
+                }
+            }
+        } finally {
+            $doc.Dispose()
+        }
+    } catch {
+        $validationErrors.Add("release-manifest.json: Failed to parse or inspect manifest: $_")
+    }
 }
 
 Write-Host "`n============================================================" -ForegroundColor Cyan

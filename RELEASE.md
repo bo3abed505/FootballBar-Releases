@@ -59,13 +59,30 @@ Or specify an explicit version if needed:
 pwsh -ExecutionPolicy Bypass -File ./scripts/publish-release.ps1 -Version "1.0.0"
 ```
 
+To optionally generate a static update discovery manifest (`release-manifest.json`), provide the target HTTPS download URL:
+```powershell
+pwsh -ExecutionPolicy Bypass -File ./scripts/publish-release.ps1 -UpdateDownloadUrl "https://example.invalid/releases/v1.0.0/FootballTray-v1.0.0-win-x64.zip"
+```
+
+> [!NOTE]
+> `https://example.invalid/...` is an illustrative placeholder only and is **not** the configured FootballTray production host.
+>
+> **Release Engineering & Operational Boundaries**:
+> 1. `publish-release.ps1` creates release artifacts strictly **locally** under `artifacts/releases/`.
+> 2. The script performs **no** external network uploads.
+> 3. Public hosting, CDN deployment, or GitHub Releases asset publication remains a separate release-infrastructure step.
+> 4. Automatic client update checking/polling is **not** implemented yet.
+> 5. This checkpoint only establishes reproducible `release-manifest.json` generation and offline validation.
+
 The script will:
 1. Clean previous publish folders in `artifacts/releases/v1.0.0/`.
 2. Restore all NuGet packages for `win-x64`.
 3. Publish a fully self-contained `win-x64` Release build carrying all Windows App SDK runtime components.
 4. Generate `VERSION.txt` and `RELEASE_NOTES.txt`.
-5. Compress the output into `FootballTray-v1.0.0-win-x64.zip`.
-6. Compute SHA-256 hashes and save `SHA256SUMS.txt`.
+5. Validate published output integrity and runtime dependencies.
+6. Compress the output into `FootballTray-v1.0.0-win-x64.zip`.
+7. Compute SHA-256 hashes and save `SHA256SUMS.txt`.
+8. Generate `release-manifest.json` (optional, when `-UpdateDownloadUrl` is supplied).
 
 ---
 
@@ -83,6 +100,8 @@ The validation script verifies:
 - `VERSION.txt` matches the configured SemVer version.
 - SHA-256 checksums match the generated zip archive and binary.
 - Security Boundary Scan: Verifies that no API keys, database URLs, `.env` files, or test DLLs leaked into the release folder.
+- Absence of test/development files (`*.Tests.dll`, `*.cs`, `*.ts`, `.env*`).
+- Release Manifest Integrity: If `release-manifest.json` is present, verifies schema version (`"1.0"`), version match, architecture (`"win-x64"`), HTTPS download URL with matching archive filename, SHA-256 hash match against actual ZIP, byte size match against actual ZIP, and valid explicit-offset publication timestamp.
 
 ### Validation Environments Note
 - **Isolated Publish-Directory Validation**: The release ZIP is extracted to a clean temporary location outside the repository tree, verifying that the application boots and initializes Windows App SDK runtime without referencing workspace files.
@@ -100,6 +119,7 @@ artifacts/
       SHA256SUMS.txt                      # SHA-256 Checksums
       VERSION.txt                         # Version and build metadata
       RELEASE_NOTES.txt                   # User-facing release notes
+      release-manifest.json               # (Optional) Update discovery manifest
       win-x64/                            # Self-contained application folder
         FootballTray.exe                  # Main application executable
         FootballTray.dll
@@ -107,6 +127,39 @@ artifacts/
         Microsoft.WinUI.dll
         Microsoft.WindowsAppRuntime.Bootstrap.dll
         ... (runtime dependencies)
+```
+
+---
+
+## Release Update Manifest (Optional)
+
+When `-UpdateDownloadUrl` is supplied to `publish-release.ps1`, a deterministic `release-manifest.json` document is written to the release root. This manifest establishes the static contract that a future client update discovery service can consume to safely detect, evaluate, and offer new releases without hardcoded backend coupling or provider traffic.
+
+### Schema Fields (`schemaVersion: "1.0"`)
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `schemaVersion` | string | Yes | Manifest schema version (strictly `"1.0"`). |
+| `version` | string | Yes | FootballTray application version using the installer-compatible version grammar (e.g. `"1.0.0"`). |
+| `publishedAt` | string | Yes | ISO 8601 UTC timestamp with explicit `Z` offset (e.g. `"2026-09-10T19:30:00Z"`). |
+| `architecture` | string | Yes | Target platform architecture (strictly `"win-x64"`). |
+| `downloadUrl` | string | Yes | Absolute HTTPS URI pointing directly to the release ZIP archive. Must match archive filename. |
+| `sha256` | string | Yes | Lowercase 64-hex SHA-256 hash of the distribution ZIP archive. |
+| `sizeBytes` | integer | Yes | Exact file size in bytes of the distribution ZIP archive. |
+| `releaseNotes` | string | No | User-facing release notes content (up to 10,000 characters). |
+
+Example `release-manifest.json`:
+```json
+{
+  "schemaVersion": "1.0",
+  "version": "1.0.0",
+  "publishedAt": "2026-09-10T19:30:00Z",
+  "architecture": "win-x64",
+  "downloadUrl": "https://example.invalid/releases/v1.0.0/FootballTray-v1.0.0-win-x64.zip",
+  "sha256": "0a0216b61bd63dafdeab85a00b6319e4fa0108e958d0fe25b4bde943ff58ddd4",
+  "sizeBytes": 65518293,
+  "releaseNotes": "FootballTray v1.0.0\n============================================================\n..."
+}
 ```
 
 ---
