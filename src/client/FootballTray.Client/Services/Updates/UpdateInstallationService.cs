@@ -421,8 +421,8 @@ public sealed class UpdateInstallationService : IUpdateInstallationService
             }
         }
 
-        // Version verification: VERSION.txt takes priority, with PE ProductVersion/FileVersion fallback
-        string? payloadVersion = null;
+        // Version verification: validate VERSION.txt and PE binary metadata against expectedVersion and each other
+        string? versionTxtVersion = null;
         string versionTxtPath = Path.Combine(stagingDirectory, "VERSION.txt");
         if (File.Exists(versionTxtPath))
         {
@@ -432,39 +432,76 @@ public sealed class UpdateInstallationService : IUpdateInstallationService
                 var match = Regex.Match(line, @"(?:FootballTray\s+)?v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)");
                 if (match.Success && SemanticVersion.TryParse(match.Groups[1].Value, out var parsed) && parsed != null)
                 {
-                    payloadVersion = parsed.ToString();
+                    versionTxtVersion = parsed.ToString();
                     break;
                 }
             }
+
+            if (versionTxtVersion != null && !string.Equals(versionTxtVersion, expectedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Extracted 'VERSION.txt' version 'v{versionTxtVersion}' does not match expected version 'v{expectedVersion}'.");
+            }
         }
 
-        if (payloadVersion == null)
+        string? peVersion = null;
+        try
+        {
+            var vi = FileVersionInfo.GetVersionInfo(exePath);
+            if (!string.IsNullOrWhiteSpace(vi.ProductVersion))
+            {
+                string pv = vi.ProductVersion;
+                int plusIdx = pv.IndexOf('+');
+                string cleanPv = plusIdx > 0 ? pv[..plusIdx] : pv;
+                if (SemanticVersion.TryParse(cleanPv, out var parsedProd) && parsedProd != null)
+                {
+                    peVersion = parsedProd.ToString();
+                }
+            }
+            if (peVersion == null && !string.IsNullOrWhiteSpace(vi.FileVersion) &&
+                SemanticVersion.TryParse(vi.FileVersion, out var parsedFile) && parsedFile != null)
+            {
+                peVersion = parsedFile.ToString();
+            }
+        }
+        catch { }
+
+        if (peVersion != null)
+        {
+            if (!string.Equals(peVersion, expectedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Extracted 'FootballTray.exe' binary version 'v{peVersion}' does not match expected version 'v{expectedVersion}'.");
+            }
+
+            if (versionTxtVersion != null && !string.Equals(versionTxtVersion, peVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Payload version mismatch: 'VERSION.txt' specifies 'v{versionTxtVersion}' but 'FootballTray.exe' specifies 'v{peVersion}'.");
+            }
+        }
+
+        string coreDllPath = Path.Combine(stagingDirectory, "FootballTray.Core.dll");
+        if (File.Exists(coreDllPath))
         {
             try
             {
-                var vi = FileVersionInfo.GetVersionInfo(exePath);
-                if (!string.IsNullOrWhiteSpace(vi.ProductVersion) &&
-                    SemanticVersion.TryParse(vi.ProductVersion, out var parsedProd) && parsedProd != null)
+                var vi = FileVersionInfo.GetVersionInfo(coreDllPath);
+                if (!string.IsNullOrWhiteSpace(vi.ProductVersion))
                 {
-                    payloadVersion = parsedProd.ToString();
-                }
-                else if (!string.IsNullOrWhiteSpace(vi.FileVersion) &&
-                         SemanticVersion.TryParse(vi.FileVersion, out var parsedFile) && parsedFile != null)
-                {
-                    payloadVersion = parsedFile.ToString();
+                    string pv = vi.ProductVersion;
+                    int plusIdx = pv.IndexOf('+');
+                    string cleanPv = plusIdx > 0 ? pv[..plusIdx] : pv;
+                    if (SemanticVersion.TryParse(cleanPv, out var parsedCoreProd) && parsedCoreProd != null &&
+                        !string.Equals(parsedCoreProd.ToString(), expectedVersion, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException($"Extracted 'FootballTray.Core.dll' binary version 'v{parsedCoreProd}' does not match expected version 'v{expectedVersion}'.");
+                    }
                 }
             }
-            catch { }
+            catch (Exception ex) when (ex is not InvalidOperationException) { }
         }
 
-        if (payloadVersion == null)
+        if (versionTxtVersion == null && peVersion == null)
         {
             throw new InvalidOperationException("Unable to determine valid semantic version from extracted payload.");
-        }
-
-        if (!string.Equals(payloadVersion, expectedVersion, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Extracted payload version 'v{payloadVersion}' does not match expected version 'v{expectedVersion}'.");
         }
     }
 

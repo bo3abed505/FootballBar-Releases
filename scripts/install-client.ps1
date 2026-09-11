@@ -219,6 +219,7 @@ function Get-PayloadVersion {
         throw "Cannot determine payload version: directory does not exist: '$Dir'."
     }
 
+    $versionTxtCandidate = $null
     # 1. Try VERSION.txt
     $versionTxt = Join-Path $Dir "VERSION.txt"
     if (Test-Path -LiteralPath $versionTxt) {
@@ -229,13 +230,15 @@ function Get-PayloadVersion {
                     $candidate = $matches[1]
                     try {
                         $parsed = Parse-SemVer -VersionString $candidate
-                        return $parsed.Clean
+                        $versionTxtCandidate = $parsed.Clean
+                        break
                     } catch {}
                 }
             }
         }
     }
 
+    $peCandidate = $null
     # 2. Try PE ProductVersion or FileVersion
     $exePath = Join-Path $Dir "FootballTray.exe"
     if (Test-Path -LiteralPath $exePath) {
@@ -244,16 +247,34 @@ function Get-PayloadVersion {
             if (-not [string]::IsNullOrWhiteSpace($vi.ProductVersion)) {
                 try {
                     $parsed = Parse-SemVer -VersionString $vi.ProductVersion
-                    return $parsed.Clean
+                    $peCandidate = $parsed.Clean
                 } catch {}
             }
-            if (-not [string]::IsNullOrWhiteSpace($vi.FileVersion)) {
+            if ($null -eq $peCandidate -and -not [string]::IsNullOrWhiteSpace($vi.FileVersion)) {
                 try {
                     $parsed = Parse-SemVer -VersionString $vi.FileVersion
-                    return $parsed.Clean
+                    $peCandidate = $parsed.Clean
                 } catch {}
             }
         } catch {}
+    }
+
+    # If both VERSION.txt and PE version exist, enforce consistency (ignoring build metadata)
+    if ($null -ne $versionTxtCandidate -and $null -ne $peCandidate) {
+        $normTxt = $versionTxtCandidate -replace '\+.*$', ''
+        $normPe = $peCandidate -replace '\+.*$', ''
+        if (-not [string]::Equals($normTxt, $normPe, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "CRITICAL: Payload version mismatch in '$Dir'. VERSION.txt specifies '$versionTxtCandidate' but FootballTray.exe specifies '$peCandidate'."
+        }
+        return $normTxt
+    }
+
+    if ($null -ne $versionTxtCandidate) {
+        return ($versionTxtCandidate -replace '\+.*$', '')
+    }
+
+    if ($null -ne $peCandidate) {
+        return ($peCandidate -replace '\+.*$', '')
     }
 
     # Fail closed: never silently invent a version

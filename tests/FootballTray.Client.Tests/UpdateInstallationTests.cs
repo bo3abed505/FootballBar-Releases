@@ -80,7 +80,8 @@ public class UpdateInstallationTests
         string? customVersionTxt = null,
         bool validExe = true,
         bool includeAllDlls = true,
-        Action<ZipArchive>? customEntryAction = null)
+        Action<ZipArchive>? customEntryAction = null,
+        string? customExePath = null)
     {
         string zipPath = Path.Combine(targetDir, $"package_{Guid.NewGuid():N}.zip");
         using (var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write))
@@ -96,8 +97,16 @@ public class UpdateInstallationTests
             var exeEntry = archive.CreateEntry("FootballTray.exe");
             using (var stream = exeEntry.Open())
             {
-                byte[] peBytes = validExe ? CreateDummyX64PeImage() : [0x01, 0x02, 0x03, 0x04];
-                stream.Write(peBytes, 0, peBytes.Length);
+                if (customExePath != null)
+                {
+                    using var exeStream = File.OpenRead(customExePath);
+                    exeStream.CopyTo(stream);
+                }
+                else
+                {
+                    byte[] peBytes = validExe ? CreateDummyX64PeImage() : [0x01, 0x02, 0x03, 0x04];
+                    stream.Write(peBytes, 0, peBytes.Length);
+                }
             }
 
             if (includeAllDlls)
@@ -1025,6 +1034,80 @@ public class UpdateInstallationTests
             "Launcher PSI must use the PowerShellPath stored in the token.");
         Assert.IsTrue(_launcher.LastStartInfo.ArgumentList.Contains(prepared.CallerProcessId.ToString()),
             "Launcher PSI must pass CallerProcessId as -WaitForProcessId.");
+    }
+
+    private static string FindRepoRoot()
+    {
+        string current = AppContext.BaseDirectory;
+        while (!string.IsNullOrEmpty(current))
+        {
+            if (File.Exists(Path.Combine(current, "FootballTray.sln")))
+            {
+                return current;
+            }
+            var parent = Directory.GetParent(current);
+            if (parent == null) break;
+            current = parent.FullName;
+        }
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    }
+
+    [TestMethod]
+    public async Task Test41_PrepareInstall_VersionTxtMatchesManifest_BinaryMismatch_ThrowsInvalidOperationException()
+    {
+        using var service = new UpdateInstallationService(_launcher, _updatesDir, _trustedInstallerScript);
+        string root = FindRepoRoot();
+        string realExe = Path.Combine(root, "artifacts", "releases", "v1.0.0", "win-x64", "FootballTray.exe");
+        Assert.IsTrue(File.Exists(realExe), "Real FootballTray.exe must exist in historical release.");
+
+        // Manifest and VERSION.txt both say 1.0.1, but executable binary has version 1.0.0
+        var (manifest, zipPath) = CreateValidReleaseZip(_tempDir, "1.0.1", customVersionTxt: "FootballTray v1.0.1", customExePath: realExe);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await service.PrepareInstallAsync(manifest, zipPath);
+        });
+
+        Assert.IsTrue(ex.Message.Contains("binary version 'v1.0.0' does not match expected version 'v1.0.1'"),
+            $"Expected binary version mismatch error. Actual: {ex.Message}");
+        Assert.AreEqual(0, _launcher.StartCallCount, "No process launch should occur when binary version mismatches.");
+    }
+
+    [TestMethod]
+    public async Task Test42_PrepareInstall_InverseMismatch_VersionTxtDiffersFromBinary_ThrowsInvalidOperationException()
+    {
+        using var service = new UpdateInstallationService(_launcher, _updatesDir, _trustedInstallerScript);
+        string root = FindRepoRoot();
+        string realExe = Path.Combine(root, "artifacts", "releases", "v1.0.0", "win-x64", "FootballTray.exe");
+        Assert.IsTrue(File.Exists(realExe), "Real FootballTray.exe must exist in historical release.");
+
+        // Manifest is 1.0.0 (matches real binary 1.0.0), but VERSION.txt says 1.0.1
+        var (manifest, zipPath) = CreateValidReleaseZip(_tempDir, "1.0.0", customVersionTxt: "FootballTray v1.0.1", customExePath: realExe);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await service.PrepareInstallAsync(manifest, zipPath);
+        });
+
+        Assert.IsTrue(ex.Message.Contains("VERSION.txt") || ex.Message.Contains("mismatch"),
+            $"Expected version mismatch error. Actual: {ex.Message}");
+        Assert.AreEqual(0, _launcher.StartCallCount, "No process launch should occur on version mismatch.");
+    }
+
+    [TestMethod]
+    public async Task Test43_PrepareInstall_VersionTxtAbsent_PeFallbackSucceeds()
+    {
+        using var service = new UpdateInstallationService(_launcher, _updatesDir, _trustedInstallerScript);
+        string root = FindRepoRoot();
+        string realExe = Path.Combine(root, "artifacts", "releases", "v1.0.0", "win-x64", "FootballTray.exe");
+        Assert.IsTrue(File.Exists(realExe), "Real FootballTray.exe must exist in historical release.");
+
+        // Manifest is 1.0.0, VERSION.txt is ABSENT, real binary is 1.0.0 -> PE fallback succeeds
+        var (manifest, zipPath) = CreateValidReleaseZip(_tempDir, "1.0.0", includeVersionTxt: false, customExePath: realExe);
+
+        var prepared = await service.PrepareInstallAsync(manifest, zipPath);
+        Assert.IsNotNull(prepared);
+        Assert.AreEqual("1.0.0", prepared.TargetVersion);
     }
 
     #endregion

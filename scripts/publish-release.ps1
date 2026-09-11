@@ -33,6 +33,21 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     }
 }
 
+# Reject SemVer build metadata in official publisher
+if ($Version -match '\+') {
+    Write-Error "CRITICAL: Release build metadata ('+...') is not supported by the FootballTray publisher."
+    exit 1
+}
+
+# Derive numeric 3-part core for Win32 AssemblyVersion and FileVersion (fail closed if invalid)
+if ($Version -match '^(\d+\.\d+\.\d+)(?:-.*)?$') {
+    $numericCore = $Matches[1]
+} else {
+    Write-Error "CRITICAL: Release version '$Version' cannot produce a valid numeric Major.Minor.Patch core."
+    exit 1
+}
+$assemblyFileVersion = "$numericCore.0"
+
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " FootballTray Release Publishing — v$Version" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
@@ -163,6 +178,11 @@ $publishArgs = @(
     "-p:PublishReadyToRun=false",
     "-p:PublishTrimmed=false",
     "-p:PublishSingleFile=false",
+    "-p:Version=$Version",
+    "-p:VersionPrefix=$numericCore",
+    "-p:InformationalVersion=$Version",
+    "-p:FileVersion=$assemblyFileVersion",
+    "-p:AssemblyVersion=$assemblyFileVersion",
     "-o", $PublishDir
 )
 

@@ -28,6 +28,15 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = Split-Path -Parent $ScriptDir
 $VersionFile = Join-Path $RootDir "VERSION"
 
+function Get-CleanProductVersion([string]$rawVersion) {
+    if ([string]::IsNullOrWhiteSpace($rawVersion)) { return "" }
+    $plusIdx = $rawVersion.IndexOf('+')
+    if ($plusIdx -gt 0) {
+        return $rawVersion.Substring(0, $plusIdx)
+    }
+    return $rawVersion
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     if (Test-Path $VersionFile) {
         $Version = (Get-Content $VersionFile -Raw).Trim()
@@ -35,6 +44,15 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
         $Version = "1.0.0"
     }
 }
+
+# Derive numeric 3-part core for Win32 AssemblyVersion and FileVersion
+$numericCore = $null
+if ($Version -match '^(\d+\.\d+\.\d+)(?:[+-].*)?$') {
+    $numericCore = $Matches[1]
+} else {
+    $validationErrors.Add("Target version '$Version' cannot produce a valid numeric Major.Minor.Patch core.")
+}
+$expectedNumericVersion = if ($numericCore) { "$numericCore.0" } else { "" }
 
 if ([string]::IsNullOrWhiteSpace($ReleaseDir)) {
     $ReleaseDir = Join-Path $RootDir "artifacts\releases\v$Version"
@@ -117,6 +135,67 @@ if (-not (Test-Path $VersionTxtPath)) {
         $validationErrors.Add("VERSION.txt does not contain configured version '$Version'. Content:`n$versionContent")
     } else {
         Write-Host "  VERSION.txt matches version v$Version" -ForegroundColor Green
+    }
+}
+
+# 4.1 Verify FootballTray.exe and FootballTray.Core.dll Runtime Binary Versions
+Write-Host "`n[4.1/8] Validating runtime binary version metadata..." -ForegroundColor Yellow
+if (Test-Path $ExePath) {
+    try {
+        $exeVi = (Get-Item -LiteralPath $ExePath).VersionInfo
+        $cleanExeProductVersion = Get-CleanProductVersion $exeVi.ProductVersion
+        if (-not [string]::Equals($cleanExeProductVersion, $Version, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $validationErrors.Add("FootballTray.exe ProductVersion '$cleanExeProductVersion' does not match target version '$Version'.")
+        } else {
+            Write-Host "  FootballTray.exe ProductVersion matches v$Version" -ForegroundColor Green
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($expectedNumericVersion)) {
+            $exeFileVersion = $exeVi.FileVersion
+            if (-not [string]::Equals($exeFileVersion, $expectedNumericVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $validationErrors.Add("FootballTray.exe FileVersion '$exeFileVersion' does not match expected '$expectedNumericVersion'.")
+            } else {
+                Write-Host "  FootballTray.exe FileVersion matches $expectedNumericVersion" -ForegroundColor Green
+            }
+        }
+    } catch {
+        $validationErrors.Add("Failed to inspect version information on '$ExePath': $_")
+    }
+}
+
+$coreDllPath = Join-Path $PublishDir "FootballTray.Core.dll"
+if (Test-Path $coreDllPath) {
+    try {
+        $coreVi = (Get-Item -LiteralPath $coreDllPath).VersionInfo
+        $cleanCoreProductVersion = Get-CleanProductVersion $coreVi.ProductVersion
+        if (-not [string]::Equals($cleanCoreProductVersion, $Version, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $validationErrors.Add("FootballTray.Core.dll ProductVersion '$cleanCoreProductVersion' does not match target version '$Version'.")
+        } else {
+            Write-Host "  FootballTray.Core.dll ProductVersion matches v$Version" -ForegroundColor Green
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($expectedNumericVersion)) {
+            $coreFileVersion = $coreVi.FileVersion
+            if (-not [string]::Equals($coreFileVersion, $expectedNumericVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $validationErrors.Add("FootballTray.Core.dll FileVersion '$coreFileVersion' does not match expected '$expectedNumericVersion'.")
+            } else {
+                Write-Host "  FootballTray.Core.dll FileVersion matches $expectedNumericVersion" -ForegroundColor Green
+            }
+
+            try {
+                $coreAssemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($coreDllPath)
+                $coreAssemblyVer = $coreAssemblyName.Version.ToString()
+                if (-not [string]::Equals($coreAssemblyVer, $expectedNumericVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $validationErrors.Add("FootballTray.Core.dll AssemblyVersion '$coreAssemblyVer' does not match expected '$expectedNumericVersion'.")
+                } else {
+                    Write-Host "  FootballTray.Core.dll AssemblyVersion matches $expectedNumericVersion" -ForegroundColor Green
+                }
+            } catch {
+                $validationErrors.Add("Failed to read FootballTray.Core.dll AssemblyVersion: $_")
+            }
+        }
+    } catch {
+        $validationErrors.Add("Failed to inspect version information on '$coreDllPath': $_")
     }
 }
 

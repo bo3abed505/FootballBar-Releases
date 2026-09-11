@@ -724,5 +724,191 @@ public class ReleaseEngineeringTests
         Assert.IsTrue(stagingIdx > stopRunningClientIdx, "Destructive staging operations must occur after Stop-RunningClient.");
     }
 
+    private static string NormalizeProductVersion(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        int plusIdx = raw.IndexOf('+');
+        return plusIdx > 0 ? raw[..plusIdx] : raw;
+    }
+
+    [TestMethod]
+    public void Test22_PublishScript_PropagatesVersionToCompiledBinaries_EndToEnd()
+    {
+        string root = FindRepoRoot();
+        string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
+        const string testVersion = "9.8.7";
+        string releaseDir = Path.Combine(root, "artifacts", "releases", $"v{testVersion}");
+
+        // Record source file contents before publish to verify source immutability
+        string dirBuildPropsPath = Path.Combine(root, "Directory.Build.props");
+        string rootVersionPath = Path.Combine(root, "VERSION");
+        byte[] originalPropsBytes = File.ReadAllBytes(dirBuildPropsPath);
+        byte[] originalVersionBytes = File.ReadAllBytes(rootVersionPath);
+
+        try
+        {
+            var publishResult = RunScriptDirect(publishScript, $"-Version \"{testVersion}\" -SkipArchive", root, timeoutMs: 180000);
+            Assert.AreEqual(0, publishResult.ExitCode, $"publish-release failed: {publishResult.Stdout} {publishResult.Stderr}");
+
+            string publishDir = Path.Combine(releaseDir, "win-x64");
+            string versionTxtPath = Path.Combine(publishDir, "VERSION.txt");
+            string coreDllPath = Path.Combine(publishDir, "FootballTray.Core.dll");
+            string exePath = Path.Combine(publishDir, "FootballTray.exe");
+
+            Assert.IsTrue(File.Exists(versionTxtPath), "VERSION.txt must exist.");
+            Assert.IsTrue(File.Exists(coreDllPath), "FootballTray.Core.dll must exist.");
+            Assert.IsTrue(File.Exists(exePath), "FootballTray.exe must exist.");
+
+            // 1. VERSION.txt target
+            string versionTxt = File.ReadAllText(versionTxtPath);
+            Assert.IsTrue(versionTxt.Contains($"FootballTray v{testVersion}"), $"VERSION.txt content unexpected: {versionTxt}");
+
+            // 2. FootballTray.Core.dll metadata
+            var coreVi = System.Diagnostics.FileVersionInfo.GetVersionInfo(coreDllPath);
+            Assert.AreEqual(testVersion, NormalizeProductVersion(coreVi.ProductVersion), "FootballTray.Core.dll ProductVersion must match test version.");
+            Assert.AreEqual($"{testVersion}.0", coreVi.FileVersion, "FootballTray.Core.dll FileVersion must be 4-part numeric.");
+
+            var coreAssemblyName = System.Reflection.AssemblyName.GetAssemblyName(coreDllPath);
+            Assert.AreEqual($"{testVersion}.0", coreAssemblyName.Version?.ToString(), "FootballTray.Core.dll AssemblyVersion must match numeric 4-part.");
+
+            // 3. FootballTray.exe metadata
+            var exeVi = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+            Assert.AreEqual(testVersion, NormalizeProductVersion(exeVi.ProductVersion), "FootballTray.exe ProductVersion must match test version.");
+            Assert.AreEqual($"{testVersion}.0", exeVi.FileVersion, "FootballTray.exe FileVersion must be 4-part numeric.");
+
+            // 4. Strict validate-release accepts the internally consistent release
+            var validateResult = RunScriptDirect(validateScript, $"-Version \"{testVersion}\" -ReleaseDir \"{releaseDir}\" -RequireAutoUpdateInstaller", root);
+            Assert.AreEqual(0, validateResult.ExitCode, $"validate-release failed on consistent release: {validateResult.Stdout} {validateResult.Stderr}");
+            Assert.IsTrue(validateResult.Stdout.Contains("VALIDATION PASSED"));
+
+            // 5. Source files remain 100% byte-for-byte unchanged
+            CollectionAssert.AreEqual(originalPropsBytes, File.ReadAllBytes(dirBuildPropsPath), "Directory.Build.props must not be modified.");
+            CollectionAssert.AreEqual(originalVersionBytes, File.ReadAllBytes(rootVersionPath), "Root VERSION file must not be modified.");
+        }
+        finally
+        {
+            if (Directory.Exists(releaseDir))
+            {
+                try { Directory.Delete(releaseDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Test23_ValidateRelease_MismatchedBinaryVersion_FailsClosed()
+    {
+        string root = FindRepoRoot();
+        string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
+        string tempDir = Path.Combine(Path.GetTempPath(), $"validate_mismatch_{Guid.NewGuid():N}");
+        string winX64 = Path.Combine(tempDir, "win-x64");
+        Directory.CreateDirectory(winX64);
+
+        try
+        {
+            string histDir = Path.Combine(root, "artifacts", "releases", "v1.0.0", "win-x64");
+            File.Copy(Path.Combine(histDir, "FootballTray.exe"), Path.Combine(winX64, "FootballTray.exe"));
+            foreach (var req in new[] { "FootballTray.dll", "FootballTray.Core.dll", "Microsoft.WinUI.dll", "Microsoft.WindowsAppRuntime.Bootstrap.dll", "Microsoft.Windows.AppNotifications.Projection.dll" })
+            {
+                string src = Path.Combine(histDir, req);
+                if (File.Exists(src)) { File.Copy(src, Path.Combine(winX64, req)); }
+            }
+
+            File.WriteAllText(Path.Combine(tempDir, "VERSION.txt"), "FootballTray v9.8.7\nRuntime: net10.0");
+            File.WriteAllText(Path.Combine(winX64, "VERSION.txt"), "FootballTray v9.8.7\nRuntime: net10.0");
+
+            var result = RunScriptDirect(validateScript, $"-Version \"9.8.7\" -ReleaseDir \"{tempDir}\"", root);
+            Assert.AreNotEqual(0, result.ExitCode, "validate-release must fail closed when binary metadata does not match requested version.");
+            Assert.IsTrue(result.Stdout.Contains("FootballTray.exe ProductVersion") || result.Stderr.Contains("FootballTray.exe ProductVersion"),
+                $"Expected ProductVersion mismatch error. Stdout: {result.Stdout} Stderr: {result.Stderr}");
+            Assert.IsTrue(result.Stdout.Contains("FootballTray.Core.dll ProductVersion") || result.Stderr.Contains("FootballTray.Core.dll ProductVersion"),
+                $"Expected Core ProductVersion mismatch error. Stdout: {result.Stdout} Stderr: {result.Stderr}");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Test24_InstallerScript_MismatchedVersionTxtAndBinary_FailsClosed()
+    {
+        string root = FindRepoRoot();
+        string installerScript = Path.Combine(root, "scripts", "install-client.ps1");
+        string tempDir = Path.Combine(Path.GetTempPath(), $"installer_mismatch_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            // Copy real binary (1.0.0) and required dependencies from historical release
+            string histDir = Path.Combine(root, "artifacts", "releases", "v1.0.0", "win-x64");
+            string realExe = Path.Combine(histDir, "FootballTray.exe");
+            Assert.IsTrue(File.Exists(realExe), "Real FootballTray.exe must exist in historical release.");
+            File.Copy(realExe, Path.Combine(tempDir, "FootballTray.exe"));
+
+            foreach (var req in new[] { "FootballTray.dll", "FootballTray.Core.dll", "Microsoft.WinUI.dll" })
+            {
+                string src = Path.Combine(histDir, req);
+                if (File.Exists(src))
+                {
+                    File.Copy(src, Path.Combine(tempDir, req));
+                }
+            }
+
+            // Write mismatched VERSION.txt (9.8.7)
+            File.WriteAllText(Path.Combine(tempDir, "VERSION.txt"), "FootballTray v9.8.7\nRuntime: net10.0");
+
+            var result = RunScriptDirect(installerScript, $"-SourceDir \"{tempDir}\" -WhatIf", root);
+            Assert.AreNotEqual(0, result.ExitCode, "install-client must fail when VERSION.txt and binary version disagree.");
+            Assert.IsTrue(result.Stdout.Contains("Payload version mismatch") || result.Stderr.Contains("Payload version mismatch"),
+                $"Expected mismatch error message. Stdout: {result.Stdout} Stderr: {result.Stderr}");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Test25_PublishRelease_BuildMetadata_FailsClosedBeforePublish()
+    {
+        string root = FindRepoRoot();
+        string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        const string testVersion = "1.2.3+build.4";
+        string releaseDir = Path.Combine(root, "artifacts", "releases", $"v{testVersion}");
+
+        try
+        {
+            var result = RunScriptDirect(publishScript, $"-Version \"{testVersion}\" -SkipArchive", root);
+            Assert.AreNotEqual(0, result.ExitCode, "publish-release must fail closed when build metadata is provided.");
+            Assert.IsTrue(
+                result.Stdout.Contains("Release build metadata ('+...') is not supported by the FootballTray publisher.") ||
+                result.Stderr.Contains("Release build metadata ('+...') is not supported by the FootballTray publisher."),
+                $"Expected build metadata rejection error. Stdout: {result.Stdout} Stderr: {result.Stderr}");
+
+            // Verify dotnet publish was not completed for that release
+            Assert.IsFalse(Directory.Exists(releaseDir), "Release directory should not exist when build metadata is rejected.");
+
+            // Verify canonical v1.0.0 artifact was not touched
+            string v1Dir = Path.Combine(root, "artifacts", "releases", "v1.0.0");
+            Assert.IsTrue(Directory.Exists(v1Dir), "Historical v1.0.0 directory must remain intact.");
+            string v1Zip = Path.Combine(v1Dir, "FootballTray-v1.0.0-win-x64.zip");
+            Assert.IsTrue(File.Exists(v1Zip), "Historical v1.0.0 ZIP must remain intact.");
+        }
+        finally
+        {
+            if (Directory.Exists(releaseDir))
+            {
+                try { Directory.Delete(releaseDir, recursive: true); } catch { }
+            }
+        }
+    }
+
     #endregion
 }
