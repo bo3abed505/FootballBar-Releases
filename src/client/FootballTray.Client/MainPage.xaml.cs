@@ -136,6 +136,43 @@ public sealed partial class MainPage : Page
         DiagnosticsLastSyncText.Text = _viewModel.DiagnosticsLastSyncText;
         DiagnosticsTaskbarText.Text = _viewModel.DiagnosticsTaskbarText;
 
+        // Software Updates Card
+        UpdateCurrentVersionText.Text = $"Current: {_viewModel.CurrentVersionText}";
+        CheckForUpdatesButton.IsEnabled = _viewModel.CanCheckForUpdates;
+        CheckForUpdatesButton.Content = _viewModel.IsCheckingForUpdates ? "Checking..." : "Check for updates";
+
+        if (!string.IsNullOrWhiteSpace(_viewModel.UpdateStatusMessage))
+        {
+            UpdateStatusText.Text = _viewModel.UpdateStatusMessage;
+            UpdateStatusText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            UpdateStatusText.Visibility = Visibility.Collapsed;
+            UpdateStatusText.Text = string.Empty;
+        }
+
+        if (_viewModel.IsUpdateAvailable)
+        {
+            UpdateAvailablePanel.Visibility = Visibility.Visible;
+            UpdateTargetVersionText.Text = $"Version v{_viewModel.LatestVersion}";
+            if (!string.IsNullOrWhiteSpace(_viewModel.UpdateReleaseNotes))
+            {
+                UpdateReleaseNotesHeader.Visibility = Visibility.Visible;
+                UpdateReleaseNotesText.Text = _viewModel.UpdateReleaseNotes;
+                UpdateReleaseNotesText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                UpdateReleaseNotesHeader.Visibility = Visibility.Collapsed;
+                UpdateReleaseNotesText.Visibility = Visibility.Collapsed;
+            }
+        }
+        else
+        {
+            UpdateAvailablePanel.Visibility = Visibility.Collapsed;
+        }
+
         // Update active filter button styling
         UpdateFilterButtons();
     }
@@ -195,5 +232,13 @@ public sealed partial class MainPage : Page
     private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e)
     {
         _viewModel?.CopyDiagnosticsToClipboard();
+    }
+
+    private async void OnCheckForUpdatesClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            await _viewModel.CheckForUpdatesAsync(isManual: true);
+        }
     }
 }

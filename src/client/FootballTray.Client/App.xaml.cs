@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
@@ -9,6 +10,7 @@ using FootballTray.Client.Taskbar;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.Services.Updates;
 using FootballTray.Client.ViewModels;
 
 namespace FootballTray.Client;
@@ -26,6 +28,9 @@ public partial class App : Application
     private LocalCacheService? _cacheService;
     private PreferencesService? _preferencesService;
     private DiagnosticsService? _diagnosticsService;
+    private UpdateDiscoveryService? _updateDiscoveryService;
+    private readonly CancellationTokenSource _appShutdownCts = new();
+    private Task? _startupUpdateCheckTask;
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
@@ -69,9 +74,10 @@ public partial class App : Application
         _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
         _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);
         CurrentDiagnosticsService = _diagnosticsService;
+        _updateDiscoveryService = new UpdateDiscoveryService();
 
         // 2. Initialize Root MainViewModel
-        CurrentMainViewModel = new MainViewModel(_preferencesService, _syncService, _diagnosticsService);
+        CurrentMainViewModel = new MainViewModel(_preferencesService, _syncService, _diagnosticsService, updateDiscoveryService: _updateDiscoveryService);
 
         // 3. Create Main Application Window
         _window = new MainWindow();
@@ -83,15 +89,19 @@ public partial class App : Application
         _window.Closed += (s, e) =>
         {
             AppLogger.Info("App", "ShutdownBegin", "MainWindow closed. Initiating graceful subsystem shutdown...");
+            _appShutdownCts.Cancel();
             CurrentMainViewModel?.Dispose();
             CurrentMainViewModel = null;
             _syncService?.Dispose();
             _syncService = null;
             _apiClient?.Dispose();
             _apiClient = null;
+            _updateDiscoveryService?.Dispose();
+            _updateDiscoveryService = null;
             _taskbarHost?.Dispose();
             _taskbarHost = null;
             CurrentTaskbarHost = null;
+            _appShutdownCts.Dispose();
 
             UninitializeAppNotifications();
             AppLogger.Info("App", "ShutdownComplete", "FootballTray client shutdown complete.");
@@ -132,6 +142,11 @@ public partial class App : Application
             // Start initial sync and periodic polling
             await _syncService.StartAsync();
             AppLogger.Info("App", "StartupComplete", "FootballTray client startup sequence completed successfully.");
+
+            // 6. Schedule delayed startup update check (isolated from football sync health)
+            _startupUpdateCheckTask = CurrentMainViewModel?.RunStartupUpdateCheckAsync(
+                TimeSpan.FromSeconds(30),
+                _appShutdownCts.Token);
         }
         catch (Exception ex)
         {

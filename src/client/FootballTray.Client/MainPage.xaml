@@ -503,6 +503,81 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- Software Updates Card -->
+                        <Border
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="16">
+                            <StackPanel Spacing="10">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE895;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                    <StackPanel>
+                                        <TextBlock
+                                            Text="Software Updates"
+                                            FontWeight="SemiBold"
+                                            FontSize="14" />
+                                        <TextBlock
+                                            x:Name="UpdateCurrentVersionText"
+                                            Text="Current: Loading..."
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Persistent Update Available Section -->
+                                <Border
+                                    x:Name="UpdateAvailablePanel"
+                                    Visibility="Collapsed"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="12">
+                                    <StackPanel Spacing="6">
+                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                            <TextBlock Text="Update available" FontWeight="Bold" FontSize="12" />
+                                        </StackPanel>
+                                        <TextBlock
+                                            x:Name="UpdateTargetVersionText"
+                                            Text="Version v1.1.0"
+                                            FontWeight="SemiBold"
+                                            FontSize="12" />
+                                        <TextBlock
+                                            x:Name="UpdateReleaseNotesHeader"
+                                            Text="Release Notes:"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                                            <TextBlock
+                                                x:Name="UpdateReleaseNotesText"
+                                                TextWrapping="Wrap"
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Manual Update Status Message -->
+                                <TextBlock
+                                    x:Name="UpdateStatusText"
+                                    Visibility="Collapsed"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap" />
+
+                                <!-- Manual Check for Updates Button -->
+                                <Button
+                                    x:Name="CheckForUpdatesButton"
+                                    Content="Check for updates"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnCheckForUpdatesClick" />
+                            </StackPanel>
+                        </Border>
+
                         <!-- Diagnostics & Troubleshooting Card -->
                         <Border
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

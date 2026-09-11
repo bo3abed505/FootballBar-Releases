@@ -4,12 +4,15 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
+using FootballTray.Core;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.Services.Updates;
 
 namespace FootballTray.Client.ViewModels;
 
@@ -22,6 +25,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly IPreferencesService _preferencesService;
     private readonly Diagnostics.IDiagnosticsService _diagnosticsService;
     private readonly DispatcherQueue? _dispatcherQueue;
+    private readonly IUpdateDiscoveryService? _updateDiscoveryService;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayFunc;
+    private readonly CancellationTokenSource _disposeCts = new();
+    private readonly object _checkLock = new();
 
     private MatchFilterType _activeFilter = MatchFilterType.All;
     private string _connectionStatusText = "Connecting...";
@@ -38,18 +45,84 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _isInitialized;
     private TrayDataDto? _latestTrayData;
 
+    private UpdateCheckState _updateCheckState = UpdateCheckState.NotChecked;
+    private bool _isCheckingForUpdates;
+    private bool _isUpdateAvailable;
+    private string? _latestVersion;
+    private string? _updateStatusMessage;
+    private string? _updateReleaseNotes;
+    private ReleaseManifest? _offeredManifest;
+    private Task<UpdateCheckResult>? _inFlightCheckTask;
+    private bool _currentCheckIsManual;
+    private int _startupCheckScheduled;
+    private int _manualUpdateCheckRequested;
+
     public ObservableCollection<MatchItemViewModel> FilteredMatches { get; } = new();
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
 
     public Diagnostics.IDiagnosticsService DiagnosticsService => _diagnosticsService;
+    public IUpdateDiscoveryService? UpdateDiscoveryService => _updateDiscoveryService;
+    public bool HasUpdateCapability => _updateDiscoveryService != null;
 
     public string DiagnosticsVersionText => $"Version {_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
     public string DiagnosticsHealthStatusText => $"{_diagnosticsService.GetCurrentSnapshot().HealthState} ({_diagnosticsService.GetCurrentSnapshot().FreshnessState})";
     public string DiagnosticsLastSyncText => _diagnosticsService.GetCurrentSnapshot().LastSuccessfulServerResponseTime?.ToString("HH:mm:ss 'UTC'") ?? "Never";
     public string DiagnosticsTaskbarText => _diagnosticsService.GetCurrentSnapshot().TaskbarHostStatus;
     public string DiagnosticsReportText => _diagnosticsService.GetSanitizedReportText();
+
+    public UpdateCheckState UpdateCheckState
+    {
+        get => _updateCheckState;
+        private set => SetProperty(ref _updateCheckState, value);
+    }
+
+    public bool IsCheckingForUpdates
+    {
+        get => _isCheckingForUpdates;
+        private set
+        {
+            if (SetProperty(ref _isCheckingForUpdates, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCheckForUpdates)));
+            }
+        }
+    }
+
+    public bool CanCheckForUpdates => !_isCheckingForUpdates && _updateDiscoveryService != null;
+
+    public bool IsUpdateAvailable
+    {
+        get => _isUpdateAvailable;
+        private set => SetProperty(ref _isUpdateAvailable, value);
+    }
+
+    public string? LatestVersion
+    {
+        get => _latestVersion;
+        private set => SetProperty(ref _latestVersion, value);
+    }
+
+    public string? UpdateStatusMessage
+    {
+        get => _updateStatusMessage;
+        private set => SetProperty(ref _updateStatusMessage, value);
+    }
+
+    public string? UpdateReleaseNotes
+    {
+        get => _updateReleaseNotes;
+        private set => SetProperty(ref _updateReleaseNotes, value);
+    }
+
+    public ReleaseManifest? OfferedManifest
+    {
+        get => _offeredManifest;
+        private set => SetProperty(ref _offeredManifest, value);
+    }
+
+    public string CurrentVersionText => $"v{_updateDiscoveryService?.CurrentVersion?.ToString() ?? AppVersionInfo.Version}";
 
     public MatchFilterType ActiveFilter
     {
@@ -141,12 +214,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         IPreferencesService preferencesService,
         ISyncService? syncService = null,
         Diagnostics.IDiagnosticsService? diagnosticsService = null,
-        DispatcherQueue? dispatcherQueue = null)
+        DispatcherQueue? dispatcherQueue = null,
+        IUpdateDiscoveryService? updateDiscoveryService = null,
+        Func<TimeSpan, CancellationToken, Task>? delayFunc = null)
     {
         _preferencesService = preferencesService ?? throw new ArgumentNullException(nameof(preferencesService));
         _syncService = syncService;
         _diagnosticsService = diagnosticsService ?? new Diagnostics.DiagnosticsService(_syncService, _preferencesService);
         _dispatcherQueue = dispatcherQueue ?? DispatcherQueue.GetForCurrentThread();
+        _updateDiscoveryService = updateDiscoveryService;
+        _delayFunc = delayFunc ?? Task.Delay;
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -567,8 +644,192 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    /// <summary>
+    /// Checks for remote application updates.
+    /// When <paramref name="isManual"/> is true, surfaces user feedback on in-progress, up-to-date, and failure states.
+    /// When <paramref name="isManual"/> is false, runs silently unless an update is available.
+    /// Manual requests take presentation precedence over concurrent/in-flight automatic startup checks.
+    /// </summary>
+    public async Task<UpdateCheckResult?> CheckForUpdatesAsync(
+        bool isManual = true,
+        CancellationToken cancellationToken = default)
+    {
+        if (isManual)
+        {
+            Interlocked.Exchange(ref _manualUpdateCheckRequested, 1);
+        }
+
+        if (_updateDiscoveryService == null)
+        {
+            if (isManual)
+            {
+                RunOnUiSafe(() =>
+                {
+                    UpdateStatusMessage = "Update discovery is not available.";
+                }, nameof(CheckForUpdatesAsync));
+            }
+            return null;
+        }
+
+        Task<UpdateCheckResult> checkTask;
+        lock (_checkLock)
+        {
+            if (isManual)
+            {
+                _currentCheckIsManual = true;
+            }
+
+            if (_inFlightCheckTask == null)
+            {
+                _inFlightCheckTask = RunCheckCoreAsync();
+            }
+            else if (isManual)
+            {
+                // Immediate feedback for manual user joining an in-flight check
+                RunOnUiSafe(() =>
+                {
+                    IsCheckingForUpdates = true;
+                    UpdateStatusMessage = "Checking for updates...";
+                }, nameof(CheckForUpdatesAsync));
+            }
+
+            checkTask = _inFlightCheckTask;
+        }
+
+        return await checkTask.WaitAsync(cancellationToken);
+    }
+
+    private async Task<UpdateCheckResult> RunCheckCoreAsync()
+    {
+        RunOnUiSafe(() =>
+        {
+            IsCheckingForUpdates = true;
+            if (_currentCheckIsManual)
+            {
+                UpdateStatusMessage = "Checking for updates...";
+            }
+        }, nameof(RunCheckCoreAsync));
+
+        UpdateCheckResult result;
+        try
+        {
+            result = await _updateDiscoveryService!.CheckForUpdatesAsync(_disposeCts.Token);
+        }
+        finally
+        {
+            lock (_checkLock)
+            {
+                _inFlightCheckTask = null;
+            }
+        }
+
+        bool isManualPresentation;
+        lock (_checkLock)
+        {
+            isManualPresentation = _currentCheckIsManual;
+            _currentCheckIsManual = false;
+        }
+
+        RunOnUiSafe(() =>
+        {
+            ApplyUpdateResult(result, isManualPresentation);
+        }, nameof(RunCheckCoreAsync));
+
+        return result;
+    }
+
+    private void ApplyUpdateResult(UpdateCheckResult result, bool isManual)
+    {
+        UpdateCheckState = result.State;
+
+        switch (result.State)
+        {
+            case UpdateCheckState.UpdateAvailable:
+                LatestVersion = result.TargetVersion?.ToString() ?? result.OfferedManifest?.Version;
+                UpdateReleaseNotes = result.OfferedManifest?.ReleaseNotes;
+                OfferedManifest = result.OfferedManifest;
+                IsUpdateAvailable = true;
+                UpdateStatusMessage = isManual
+                    ? $"A newer version v{LatestVersion} is available."
+                    : $"Update available: FootballTray v{LatestVersion}";
+                break;
+
+            case UpdateCheckState.UpToDate:
+                IsUpdateAvailable = false;
+                OfferedManifest = null;
+                if (isManual)
+                {
+                    UpdateStatusMessage = "FootballTray is up to date.";
+                }
+                break;
+
+            case UpdateCheckState.CheckFailed:
+                IsUpdateAvailable = false;
+                OfferedManifest = null;
+                if (isManual)
+                {
+                    UpdateStatusMessage = $"Check failed: {result.Message}";
+                }
+                break;
+        }
+
+        IsCheckingForUpdates = false;
+    }
+
+    /// <summary>
+    /// Executes a delayed startup update check.
+    /// Runs at most once per application lifetime and guarantees clean shutdown cancellation without unobserved exceptions.
+    /// </summary>
+    public async Task RunStartupUpdateCheckAsync(
+        TimeSpan delay,
+        CancellationToken cancellationToken = default)
+    {
+        if (_updateDiscoveryService == null) return;
+
+        if (Interlocked.Exchange(ref _startupCheckScheduled, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _disposeCts.Token);
+
+            var token = linkedCts.Token;
+
+            if (delay > TimeSpan.Zero)
+            {
+                await _delayFunc(delay, token);
+            }
+
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (Volatile.Read(ref _manualUpdateCheckRequested) != 0)
+            {
+                return;
+            }
+
+            await CheckForUpdatesAsync(isManual: false, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on application shutdown or disposal: silent, no error surfaced
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLogger.Warn("Updates", "StartupCheckOrchestrationError", $"Startup update check orchestration failed: [{ex.GetType().Name}] {ex.Message}", ex: ex);
+        }
+    }
+
     public void Dispose()
     {
+        _disposeCts.Cancel();
+        _disposeCts.Dispose();
         _preferencesService.PreferencesChanged -= OnPreferencesChanged;
         if (_syncService != null)
         {
