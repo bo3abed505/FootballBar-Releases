@@ -189,12 +189,40 @@ public sealed partial class MainPage : Page
                 UpdateDownloadStatusText.Visibility = Visibility.Visible;
                 UpdateDownloadStatusText.Text = "Update downloaded and verified.";
                 DownloadUpdateButton.Visibility = Visibility.Collapsed;
+
+                InstallUpdateButton.Visibility = Visibility.Visible;
+                InstallUpdateButton.IsEnabled = _viewModel.CanInstallUpdate;
+
+                if (_viewModel.IsInstallingUpdate)
+                {
+                    InstallUpdateButton.Content = _viewModel.InstallationState == Services.Updates.UpdateInstallationState.Preparing
+                        ? "Preparing..."
+                        : "Installing...";
+                    UpdateInstallStatusText.Visibility = Visibility.Visible;
+                    UpdateInstallStatusText.Text = _viewModel.InstallStatusText ?? "Preparing update installation...";
+                }
+                else
+                {
+                    InstallUpdateButton.Content = "Install update";
+                    if (!string.IsNullOrWhiteSpace(_viewModel.InstallStatusText))
+                    {
+                        UpdateInstallStatusText.Visibility = Visibility.Visible;
+                        UpdateInstallStatusText.Text = _viewModel.InstallStatusText;
+                    }
+                    else
+                    {
+                        UpdateInstallStatusText.Visibility = Visibility.Collapsed;
+                        UpdateInstallStatusText.Text = string.Empty;
+                    }
+                }
             }
             else
             {
                 UpdateDownloadProgressBar.Visibility = Visibility.Collapsed;
                 DownloadUpdateButton.Visibility = Visibility.Visible;
                 DownloadUpdateButton.Content = "Download update";
+                InstallUpdateButton.Visibility = Visibility.Collapsed;
+                UpdateInstallStatusText.Visibility = Visibility.Collapsed;
 
                 if (!string.IsNullOrWhiteSpace(_viewModel.DownloadStatusText))
                 {
@@ -211,6 +239,8 @@ public sealed partial class MainPage : Page
         else
         {
             UpdateAvailablePanel.Visibility = Visibility.Collapsed;
+            InstallUpdateButton.Visibility = Visibility.Collapsed;
+            UpdateInstallStatusText.Visibility = Visibility.Collapsed;
         }
 
         // Update active filter button styling
@@ -287,6 +317,14 @@ public sealed partial class MainPage : Page
         if (_viewModel != null)
         {
             await _viewModel.DownloadUpdateAsync();
+        }
+    }
+
+    private async void OnInstallUpdateClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            await _viewModel.InstallUpdateAsync();
         }
     }
 }

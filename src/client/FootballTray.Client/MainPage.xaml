@@ -582,6 +582,21 @@
                                                 Style="{ThemeResource AccentButtonStyle}"
                                                 HorizontalAlignment="Stretch"
                                                 Click="OnDownloadUpdateClick" />
+
+                                            <Button
+                                                x:Name="InstallUpdateButton"
+                                                Content="Install update"
+                                                Style="{ThemeResource AccentButtonStyle}"
+                                                HorizontalAlignment="Stretch"
+                                                Visibility="Collapsed"
+                                                Click="OnInstallUpdateClick" />
+
+                                            <TextBlock
+                                                x:Name="UpdateInstallStatusText"
+                                                Visibility="Collapsed"
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                TextWrapping="Wrap" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Border>

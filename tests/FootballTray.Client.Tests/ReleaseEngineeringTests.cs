@@ -166,10 +166,24 @@ public class ReleaseEngineeringTests
             FixturePath = Path.Combine(root, "artifacts", $".tmp_fixture_{Guid.NewGuid():N}");
             Directory.CreateDirectory(FixturePath);
 
-            // Create junction for win-x64 to avoid copying 100MB of binaries
+            // Create individual file-level hardlinks for every file in the real win-x64 directory.
+            // File hardlinks — unlike directory junctions — do NOT have write-through semantics:
+            // creating a new file inside the fixture's win-x64 stays in the fixture and never
+            // touches the real release directory. This protects the immutable historical artifact.
             string realPublish = Path.Combine(realRelease, "win-x64");
             string fixturePublish = Path.Combine(FixturePath, "win-x64");
-            RunPowerShell($"New-Item -ItemType Junction -Path '{fixturePublish}' -Target '{realPublish}' | Out-Null", root);
+            RunPowerShell($@"
+                $src = '{realPublish}'
+                $dst = '{fixturePublish}'
+                New-Item -ItemType Directory -Path $dst -Force | Out-Null
+                Get-ChildItem -Path $src -Recurse -File | ForEach-Object {{
+                    $rel  = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+                    $dest = Join-Path $dst $rel
+                    $parent = Split-Path $dest -Parent
+                    if (-not (Test-Path $parent)) {{ New-Item -ItemType Directory -Path $parent -Force | Out-Null }}
+                    New-Item -ItemType HardLink -Path $dest -Target $_.FullName | Out-Null
+                }}
+            ", root);
 
             // Create hardlink for ZIP to avoid copying 62MB archive
             string zipName = $"FootballTray-v{version}-win-x64.zip";
@@ -615,6 +629,99 @@ public class ReleaseEngineeringTests
                 try { Directory.Delete(releaseDir, recursive: true); } catch { }
             }
         }
+    }
+
+    [TestMethod]
+    public void Test18_PublishedClientPayload_ContainsInstallClientScript()
+    {
+        string root = FindRepoRoot();
+        string csprojPath = Path.Combine(root, "src", "client", "FootballTray.Client", "FootballTray.Client.csproj");
+        Assert.IsTrue(File.Exists(csprojPath), "FootballTray.Client.csproj must exist.");
+
+        string content = File.ReadAllText(csprojPath);
+        Assert.IsTrue(content.Contains("scripts\\install-client.ps1") || content.Contains("scripts/install-client.ps1"),
+            "csproj must include scripts/install-client.ps1");
+        Assert.IsTrue(content.Contains("<CopyToPublishDirectory>Always</CopyToPublishDirectory>") ||
+                      content.Contains("<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>"),
+            "install-client.ps1 must be configured to copy to publish directory.");
+
+        string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
+        string validateContent = File.ReadAllText(validateScript);
+        Assert.IsTrue(validateContent.Contains("install-client.ps1"),
+            "validate-release.ps1 must require install-client.ps1 in publish directory.");
+    }
+
+    [TestMethod]
+    public void Test19_InstallerScript_WaitForProcessId_ExitedPidAllowsContinuation()
+    {
+        string root = FindRepoRoot();
+        string installerScript = Path.Combine(root, "scripts", "install-client.ps1");
+
+        // Spawn a process that exits immediately
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c exit 0")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false
+        };
+        using var helperProcess = System.Diagnostics.Process.Start(psi)!;
+        helperProcess.WaitForExit();
+        int exitedPid = helperProcess.Id;
+
+        // Passing an exited PID with -WhatIf should wait 0s, detect process exited, and proceed to WhatIf
+        var result = RunScriptDirect(installerScript, $"-WaitForProcessId {exitedPid} -WhatIf", root);
+        Assert.AreEqual(0, result.ExitCode, $"install-client with exited PID failed: {result.Stdout} {result.Stderr}");
+        Assert.IsTrue(result.Stdout.Contains("Calling process exited gracefully.") || result.Stdout.Contains("WHATIF:"),
+            $"Expected successful wait output. Stdout: {result.Stdout}");
+    }
+
+    [TestMethod]
+    public void Test20_InstallerScript_WaitForProcessId_TimeoutFailsClosedWithoutForcedKill()
+    {
+        string root = FindRepoRoot();
+        string installerScript = Path.Combine(root, "scripts", "install-client.ps1");
+
+        var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe", "-NoProfile -Command \"Start-Sleep -Seconds 30\"")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false
+        };
+        using var livingProcess = System.Diagnostics.Process.Start(psi)!;
+        try
+        {
+            int livingPid = livingProcess.Id;
+
+            var result = RunScriptDirect(installerScript, $"-WaitForProcessId {livingPid} -WhatIf", root, timeoutMs: 35000);
+            Assert.AreNotEqual(0, result.ExitCode, "Installer must fail closed when caller does not exit.");
+            Assert.IsTrue(result.Stdout.Contains("did not exit within 15 seconds") || result.Stderr.Contains("did not exit within 15 seconds"),
+                $"Expected 15s timeout error message. Stdout: {result.Stdout} Stderr: {result.Stderr}");
+
+            // Crucial assertion: Caller process must NOT have been force-killed!
+            Assert.IsFalse(livingProcess.HasExited, "Installer must NOT force-kill the calling process upon timeout.");
+        }
+        finally
+        {
+            try { livingProcess.Kill(entireProcessTree: true); } catch { }
+        }
+    }
+
+    [TestMethod]
+    public void Test21_InstallerScript_WaitForProcessId_PreservesRemainingProcessProtection()
+    {
+        string root = FindRepoRoot();
+        string installerScript = Path.Combine(root, "scripts", "install-client.ps1");
+        string content = File.ReadAllText(installerScript);
+
+        // Verify WaitForProcessId block exists
+        Assert.IsTrue(content.Contains("$WaitForProcessId -gt 0"), "Script must handle $WaitForProcessId > 0.");
+
+        // Verify Stop-RunningClient is called after wait loop inside WaitForProcessId block
+        int waitIdx = content.IndexOf("$WaitForProcessId -gt 0");
+        int stopRunningClientIdx = content.IndexOf("Stop-RunningClient", waitIdx);
+        Assert.IsTrue(stopRunningClientIdx > waitIdx, "Stop-RunningClient must be called after waiting for caller PID.");
+
+        // Verify Stop-RunningClient occurs before destructive staging and backup directory cleanup
+        int stagingIdx = content.IndexOf("$StagingDir", stopRunningClientIdx);
+        Assert.IsTrue(stagingIdx > stopRunningClientIdx, "Destructive staging operations must occur after Stop-RunningClient.");
     }
 
     #endregion

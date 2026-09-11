@@ -30,9 +30,12 @@ public partial class App : Application
     private DiagnosticsService? _diagnosticsService;
     private UpdateDiscoveryService? _updateDiscoveryService;
     private UpdatePackageAcquisitionService? _updatePackageAcquisitionService;
+    private UpdateInstallationService? _updateInstallationService;
     private readonly CancellationTokenSource _appShutdownCts = new();
     private Task? _startupUpdateCheckTask;
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
+    private volatile bool _updateHandoffExitRequested;
+
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
     public static MainViewModel? CurrentMainViewModel { get; private set; }
@@ -77,6 +80,30 @@ public partial class App : Application
         CurrentDiagnosticsService = _diagnosticsService;
         _updateDiscoveryService = new UpdateDiscoveryService();
         _updatePackageAcquisitionService = new UpdatePackageAcquisitionService();
+        _updateInstallationService = new UpdateInstallationService();
+
+        var shutdownHandler = new ActionShutdownHandler(() =>
+        {
+            // Mark intent before touching the window so the Closed handler sees it even if
+            // TryEnqueue races with an in-progress teardown.
+            _updateHandoffExitRequested = true;
+
+            var win = _window;
+            if (win == null) return false;
+
+            var dq = win.DispatcherQueue;
+            if (dq == null) return false;
+
+            if (dq.HasThreadAccess)
+            {
+                win.Close();
+                return true;
+            }
+            else
+            {
+                return dq.TryEnqueue(() => win.Close());
+            }
+        });
 
         // 2. Initialize Root MainViewModel
         CurrentMainViewModel = new MainViewModel(
@@ -84,7 +111,9 @@ public partial class App : Application
             _syncService,
             _diagnosticsService,
             updateDiscoveryService: _updateDiscoveryService,
-            updateAcquisitionService: _updatePackageAcquisitionService);
+            updateAcquisitionService: _updatePackageAcquisitionService,
+            updateInstallationService: _updateInstallationService,
+            appShutdownHandler: shutdownHandler);
 
         // 3. Create Main Application Window
         _window = new MainWindow();
@@ -95,6 +124,10 @@ public partial class App : Application
 
         _window.Closed += (s, e) =>
         {
+            // Capture the handoff-exit flag before any state is mutated so
+            // Application.Current.Exit() fires at the correct point.
+            bool exitAfterCleanup = _updateHandoffExitRequested;
+
             AppLogger.Info("App", "ShutdownBegin", "MainWindow closed. Initiating graceful subsystem shutdown...");
             _appShutdownCts.Cancel();
             CurrentMainViewModel?.Dispose();
@@ -107,6 +140,8 @@ public partial class App : Application
             _updateDiscoveryService = null;
             _updatePackageAcquisitionService?.Dispose();
             _updatePackageAcquisitionService = null;
+            _updateInstallationService?.Dispose();
+            _updateInstallationService = null;
             _taskbarHost?.Dispose();
             _taskbarHost = null;
             CurrentTaskbarHost = null;
@@ -114,6 +149,14 @@ public partial class App : Application
 
             UninitializeAppNotifications();
             AppLogger.Info("App", "ShutdownComplete", "FootballTray client shutdown complete.");
+
+            // Stage 2: if shutdown was requested for installer handoff, force process exit so
+            // the installer's -WaitForProcessId guard is satisfied even if WinUI teardown
+            // would otherwise keep a background thread alive.
+            if (exitAfterCleanup)
+            {
+                Application.Current.Exit();
+            }
         };
 
         // 5. Initialize Taskbar Host and inject into primary taskbar
@@ -197,5 +240,12 @@ public partial class App : Application
                 _window.Activate();
             });
         }
+    }
+
+    private sealed class ActionShutdownHandler : IAppShutdownHandler
+    {
+        private readonly Func<bool> _action;
+        public ActionShutdownHandler(Func<bool> action) => _action = action;
+        public bool RequestShutdown() => _action();
     }
 }

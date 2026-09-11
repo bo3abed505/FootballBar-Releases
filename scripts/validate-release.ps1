@@ -8,12 +8,17 @@
     Optional version string. Defaults to the version found in the root VERSION file.
 .PARAMETER ReleaseDir
     Optional custom path to the release directory to validate.
+.PARAMETER RequireAutoUpdateInstaller
+    When set, validates that install-client.ps1 is present in the publish directory.
+    Omit this switch when validating historical release artifacts that pre-date the
+    auto-update installer (e.g. v1.0.0).
 #>
 
 [CmdletBinding()]
 param (
     [string]$Version,
-    [string]$ReleaseDir
+    [string]$ReleaseDir,
+    [switch]$RequireAutoUpdateInstaller
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,9 +81,9 @@ if (Test-Path $ExePath) {
     }
 }
 
-# 3. Verify Required Windows App SDK and Application DLLs
-Write-Host "`n[3/8] Validating required runtime DLLs..." -ForegroundColor Yellow
-$requiredDlls = @(
+# 3. Verify Required Windows App SDK, Application DLLs, and Installer
+Write-Host "`n[3/8] Validating required runtime DLLs and installer..." -ForegroundColor Yellow
+$requiredFiles = @(
     "FootballTray.dll",
     "FootballTray.Core.dll",
     "Microsoft.WinUI.dll",
@@ -86,12 +91,19 @@ $requiredDlls = @(
     "Microsoft.Windows.AppNotifications.Projection.dll"
 )
 
-foreach ($dll in $requiredDlls) {
-    $dllPath = Join-Path $PublishDir $dll
-    if (Test-Path $dllPath) {
-        Write-Host "  Found $dll" -ForegroundColor Green
+# install-client.ps1 is required for auto-update-capable releases (v1.1.0+).
+# Historical artifacts (e.g. v1.0.0) pre-date this component; only enforce
+# when the caller explicitly requests it via -RequireAutoUpdateInstaller.
+if ($RequireAutoUpdateInstaller) {
+    $requiredFiles += "install-client.ps1"
+}
+
+foreach ($req in $requiredFiles) {
+    $filePath = Join-Path $PublishDir $req
+    if (Test-Path $filePath) {
+        Write-Host "  Found $req" -ForegroundColor Green
     } else {
-        $validationErrors.Add("Missing required runtime library: $dll")
+        $validationErrors.Add("Missing required release component: $req")
     }
 }
 

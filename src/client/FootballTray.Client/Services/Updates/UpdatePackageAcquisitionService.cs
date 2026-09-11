@@ -33,13 +33,6 @@ public sealed class UpdatePackageAcquisitionService : IUpdatePackageAcquisitionS
     private readonly object _stateLock = new();
     private bool _disposed;
 
-    private readonly record struct PackageIdentity(
-        string Version,
-        string Architecture,
-        string DownloadUrl,
-        string Sha256,
-        long SizeBytes);
-
     private PackageIdentity? _inFlightIdentity;
     private Task<UpdateAcquisitionResult>? _inFlightTask;
 

@@ -308,6 +308,21 @@ The uninstaller:
 4. Cleans the `HKCU` Uninstall registry key.
 5. **Preserves User Data**: Keeps `%LOCALAPPDATA%\FootballTray` intact so user settings and match history are preserved for future installs.
 
+### 4. Automatic Updates & Installer Handoff
+
+FootballTray supports user-approved automatic updates orchestrated from the client UI:
+
+1. **User Approval Required**: Updates are never silently downloaded or installed without explicit user action. The user must explicitly click "Download update" and "Install update" in the settings panel.
+2. **Payload Inclusion**: `scripts/install-client.ps1` is included as part of the official client publish payload (`win-x64/install-client.ps1`) and installed beside `FootballTray.exe`.
+3. **Trusted Installer Handoff**: When installing an update, FootballTray copies its **current trusted local** `install-client.ps1` into an isolated handoff directory (`%LOCALAPPDATA%\FootballTray\Updates\<version>\handoff_<guid>\install-client.ps1`) and launches it using the absolute Windows PowerShell host (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`). The downloaded ZIP's scripts are never directly executed to launch the upgrade.
+4. **Bootstrap Constraint (First Auto-Update-Capable Release)**:
+   - Historical v1.0.0 builds created prior to this feature did not package `install-client.ps1` beside `FootballTray.exe`.
+   - Automatic installer handoff strictly requires `install-client.ps1` beside `FootballTray.exe` and fails closed if it is absent (no repository fallback).
+   - The first auto-update-capable build must be installed or upgraded via the standard manual installer path (`pwsh ./scripts/install-client.ps1`) to seed the trusted script into the application directory.
+   - Subsequent releases automatically carry `install-client.ps1` forward through the installer's normal `$SourceDir` recursive payload copying.
+   - Trust chain: First seeded auto-update-capable release -> its trusted local installer -> next verified release -> next release installs its own trusted installer -> repeat.
+5. **Process Handoff & Instance Protection**: The installer is invoked with `-WaitForProcessId <callerPid>`. It performs read-only preflight checks and waits up to 15 seconds for the exact caller PID to exit gracefully. If the caller fails to exit within 15 seconds, the installer fails closed without force-killing the caller. Once the caller exits, the installer cleans any other remaining FootballTray instances before beginning destructive file operations.
+
 ---
 
 ## Future Installer Strategy

@@ -283,6 +283,22 @@ if ($hasUpdateUrl) {
     Write-Host "`n[8/8] Skipping release manifest (-UpdateDownloadUrl was not specified)." -ForegroundColor Gray
 }
 
+# Final gate: run validate-release.ps1 with -RequireAutoUpdateInstaller so every new
+# release is confirmed to carry install-client.ps1. Historical artifacts (pre-v1.1.0)
+# that lack this file can still be validated without the switch.
+Write-Host "`n[Post-publish] Running artifact validation gate..." -ForegroundColor Yellow
+$ValidateScript = Join-Path $ScriptDir "validate-release.ps1"
+if (Test-Path $ValidateScript) {
+    & $ValidateScript -Version $Version -ReleaseDir $ReleaseBaseDir -RequireAutoUpdateInstaller
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Post-publish validation failed. Release artifacts may be incomplete."
+        exit 1
+    }
+    Write-Host "  Artifact validation passed." -ForegroundColor Green
+} else {
+    Write-Warning "validate-release.ps1 not found at '$ValidateScript'. Skipping post-publish validation."
+}
+
 Write-Host "`n============================================================" -ForegroundColor Green
 Write-Host " Release v$Version published successfully!" -ForegroundColor Green
 Write-Host " Artifacts directory: $ReleaseBaseDir" -ForegroundColor Green
@@ -290,4 +306,5 @@ if ($hasUpdateUrl) {
     Write-Host " Manifest:            $ManifestFile" -ForegroundColor Green
 }
 Write-Host "============================================================" -ForegroundColor Green
+
 exit 0

@@ -44,6 +44,7 @@ param (
     [switch]$Launch,
     [switch]$AllowDowngrade,
     [switch]$WhatIf,
+    [int]$WaitForProcessId = 0,
     [switch]$SimulatePostActivationFailure,
     [string]$SimulateFailureStep
 )
@@ -389,6 +390,26 @@ if ($isUpgrade) {
 # ----------------------------------------------------------------------
 Write-Host "`n[2/5] Preparing installation staging..." -ForegroundColor Yellow
 
+# If WaitForProcessId is specified, wait for the caller process to exit gracefully
+if ($WaitForProcessId -gt 0) {
+    Write-Host "Waiting for calling process (PID: $WaitForProcessId) to exit..." -ForegroundColor Yellow
+    $swWait = [System.Diagnostics.Stopwatch]::StartNew()
+    $waitedProcessExited = $false
+    while ($swWait.Elapsed.TotalSeconds -lt 15) {
+        $p = Get-Process -Id $WaitForProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $p -or $p.HasExited) {
+            $waitedProcessExited = $true
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    if (-not $waitedProcessExited) {
+        throw "CRITICAL: Calling process (PID: $WaitForProcessId) did not exit within 15 seconds. Aborting installation to prevent corrupting running application."
+    }
+    Write-Host "Calling process exited gracefully." -ForegroundColor Green
+}
+
 if ($WhatIf) {
     Write-Host "  [WhatIf] Would stop running FootballTray processes (if any)." -ForegroundColor Gray
     Write-Host "  [WhatIf] Would stage files from '$SourceDir' to '$StagingDir'." -ForegroundColor Gray
@@ -402,7 +423,7 @@ if ($WhatIf) {
     return
 }
 
-# Stop any running instances before touching files
+# Stop running instances before touching files
 Stop-RunningClient
 
 # Clean stale staging or backup directories

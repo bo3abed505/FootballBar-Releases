@@ -19,6 +19,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace FootballTray.Client.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public class UpdatePackageAcquisitionTests
 {
     private string _tempDir = string.Empty;
@@ -793,11 +794,10 @@ public class UpdatePackageAcquisitionTests
         await vm.DownloadUpdateAsync();
 
         Assert.IsTrue(vm.IsUpdateDownloaded);
-        // Verify no install / restart properties or actions exist on ViewModel
+        // Verify installation is disabled when no installation service is provided and no silent restart exists
+        Assert.IsFalse(vm.CanInstallUpdate);
+        Assert.IsFalse(vm.IsInstallingUpdate);
         var vmType = typeof(MainViewModel);
-        Assert.IsNull(vmType.GetProperty("CanInstallUpdate"));
-        Assert.IsNull(vmType.GetProperty("IsInstallingUpdate"));
-        Assert.IsNull(vmType.GetMethod("InstallUpdateAsync"));
         Assert.IsNull(vmType.GetMethod("RestartAndInstall"));
     }
 

@@ -66,25 +66,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private PackageIdentity? _inFlightDownloadIdentity;
     private readonly object _downloadLock = new();
 
-    private readonly record struct PackageIdentity(
-        string Version,
-        string Architecture,
-        string DownloadUrl,
-        string Sha256,
-        long SizeBytes);
-
-    private static PackageIdentity CreatePackageIdentity(ReleaseManifest manifest) =>
-        new(
-            manifest.Version,
-            manifest.Architecture,
-            manifest.DownloadUrl,
-            manifest.Sha256,
-            manifest.SizeBytes);
+    private readonly IUpdateInstallationService? _updateInstallationService;
+    private readonly IAppShutdownHandler? _appShutdownHandler;
+    private UpdateInstallationState _installationState = UpdateInstallationState.NotReady;
+    private string? _installStatusText;
+    private Task<UpdateInstallationResult?>? _inFlightInstallTask;
+    private PackageIdentity? _inFlightInstallIdentity;
+    private readonly object _installLock = new();
 
     private bool IsCurrentOffer(PackageIdentity targetIdentity)
     {
         if (_offeredManifest == null) return false;
-        return CreatePackageIdentity(_offeredManifest) == targetIdentity;
+        return PackageIdentity.FromManifest(_offeredManifest) == targetIdentity;
     }
 
     public ObservableCollection<MatchItemViewModel> FilteredMatches { get; } = new();
@@ -95,6 +88,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public Diagnostics.IDiagnosticsService DiagnosticsService => _diagnosticsService;
     public IUpdateDiscoveryService? UpdateDiscoveryService => _updateDiscoveryService;
     public IUpdatePackageAcquisitionService? UpdateAcquisitionService => _updateAcquisitionService;
+    public IUpdateInstallationService? UpdateInstallationService => _updateInstallationService;
+    public IAppShutdownHandler? AppShutdownHandler => _appShutdownHandler;
     public bool HasUpdateCapability => _updateDiscoveryService != null;
 
     public string DiagnosticsVersionText => $"Version {_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
@@ -131,6 +126,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (SetProperty(ref _isUpdateAvailable, value))
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanInstallUpdate)));
             }
         }
     }
@@ -161,6 +157,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (SetProperty(ref _offeredManifest, value))
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanInstallUpdate)));
             }
         }
     }
@@ -175,6 +172,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsAcquiringUpdate)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsUpdateDownloaded)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanInstallUpdate)));
             }
         }
     }
@@ -236,8 +234,62 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (SetProperty(ref _verifiedPackagePath, value))
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsUpdateDownloaded)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanInstallUpdate)));
             }
         }
+    }
+
+    public UpdateInstallationState InstallationState
+    {
+        get => _installationState;
+        private set
+        {
+            if (SetProperty(ref _installationState, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInstallingUpdate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanInstallUpdate)));
+            }
+        }
+    }
+
+    public bool IsInstallingUpdate =>
+        _installationState is UpdateInstallationState.Preparing
+            or UpdateInstallationState.StartingInstaller
+            or UpdateInstallationState.HandoffStarted;
+
+    public bool CanInstallUpdate
+    {
+        get
+        {
+            if (IsInstallingUpdate || !_isUpdateAvailable || _offeredManifest == null || _updateInstallationService == null)
+            {
+                return false;
+            }
+
+            if (!IsUpdateDownloaded || string.IsNullOrEmpty(_verifiedPackagePath))
+            {
+                return false;
+            }
+
+            lock (_installLock)
+            {
+                if (_inFlightInstallTask != null && !_inFlightInstallTask.IsCompleted)
+                {
+                    if (_inFlightInstallIdentity != null && !IsCurrentOffer(_inFlightInstallIdentity.Value))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+    }
+
+    public string? InstallStatusText
+    {
+        get => _installStatusText;
+        private set => SetProperty(ref _installStatusText, value);
     }
 
     public string CurrentVersionText => $"v{_updateDiscoveryService?.CurrentVersion?.ToString() ?? AppVersionInfo.Version}";
@@ -335,7 +387,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DispatcherQueue? dispatcherQueue = null,
         IUpdateDiscoveryService? updateDiscoveryService = null,
         Func<TimeSpan, CancellationToken, Task>? delayFunc = null,
-        IUpdatePackageAcquisitionService? updateAcquisitionService = null)
+        IUpdatePackageAcquisitionService? updateAcquisitionService = null,
+        IUpdateInstallationService? updateInstallationService = null,
+        IAppShutdownHandler? appShutdownHandler = null)
     {
         _preferencesService = preferencesService ?? throw new ArgumentNullException(nameof(preferencesService));
         _syncService = syncService;
@@ -344,6 +398,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _updateDiscoveryService = updateDiscoveryService;
         _delayFunc = delayFunc ?? Task.Delay;
         _updateAcquisitionService = updateAcquisitionService;
+        _updateInstallationService = updateInstallationService;
+        _appShutdownHandler = appShutdownHandler;
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -913,6 +969,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         VerifiedPackagePath = null;
         DownloadProgressPercent = 0;
         DownloadStatusText = null;
+        InstallationState = UpdateInstallationState.NotReady;
+        InstallStatusText = null;
     }
 
     /// <summary>
@@ -928,7 +986,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var targetManifest = _offeredManifest;
-        var targetIdentity = CreatePackageIdentity(targetManifest);
+        var targetIdentity = PackageIdentity.FromManifest(targetManifest);
         Task<UpdateAcquisitionResult?> downloadTask;
 
         lock (_downloadLock)
@@ -1056,6 +1114,198 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             }
         }, nameof(DownloadUpdateAsync));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Prepares and initiates installer handoff for the verified update package.
+    /// User-initiated action. Coalesces concurrent callers for the same package.
+    /// Caller cancellation unblocks only that caller's wait.
+    /// Executes the final offer check and StartPreparedHandoff synchronously with ZERO async gap.
+    /// </summary>
+    public async Task<UpdateInstallationResult?> InstallUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        if (_updateInstallationService == null || _offeredManifest == null || string.IsNullOrEmpty(_verifiedPackagePath))
+        {
+            return null;
+        }
+
+        var targetManifest = _offeredManifest;
+        var targetIdentity = PackageIdentity.FromManifest(targetManifest);
+        var verifiedPath = _verifiedPackagePath;
+        Task<UpdateInstallationResult?> installTask;
+
+        lock (_installLock)
+        {
+            if (_inFlightInstallTask != null && !_inFlightInstallTask.IsCompleted)
+            {
+                if (_inFlightInstallIdentity == targetIdentity)
+                {
+                    installTask = _inFlightInstallTask;
+                }
+                else
+                {
+                    return UpdateInstallationResult.Failed(
+                        targetManifest.Version,
+                        "Another update installation is already in progress.");
+                }
+            }
+            else
+            {
+                if (!CanInstallUpdate)
+                {
+                    return null;
+                }
+
+                _inFlightInstallIdentity = targetIdentity;
+                _inFlightInstallTask = RunInstallCoreAsync(targetManifest, verifiedPath, targetIdentity);
+                installTask = _inFlightInstallTask;
+            }
+        }
+
+        return await installTask.WaitAsync(cancellationToken);
+    }
+
+    private async Task<UpdateInstallationResult?> RunInstallCoreAsync(
+        ReleaseManifest targetManifest,
+        string verifiedPath,
+        PackageIdentity targetIdentity)
+    {
+        RunOnUiSafe(() =>
+        {
+            if (IsCurrentOffer(targetIdentity))
+            {
+                InstallationState = UpdateInstallationState.Preparing;
+                InstallStatusText = "Preparing update installer...";
+            }
+        }, nameof(InstallUpdateAsync));
+
+        PreparedUpdateInstall prepared;
+        try
+        {
+            prepared = await _updateInstallationService!.PrepareInstallAsync(
+                targetManifest,
+                verifiedPath,
+                _disposeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            RunOnUiSafe(() =>
+            {
+                if (IsCurrentOffer(targetIdentity))
+                {
+                    InstallationState = UpdateInstallationState.NotReady;
+                    InstallStatusText = "Installation preparation was cancelled.";
+                }
+            }, nameof(InstallUpdateAsync));
+            return UpdateInstallationResult.Cancelled(targetManifest.Version);
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLogger.Error("Updates", "InstallPreparationError", $"Error preparing update installation: {ex.Message}", ex: ex);
+            RunOnUiSafe(() =>
+            {
+                if (IsCurrentOffer(targetIdentity))
+                {
+                    InstallationState = UpdateInstallationState.Failed;
+                    InstallStatusText = $"Installation failed: {ex.Message}";
+                }
+            }, nameof(InstallUpdateAsync));
+            return UpdateInstallationResult.Failed(targetManifest.Version, ex.Message);
+        }
+        finally
+        {
+            lock (_installLock)
+            {
+                _inFlightInstallTask = null;
+                _inFlightInstallIdentity = null;
+            }
+
+            RunOnUiSafe(() =>
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanInstallUpdate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInstallingUpdate)));
+            }, nameof(InstallUpdateAsync));
+        }
+
+        UpdateInstallationResult? result = null;
+        bool initiateShutdown = false;
+
+        void ExecuteLaunchOnUi()
+        {
+            // Critical: Final offer check and StartPreparedHandoff executed synchronously with ZERO async gap.
+            if (!IsCurrentOffer(prepared.TargetIdentity))
+            {
+                _updateInstallationService.DiscardPreparedInstall(prepared);
+                InstallationState = UpdateInstallationState.NotReady;
+                InstallStatusText = null;
+                result = UpdateInstallationResult.Failed(
+                    prepared.TargetVersion,
+                    "The update offer changed while preparation was in progress.");
+                return;
+            }
+
+            result = _updateInstallationService.StartPreparedHandoff(prepared);
+            if (result.Success)
+            {
+                InstallationState = UpdateInstallationState.HandoffStarted;
+                InstallStatusText = "Update installer launched. Closing application...";
+                initiateShutdown = true;
+            }
+            else
+            {
+                InstallationState = UpdateInstallationState.Failed;
+                InstallStatusText = $"Failed to start installer: {result.Message}";
+            }
+        }
+
+        if (_dispatcherQueue == null || _dispatcherQueue.HasThreadAccess)
+        {
+            ExecuteLaunchOnUi();
+        }
+        else
+        {
+            var tcs = new TaskCompletionSource();
+            bool enqueued = _dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    ExecuteLaunchOnUi();
+                    tcs.SetResult();
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            });
+
+            if (!enqueued)
+            {
+                ExecuteLaunchOnUi();
+            }
+            else
+            {
+                await tcs.Task;
+            }
+        }
+
+        if (initiateShutdown)
+        {
+            bool shutdownAccepted = _appShutdownHandler?.RequestShutdown() ?? false;
+            if (!shutdownAccepted && result != null)
+            {
+                // Dispatcher queue was unavailable — window close could not be enqueued.
+                // Surface a factual message so the user knows to close manually.
+                RunOnUiSafe(() =>
+                {
+                    if (IsCurrentOffer(prepared.TargetIdentity))
+                    {
+                        InstallStatusText = "Update installer started. Close FootballTray to continue.";
+                    }
+                }, nameof(InstallUpdateAsync));
+            }
+        }
 
         return result;
     }
