@@ -1206,20 +1206,114 @@ Requirements:
             CreateNoWindow = true
         };
 
-        process.Start();
-        string stdout = process.StandardOutput.ReadToEnd();
-        string stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit(30000);
+        if (!process.Start())
+        {
+            Assert.Fail($"Failed to start Windows PowerShell 5.1 process: '{ps51Exe}'.");
+        }
 
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        if (!process.WaitForExit(30000))
+        {
+            string? killException = null;
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex)
+            {
+                killException = ex.ToString();
+            }
+
+            bool terminated = false;
+            string? postKillWaitException = null;
+            try
+            {
+                terminated = process.WaitForExit(5000);
+            }
+            catch (Exception ex)
+            {
+                postKillWaitException = ex.ToString();
+            }
+
+            if (!terminated)
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"Windows PowerShell 5.1 parser process timed out after 30000ms for script: '{scriptPath}'.");
+                sb.AppendLine("Process termination could NOT be confirmed within 5000ms post-kill wait.");
+                if (killException != null)
+                {
+                    sb.AppendLine($"process.Kill threw: {killException}");
+                }
+                else
+                {
+                    sb.AppendLine("process.Kill was called without throwing, but process did not exit.");
+                }
+                if (postKillWaitException != null)
+                {
+                    sb.AppendLine($"process.WaitForExit(5000) threw: {postKillWaitException}");
+                }
+                Assert.Fail(sb.ToString());
+            }
+
+            string? outputDrainException = null;
+            try
+            {
+                Task.WaitAll(new Task[] { stdoutTask, stderrTask }, TimeSpan.FromMilliseconds(2000));
+            }
+            catch (Exception ex)
+            {
+                outputDrainException = ex.ToString();
+            }
+
+            var timeoutMsg = new System.Text.StringBuilder();
+            timeoutMsg.AppendLine($"Windows PowerShell 5.1 parser process timed out after 30000ms for script: '{scriptPath}' and was terminated.");
+            if (killException != null)
+            {
+                timeoutMsg.AppendLine($"Note: process.Kill threw an exception: {killException}");
+            }
+            if (outputDrainException != null)
+            {
+                timeoutMsg.AppendLine($"Note: output task drain threw an exception: {outputDrainException}");
+            }
+            Assert.Fail(timeoutMsg.ToString());
+        }
+
+        process.WaitForExit();
+
+        string stdout;
+        string stderr;
+        try
+        {
+            Task.WaitAll(stdoutTask, stderrTask);
+            stdout = stdoutTask.GetAwaiter().GetResult();
+            stderr = stderrTask.GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Assert.Fail($"Failed while awaiting Windows PowerShell 5.1 process output tasks: {ex.Message}");
+            return (0, string.Empty);
+        }
+
+        Assert.AreEqual(0, process.ExitCode,
+            $"Windows PowerShell 5.1 exited with nonzero code {process.ExitCode}.\nStdout: {stdout}\nStderr: {stderr}");
+
+        bool markerFound = false;
         int errorCount = 0;
         foreach (var line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
         {
             if (line.StartsWith("ERRORS="))
             {
-                int.TryParse(line.Substring("ERRORS=".Length), out errorCount);
+                markerFound = true;
+                Assert.IsTrue(int.TryParse(line.Substring("ERRORS=".Length), out errorCount),
+                    $"Failed to parse error count from marker line: '{line}'.");
                 break;
             }
         }
+
+        Assert.IsTrue(markerFound,
+            $"Windows PowerShell 5.1 output did not contain expected 'ERRORS=' marker line.\nStdout: {stdout}\nStderr: {stderr}");
 
         string details = string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nStderr: {stderr}";
         return (errorCount, details);
