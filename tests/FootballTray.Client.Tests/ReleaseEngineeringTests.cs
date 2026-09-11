@@ -621,6 +621,16 @@ public class ReleaseEngineeringTests
             Assert.IsTrue(File.Exists(checksumFile), "SHA256SUMS.txt must exist.");
             string checksumContent = File.ReadAllText(checksumFile);
             Assert.IsTrue(checksumContent.Contains(expectedZipHash), "SHA256SUMS.txt must contain the ZIP hash.");
+
+            // Verify end-to-end generated release notes use generic fallback without Milestone 8
+            string releaseNotesPath = Path.Combine(releaseDir, "RELEASE_NOTES.txt");
+            Assert.IsTrue(File.Exists(releaseNotesPath), "RELEASE_NOTES.txt must exist in release directory.");
+            string releaseNotes = File.ReadAllText(releaseNotesPath);
+            Assert.IsTrue(releaseNotes.Contains($"FootballTray v{testVersion}"), "Fallback release notes must contain test version.");
+            Assert.IsTrue(releaseNotes.Contains("Release — Native Windows Taskbar Football Tracker"), "Fallback release notes must contain generic header.");
+            Assert.IsFalse(releaseNotes.Contains("Milestone 8"), "Fallback release notes must NOT contain Milestone 8.");
+            Assert.IsFalse(releaseNotes.Contains("Changes since v1.0.0"), "Fallback release notes must NOT contain Changes since v1.0.0.");
+            Assert.AreEqual(releaseNotes.Trim(), manifest.ReleaseNotes?.Trim(), "manifest.releaseNotes must match RELEASE_NOTES.txt.");
         }
         finally
         {
@@ -908,6 +918,190 @@ public class ReleaseEngineeringTests
                 try { Directory.Delete(releaseDir, recursive: true); } catch { }
             }
         }
+    }
+
+    [TestMethod]
+    public void Test26_PublishScript_ResolvesVersionSpecificReleaseNotes_WithManifestParity()
+    {
+        string root = FindRepoRoot();
+        string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        string notesFileV101 = Path.Combine(root, "release-notes", "v1.0.1.txt");
+
+        // 1. Source existence and content verification
+        Assert.IsTrue(File.Exists(notesFileV101), "release-notes/v1.0.1.txt must exist in repository source.");
+        string sourceNotes = File.ReadAllText(notesFileV101);
+        Assert.IsTrue(sourceNotes.Contains("Maintenance Release — Automatic Update Foundation"),
+            "Source notes must identify maintenance release.");
+        Assert.IsTrue(sourceNotes.Contains("Changes since v1.0.0:"),
+            "Source notes must specify changes section.");
+        Assert.IsFalse(sourceNotes.Contains("Milestone 8"),
+            "Source notes must NOT contain Milestone 8.");
+
+        // 2. Publisher script contract verification
+        string publishScriptContent = File.ReadAllText(publishScript);
+        Assert.IsTrue(publishScriptContent.Contains("release-notes"),
+            "publish-release.ps1 must reference release-notes directory.");
+        Assert.IsTrue(publishScriptContent.Contains("v$Version.txt"),
+            "publish-release.ps1 must look up v$Version.txt convention.");
+        Assert.IsFalse(publishScriptContent.Contains("Milestone 8"),
+            "publish-release.ps1 must NOT contain Milestone 8.");
+
+        // 3. Isolated release publish simulation for v1.0.1
+        using var fixture = new IsolatedReleaseFixture(root);
+        const string version = "1.0.1";
+        const string downloadUrl = "https://example.invalid/releases/v1.0.1/FootballTray-v1.0.1-win-x64.zip";
+
+        var result = RunPowerShell($@"
+            $RootDir = '{root.Replace("'", "''")}'
+            $Version = '{version}'
+            $ReleaseBaseDir = '{fixture.FixturePath.Replace("'", "''")}'
+            $PublishDir = Join-Path $ReleaseBaseDir 'win-x64'
+            $versionTxtPath = Join-Path $PublishDir 'VERSION.txt'
+            $releaseNotesPath = Join-Path $PublishDir 'RELEASE_NOTES.txt'
+
+            $versionNotesFile = Join-Path $RootDir 'release-notes' ""v$Version.txt""
+            if (Test-Path -LiteralPath $versionNotesFile) {{
+                $releaseNotesContent = (Get-Content -LiteralPath $versionNotesFile -Raw).TrimEnd()
+                Write-Host ""  Loaded version-specific release notes from: release-notes/v$Version.txt""
+            }} else {{
+                Write-Host ""  No version-specific release notes found at: release-notes/v$Version.txt — using generic template.""
+                $releaseNotesContent = @""
+FootballTray v$Version
+============================================================
+Release — Native Windows Taskbar Football Tracker
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
+""@
+            }}
+
+            Set-Content -Path $releaseNotesPath -Value $releaseNotesContent
+            Copy-Item -Path $releaseNotesPath -Destination (Join-Path $ReleaseBaseDir 'RELEASE_NOTES.txt') -Force
+
+            . '{publishScript.Replace("'", "''")}'; New-ReleaseManifest `
+                -Version $Version `
+                -DownloadUrl '{downloadUrl}' `
+                -ArchiveFile '{fixture.ArchivePath.Replace("'", "''")}' `
+                -ReleaseNotesFile $releaseNotesPath `
+                -ManifestFile '{fixture.ManifestPath.Replace("'", "''")}' `
+                -Architecture 'win-x64'
+        ", root);
+
+        Assert.AreEqual(0, result.ExitCode, $"Isolated publish failed: {result.Stdout} {result.Stderr}");
+
+        // A. Verify generated RELEASE_NOTES.txt
+        string generatedNotesPath = Path.Combine(fixture.FixturePath, "RELEASE_NOTES.txt");
+        Assert.IsTrue(File.Exists(generatedNotesPath), "Generated RELEASE_NOTES.txt must exist in isolated release.");
+        string generatedNotes = File.ReadAllText(generatedNotesPath);
+
+        Assert.IsTrue(generatedNotes.Contains("Maintenance Release — Automatic Update Foundation"),
+            "Generated RELEASE_NOTES.txt must contain maintenance release title.");
+        Assert.IsTrue(generatedNotes.Contains("Changes since v1.0.0:"),
+            "Generated RELEASE_NOTES.txt must contain changes section.");
+        Assert.IsFalse(generatedNotes.Contains("Milestone 8 Release"),
+            "Generated RELEASE_NOTES.txt must NOT contain 'Milestone 8 Release'.");
+        Assert.IsFalse(generatedNotes.Contains("Milestone 8"),
+            "Generated RELEASE_NOTES.txt must NOT contain 'Milestone 8'.");
+
+        // B. Verify manifest consistency
+        Assert.IsTrue(File.Exists(fixture.ManifestPath), "release-manifest.json must exist in isolated release.");
+        string manifestJson = File.ReadAllText(fixture.ManifestPath);
+        var parseResult = ReleaseManifestParser.ParseAndValidate(manifestJson);
+        Assert.IsTrue(parseResult.IsValid, $"Manifest domain parsing failed: {parseResult.ErrorMessage}");
+
+        var manifest = parseResult.ValidatedManifest!;
+        Assert.IsNotNull(manifest.ReleaseNotes, "manifest.releaseNotes must not be null.");
+        Assert.AreEqual(generatedNotes.Trim(), manifest.ReleaseNotes.Trim(),
+            "manifest.releaseNotes must match generated RELEASE_NOTES.txt content identically.");
+
+        // D. Historical safety: canonical v1.0.0 artifacts must remain untouched
+        string hist100Zip = Path.Combine(root, "artifacts", "releases", "v1.0.0", "FootballTray-v1.0.0-win-x64.zip");
+        Assert.IsTrue(File.Exists(hist100Zip), "Historical v1.0.0 ZIP must exist.");
+    }
+
+    [TestMethod]
+    public void Test27_PublishScript_GenericFallbackReleaseNotes_WhenDedicatedNotesAbsent()
+    {
+        string root = FindRepoRoot();
+        string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        string fallbackVersion = $"0.0.0-fallback.{Guid.NewGuid():N}";
+        string dedicatedNotesFile = Path.Combine(root, "release-notes", $"v{fallbackVersion}.txt");
+
+        // Verify no dedicated notes file exists for this safe test version
+        Assert.IsFalse(File.Exists(dedicatedNotesFile), "No dedicated notes file must exist for fallback test version.");
+
+        using var fixture = new IsolatedReleaseFixture(root);
+        string downloadUrl = $"https://example.invalid/releases/v{fallbackVersion}/FootballTray-v{fallbackVersion}-win-x64.zip";
+
+        var result = RunPowerShell($@"
+            $RootDir = '{root.Replace("'", "''")}'
+            $Version = '{fallbackVersion}'
+            $ReleaseBaseDir = '{fixture.FixturePath.Replace("'", "''")}'
+            $PublishDir = Join-Path $ReleaseBaseDir 'win-x64'
+            $versionTxtPath = Join-Path $PublishDir 'VERSION.txt'
+            $releaseNotesPath = Join-Path $PublishDir 'RELEASE_NOTES.txt'
+
+            $versionNotesFile = Join-Path $RootDir 'release-notes' ""v$Version.txt""
+            if (Test-Path -LiteralPath $versionNotesFile) {{
+                $releaseNotesContent = (Get-Content -LiteralPath $versionNotesFile -Raw).TrimEnd()
+                Write-Host ""  Loaded version-specific release notes from: release-notes/v$Version.txt""
+            }} else {{
+                Write-Host ""  No version-specific release notes found at: release-notes/v$Version.txt — using generic template.""
+                $releaseNotesContent = @""
+FootballTray v$Version
+============================================================
+Release — Native Windows Taskbar Football Tracker
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
+""@
+            }}
+
+            Set-Content -Path $releaseNotesPath -Value $releaseNotesContent
+            Copy-Item -Path $releaseNotesPath -Destination (Join-Path $ReleaseBaseDir 'RELEASE_NOTES.txt') -Force
+
+            . '{publishScript.Replace("'", "''")}'; New-ReleaseManifest `
+                -Version $Version `
+                -DownloadUrl '{downloadUrl}' `
+                -ArchiveFile '{fixture.ArchivePath.Replace("'", "''")}' `
+                -ReleaseNotesFile $releaseNotesPath `
+                -ManifestFile '{fixture.ManifestPath.Replace("'", "''")}' `
+                -Architecture 'win-x64'
+        ", root);
+
+        Assert.AreEqual(0, result.ExitCode, $"Isolated fallback publish failed: {result.Stdout} {result.Stderr}");
+
+        // C. Verify generic fallback content
+        string generatedNotesPath = Path.Combine(fixture.FixturePath, "RELEASE_NOTES.txt");
+        Assert.IsTrue(File.Exists(generatedNotesPath), "Generated RELEASE_NOTES.txt must exist in fallback release.");
+        string generatedNotes = File.ReadAllText(generatedNotesPath);
+
+        Assert.IsTrue(generatedNotes.Contains($"FootballTray v{fallbackVersion}"),
+            "Fallback notes must contain the dynamic target version.");
+        Assert.IsTrue(generatedNotes.Contains("Release — Native Windows Taskbar Football Tracker"),
+            "Fallback notes must contain generic release header.");
+        Assert.IsFalse(generatedNotes.Contains("Milestone 8"),
+            "Fallback notes must NOT contain 'Milestone 8'.");
+        Assert.IsFalse(generatedNotes.Contains("Changes since v1.0.0"),
+            "Fallback notes must NOT contain 'Changes since v1.0.0'.");
+
+        // Manifest consistency for fallback
+        string manifestJson = File.ReadAllText(fixture.ManifestPath);
+        var parseResult = ReleaseManifestParser.ParseAndValidate(manifestJson);
+        Assert.IsTrue(parseResult.IsValid, $"Fallback manifest domain parsing failed: {parseResult.ErrorMessage}");
+        Assert.AreEqual(generatedNotes.Trim(), parseResult.ValidatedManifest!.ReleaseNotes?.Trim(),
+            "manifest.releaseNotes must match fallback RELEASE_NOTES.txt.");
+
+        // Verify no permanent source release-notes file was created
+        Assert.IsFalse(File.Exists(dedicatedNotesFile), "No source release-notes file must be created for fallback version.");
+
+        // Historical safety: canonical v1.0.0 remains intact
+        string hist100Zip = Path.Combine(root, "artifacts", "releases", "v1.0.0", "FootballTray-v1.0.0-win-x64.zip");
+        Assert.IsTrue(File.Exists(hist100Zip), "Historical v1.0.0 ZIP must exist.");
     }
 
     #endregion

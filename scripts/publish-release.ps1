@@ -199,25 +199,23 @@ $releaseNotesPath = Join-Path $PublishDir "RELEASE_NOTES.txt"
 
 Set-Content -Path $versionTxtPath -Value "FootballTray v$Version`nRuntime: net10.0-windows10.0.26100.0`nArchitecture: win-x64 (Self-Contained)`nPackaging: Unpackaged WinUI 3 (Windows App SDK 2.4.0)`nBuild Date (UTC): $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ssZ'))"
 
-$releaseNotesContent = @"
+$versionNotesFile = Join-Path $RootDir "release-notes" "v$Version.txt"
+if (Test-Path -LiteralPath $versionNotesFile) {
+    $releaseNotesContent = (Get-Content -LiteralPath $versionNotesFile -Raw).TrimEnd()
+    Write-Host "  Loaded version-specific release notes from: release-notes/v$Version.txt" -ForegroundColor Green
+} else {
+    Write-Host "  No version-specific release notes found at: release-notes/v$Version.txt — using generic template." -ForegroundColor Gray
+    $releaseNotesContent = @"
 FootballTray v$Version
 ============================================================
-Milestone 8 Release — Native Windows Taskbar Football Tracker
-
-Features:
-- Native WinUI 3 Desktop Application with Mica styling
-- Native Windows 11 Taskbar Integration and Live Ticker
-- Intelligent Acquisition Scheduler with Multi-Tier Polling
-- ETag-Aware Caching and Instant Offline Match Discovery
-- Windows App SDK Native Match Notifications (Toast Alerts)
-- Comprehensive User Preferences (Teams, Competitions, Alerts)
-- Fully Decoupled Architecture with Zero Secret Bundling
+Release — Native Windows Taskbar Football Tracker
 
 Requirements:
 - Windows 11 64-bit (or Windows 10 build 17763+)
 - x64 processor
 - FootballTray Backend Service (Local or Network-hosted)
 "@
+}
 
 Set-Content -Path $releaseNotesPath -Value $releaseNotesContent
 

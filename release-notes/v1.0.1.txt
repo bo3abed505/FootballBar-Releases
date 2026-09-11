@@ -1,0 +1,16 @@
+FootballTray v1.0.1
+============================================================
+Maintenance Release — Automatic Update Foundation
+
+Changes since v1.0.0:
+- Added in-app remote update discovery.
+- Added verified update package download with SHA256 and size validation.
+- Added user-approved update installation handoff and automatic relaunch.
+- Hardened release version propagation across published binaries.
+- Added strict payload and binary version consistency validation.
+- Preserved transactional upgrade, rollback, and downgrade protection.
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
