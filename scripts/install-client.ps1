@@ -352,7 +352,7 @@ if ([string]::IsNullOrWhiteSpace($SourceDir)) {
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " FootballTray — Windows Client Per-User Installer" -ForegroundColor Cyan
+Write-Host " FootballTray - Windows Client Per-User Installer" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Source Directory:       $SourceDir"
 Write-Host " Target Directory:       $TargetDir"
@@ -653,7 +653,7 @@ try {
     }
 
     # ------------------------------------------------------------------
-    # 8. TRANSACTION COMPLETE — Only now clean up backups!
+    # 8. TRANSACTION COMPLETE - Only now clean up backups!
     # ------------------------------------------------------------------
     if (Test-Path -LiteralPath $BackupDir) {
         Assert-NotUserDataPath -Path $BackupDir -Operation "remove backup"

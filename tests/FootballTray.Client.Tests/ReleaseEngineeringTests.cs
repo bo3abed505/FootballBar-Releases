@@ -1104,5 +1104,126 @@ Requirements:
         Assert.IsTrue(File.Exists(hist100Zip), "Historical v1.0.0 ZIP must exist.");
     }
 
+    [TestMethod]
+    public void Test28_InstallerScript_IsStrictlyAsciiSafe()
+    {
+        string root = FindRepoRoot();
+        string installerScript = Path.Combine(root, "scripts", "install-client.ps1");
+        Assert.IsTrue(File.Exists(installerScript), "scripts/install-client.ps1 must exist.");
+
+        byte[] bytes = File.ReadAllBytes(installerScript);
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            byte b = bytes[i];
+            Assert.IsTrue(b <= 0x7F,
+                $"Non-ASCII byte 0x{b:X2} found at offset {i} in '{installerScript}'. " +
+                "The trusted Windows PowerShell installer script must remain strictly ASCII-safe (all bytes <= 0x7F) " +
+                "because it is executed by Windows PowerShell 5.1 without a BOM under system ANSI code pages.");
+        }
+    }
+
+    [TestMethod]
+    public void Test29_InstallerScript_ParsesCleanlyUnderWindowsPowerShell51()
+    {
+        string root = FindRepoRoot();
+        string installerScript = Path.Combine(root, "scripts", "install-client.ps1");
+        Assert.IsTrue(File.Exists(installerScript), "scripts/install-client.ps1 must exist.");
+
+        var (errorCount, details) = ParseWithWindowsPowerShell51(installerScript);
+        Assert.AreEqual(0, errorCount,
+            $"scripts/install-client.ps1 failed parsing under Windows PowerShell 5.1 with {errorCount} error(s):\n{details}");
+    }
+
+    [TestMethod]
+    public void Test30_PublishedInstallerPayload_ByteIdenticalAndParsesUnderWindowsPowerShell51()
+    {
+        string root = FindRepoRoot();
+        string installerSource = Path.Combine(root, "scripts", "install-client.ps1");
+        Assert.IsTrue(File.Exists(installerSource), "scripts/install-client.ps1 must exist.");
+
+        string tempPublishDir = Path.Combine(Path.GetTempPath(), $"ft_test_pub_{Guid.NewGuid():N}");
+        try
+        {
+            string csproj = Path.Combine(root, "src", "client", "FootballTray.Client", "FootballTray.Client.csproj");
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"publish \"{csproj}\" -c Release -r win-x64 --self-contained false -o \"{tempPublishDir}\"",
+                WorkingDirectory = root,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi)!;
+            proc.WaitForExit(90000);
+            Assert.AreEqual(0, proc.ExitCode, $"dotnet publish failed with exit code {proc.ExitCode}: {proc.StandardError.ReadToEnd()}");
+
+            string publishedInstaller = Path.Combine(tempPublishDir, "install-client.ps1");
+            Assert.IsTrue(File.Exists(publishedInstaller), "Published payload must contain install-client.ps1.");
+
+            // Byte-identical check
+            byte[] sourceBytes = File.ReadAllBytes(installerSource);
+            byte[] publishedBytes = File.ReadAllBytes(publishedInstaller);
+            CollectionAssert.AreEqual(sourceBytes, publishedBytes,
+                "Published install-client.ps1 must be byte-identical to repository scripts/install-client.ps1.");
+
+            // ASCII-safe check
+            for (int i = 0; i < publishedBytes.Length; i++)
+            {
+                Assert.IsTrue(publishedBytes[i] <= 0x7F,
+                    $"Published install-client.ps1 contains non-ASCII byte 0x{publishedBytes[i]:X2} at offset {i}.");
+            }
+
+            // Windows PowerShell 5.1 AST parser check
+            var (errorCount, details) = ParseWithWindowsPowerShell51(publishedInstaller);
+            Assert.AreEqual(0, errorCount,
+                $"Published install-client.ps1 failed parsing under Windows PowerShell 5.1 with {errorCount} error(s):\n{details}");
+        }
+        finally
+        {
+            if (Directory.Exists(tempPublishDir))
+            {
+                try { Directory.Delete(tempPublishDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    private static (int ErrorCount, string Details) ParseWithWindowsPowerShell51(string scriptPath)
+    {
+        string systemDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string ps51Exe = Path.Combine(systemDir, "WindowsPowerShell", "v1.0", "powershell.exe");
+        Assert.IsTrue(File.Exists(ps51Exe), $"Windows PowerShell 5.1 executable must exist at '{ps51Exe}'.");
+
+        using var process = new System.Diagnostics.Process();
+        process.StartInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = ps51Exe,
+            Arguments = $"-NoProfile -Command \"$errs = $null; $toks = $null; [System.Management.Automation.Language.Parser]::ParseFile('{scriptPath.Replace("'", "''")}', [ref]$toks, [ref]$errs) | Out-Null; Write-Host ('ERRORS=' + $errs.Count); foreach ($e in $errs) {{ Write-Host ('LINE=' + $e.Extent.StartLineNumber + ' COL=' + $e.Extent.StartColumnNumber + ' MSG=' + $e.Message) }}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        process.Start();
+        string stdout = process.StandardOutput.ReadToEnd();
+        string stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit(30000);
+
+        int errorCount = 0;
+        foreach (var line in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith("ERRORS="))
+            {
+                int.TryParse(line.Substring("ERRORS=".Length), out errorCount);
+                break;
+            }
+        }
+
+        string details = string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nStderr: {stderr}";
+        return (errorCount, details);
+    }
+
     #endregion
 }
