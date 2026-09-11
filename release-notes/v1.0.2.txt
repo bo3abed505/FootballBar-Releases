@@ -1,0 +1,15 @@
+FootballTray v1.0.2
+============================================================
+Maintenance Release — Updater Installer Compatibility
+
+Changes since v1.0.1:
+- Fixed update installation handoff compatibility with Windows PowerShell 5.1.
+- Made the trusted updater installer script ASCII-safe across Windows ANSI code pages.
+- Added regression validation for Windows PowerShell 5.1 parser compatibility.
+- Added release validation that the published installer remains byte-identical to the trusted source script.
+- Hardened PowerShell parser test process timeout and cleanup handling.
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
