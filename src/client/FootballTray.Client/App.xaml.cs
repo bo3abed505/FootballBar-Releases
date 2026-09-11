@@ -29,6 +29,7 @@ public partial class App : Application
     private PreferencesService? _preferencesService;
     private DiagnosticsService? _diagnosticsService;
     private UpdateDiscoveryService? _updateDiscoveryService;
+    private UpdatePackageAcquisitionService? _updatePackageAcquisitionService;
     private readonly CancellationTokenSource _appShutdownCts = new();
     private Task? _startupUpdateCheckTask;
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
@@ -75,9 +76,15 @@ public partial class App : Application
         _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);
         CurrentDiagnosticsService = _diagnosticsService;
         _updateDiscoveryService = new UpdateDiscoveryService();
+        _updatePackageAcquisitionService = new UpdatePackageAcquisitionService();
 
         // 2. Initialize Root MainViewModel
-        CurrentMainViewModel = new MainViewModel(_preferencesService, _syncService, _diagnosticsService, updateDiscoveryService: _updateDiscoveryService);
+        CurrentMainViewModel = new MainViewModel(
+            _preferencesService,
+            _syncService,
+            _diagnosticsService,
+            updateDiscoveryService: _updateDiscoveryService,
+            updateAcquisitionService: _updatePackageAcquisitionService);
 
         // 3. Create Main Application Window
         _window = new MainWindow();
@@ -98,6 +105,8 @@ public partial class App : Application
             _apiClient = null;
             _updateDiscoveryService?.Dispose();
             _updateDiscoveryService = null;
+            _updatePackageAcquisitionService?.Dispose();
+            _updatePackageAcquisitionService = null;
             _taskbarHost?.Dispose();
             _taskbarHost = null;
             CurrentTaskbarHost = null;

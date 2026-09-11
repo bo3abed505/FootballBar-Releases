@@ -167,6 +167,46 @@ public sealed partial class MainPage : Page
                 UpdateReleaseNotesHeader.Visibility = Visibility.Collapsed;
                 UpdateReleaseNotesText.Visibility = Visibility.Collapsed;
             }
+
+            // Update package download and verification UI
+            DownloadUpdateButton.IsEnabled = _viewModel.CanDownloadUpdate;
+
+            if (_viewModel.IsAcquiringUpdate)
+            {
+                UpdateDownloadProgressBar.Visibility = Visibility.Visible;
+                UpdateDownloadProgressBar.Value = _viewModel.DownloadProgressPercent;
+                UpdateDownloadProgressBar.IsIndeterminate = _viewModel.AcquisitionState == Services.Updates.UpdateAcquisitionState.Verifying;
+                UpdateDownloadStatusText.Visibility = Visibility.Visible;
+                UpdateDownloadStatusText.Text = _viewModel.DownloadStatusText ?? "Downloading update...";
+                DownloadUpdateButton.Visibility = Visibility.Visible;
+                DownloadUpdateButton.Content = _viewModel.AcquisitionState == Services.Updates.UpdateAcquisitionState.Verifying
+                    ? "Verifying..."
+                    : "Downloading...";
+            }
+            else if (_viewModel.IsUpdateDownloaded)
+            {
+                UpdateDownloadProgressBar.Visibility = Visibility.Collapsed;
+                UpdateDownloadStatusText.Visibility = Visibility.Visible;
+                UpdateDownloadStatusText.Text = "Update downloaded and verified.";
+                DownloadUpdateButton.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                UpdateDownloadProgressBar.Visibility = Visibility.Collapsed;
+                DownloadUpdateButton.Visibility = Visibility.Visible;
+                DownloadUpdateButton.Content = "Download update";
+
+                if (!string.IsNullOrWhiteSpace(_viewModel.DownloadStatusText))
+                {
+                    UpdateDownloadStatusText.Visibility = Visibility.Visible;
+                    UpdateDownloadStatusText.Text = _viewModel.DownloadStatusText;
+                }
+                else
+                {
+                    UpdateDownloadStatusText.Visibility = Visibility.Collapsed;
+                    UpdateDownloadStatusText.Text = string.Empty;
+                }
+            }
         }
         else
         {
@@ -239,6 +279,14 @@ public sealed partial class MainPage : Page
         if (_viewModel != null)
         {
             await _viewModel.CheckForUpdatesAsync(isManual: true);
+        }
+    }
+
+    private async void OnDownloadUpdateClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            await _viewModel.DownloadUpdateAsync();
         }
     }
 }

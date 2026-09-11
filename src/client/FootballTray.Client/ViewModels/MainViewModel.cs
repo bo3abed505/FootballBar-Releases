@@ -57,6 +57,36 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private int _startupCheckScheduled;
     private int _manualUpdateCheckRequested;
 
+    private readonly IUpdatePackageAcquisitionService? _updateAcquisitionService;
+    private UpdateAcquisitionState _acquisitionState = UpdateAcquisitionState.NotStarted;
+    private int _downloadProgressPercent;
+    private string? _downloadStatusText;
+    private string? _verifiedPackagePath;
+    private Task<UpdateAcquisitionResult?>? _inFlightDownloadTask;
+    private PackageIdentity? _inFlightDownloadIdentity;
+    private readonly object _downloadLock = new();
+
+    private readonly record struct PackageIdentity(
+        string Version,
+        string Architecture,
+        string DownloadUrl,
+        string Sha256,
+        long SizeBytes);
+
+    private static PackageIdentity CreatePackageIdentity(ReleaseManifest manifest) =>
+        new(
+            manifest.Version,
+            manifest.Architecture,
+            manifest.DownloadUrl,
+            manifest.Sha256,
+            manifest.SizeBytes);
+
+    private bool IsCurrentOffer(PackageIdentity targetIdentity)
+    {
+        if (_offeredManifest == null) return false;
+        return CreatePackageIdentity(_offeredManifest) == targetIdentity;
+    }
+
     public ObservableCollection<MatchItemViewModel> FilteredMatches { get; } = new();
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
@@ -64,6 +94,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public Diagnostics.IDiagnosticsService DiagnosticsService => _diagnosticsService;
     public IUpdateDiscoveryService? UpdateDiscoveryService => _updateDiscoveryService;
+    public IUpdatePackageAcquisitionService? UpdateAcquisitionService => _updateAcquisitionService;
     public bool HasUpdateCapability => _updateDiscoveryService != null;
 
     public string DiagnosticsVersionText => $"Version {_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
@@ -95,7 +126,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool IsUpdateAvailable
     {
         get => _isUpdateAvailable;
-        private set => SetProperty(ref _isUpdateAvailable, value);
+        private set
+        {
+            if (SetProperty(ref _isUpdateAvailable, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
+            }
+        }
     }
 
     public string? LatestVersion
@@ -119,7 +156,88 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ReleaseManifest? OfferedManifest
     {
         get => _offeredManifest;
-        private set => SetProperty(ref _offeredManifest, value);
+        private set
+        {
+            if (SetProperty(ref _offeredManifest, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
+            }
+        }
+    }
+
+    public UpdateAcquisitionState AcquisitionState
+    {
+        get => _acquisitionState;
+        private set
+        {
+            if (SetProperty(ref _acquisitionState, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsAcquiringUpdate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsUpdateDownloaded)));
+            }
+        }
+    }
+
+    public bool IsAcquiringUpdate => _acquisitionState is UpdateAcquisitionState.Downloading or UpdateAcquisitionState.Verifying;
+
+    public bool CanDownloadUpdate
+    {
+        get
+        {
+            if (IsAcquiringUpdate || !_isUpdateAvailable || _offeredManifest == null || _updateAcquisitionService == null)
+            {
+                return false;
+            }
+
+            if (_acquisitionState == UpdateAcquisitionState.Verified)
+            {
+                return false;
+            }
+
+            lock (_downloadLock)
+            {
+                if (_inFlightDownloadTask != null && !_inFlightDownloadTask.IsCompleted)
+                {
+                    // If an active acquisition task is downloading a DIFFERENT package than current offer,
+                    // keep download disabled until that old task finishes.
+                    if (_inFlightDownloadIdentity != null && !IsCurrentOffer(_inFlightDownloadIdentity.Value))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+    }
+
+    public bool IsUpdateDownloaded =>
+        _acquisitionState == UpdateAcquisitionState.Verified &&
+        !string.IsNullOrEmpty(_verifiedPackagePath);
+
+    public int DownloadProgressPercent
+    {
+        get => _downloadProgressPercent;
+        private set => SetProperty(ref _downloadProgressPercent, value);
+    }
+
+    public string? DownloadStatusText
+    {
+        get => _downloadStatusText;
+        private set => SetProperty(ref _downloadStatusText, value);
+    }
+
+    public string? VerifiedPackagePath
+    {
+        get => _verifiedPackagePath;
+        private set
+        {
+            if (SetProperty(ref _verifiedPackagePath, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsUpdateDownloaded)));
+            }
+        }
     }
 
     public string CurrentVersionText => $"v{_updateDiscoveryService?.CurrentVersion?.ToString() ?? AppVersionInfo.Version}";
@@ -216,7 +334,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Diagnostics.IDiagnosticsService? diagnosticsService = null,
         DispatcherQueue? dispatcherQueue = null,
         IUpdateDiscoveryService? updateDiscoveryService = null,
-        Func<TimeSpan, CancellationToken, Task>? delayFunc = null)
+        Func<TimeSpan, CancellationToken, Task>? delayFunc = null,
+        IUpdatePackageAcquisitionService? updateAcquisitionService = null)
     {
         _preferencesService = preferencesService ?? throw new ArgumentNullException(nameof(preferencesService));
         _syncService = syncService;
@@ -224,6 +343,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _dispatcherQueue = dispatcherQueue ?? DispatcherQueue.GetForCurrentThread();
         _updateDiscoveryService = updateDiscoveryService;
         _delayFunc = delayFunc ?? Task.Delay;
+        _updateAcquisitionService = updateAcquisitionService;
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -679,7 +799,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 _currentCheckIsManual = true;
             }
 
-            if (_inFlightCheckTask == null)
+            if (_inFlightCheckTask == null || _inFlightCheckTask.IsCompleted)
             {
                 _inFlightCheckTask = RunCheckCoreAsync();
             }
@@ -745,6 +865,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         switch (result.State)
         {
             case UpdateCheckState.UpdateAvailable:
+                bool isNewOffer = OfferedManifest == null ||
+                    !string.Equals(OfferedManifest.Version, result.OfferedManifest?.Version, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(OfferedManifest.Sha256, result.OfferedManifest?.Sha256, StringComparison.OrdinalIgnoreCase);
+
                 LatestVersion = result.TargetVersion?.ToString() ?? result.OfferedManifest?.Version;
                 UpdateReleaseNotes = result.OfferedManifest?.ReleaseNotes;
                 OfferedManifest = result.OfferedManifest;
@@ -752,11 +876,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 UpdateStatusMessage = isManual
                     ? $"A newer version v{LatestVersion} is available."
                     : $"Update available: FootballTray v{LatestVersion}";
+
+                if (isNewOffer)
+                {
+                    ResetAcquisitionPresentation();
+                }
                 break;
 
             case UpdateCheckState.UpToDate:
                 IsUpdateAvailable = false;
                 OfferedManifest = null;
+                ResetAcquisitionPresentation();
                 if (isManual)
                 {
                     UpdateStatusMessage = "FootballTray is up to date.";
@@ -766,6 +896,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             case UpdateCheckState.CheckFailed:
                 IsUpdateAvailable = false;
                 OfferedManifest = null;
+                ResetAcquisitionPresentation();
                 if (isManual)
                 {
                     UpdateStatusMessage = $"Check failed: {result.Message}";
@@ -774,6 +905,159 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         IsCheckingForUpdates = false;
+    }
+
+    private void ResetAcquisitionPresentation()
+    {
+        AcquisitionState = UpdateAcquisitionState.NotStarted;
+        VerifiedPackagePath = null;
+        DownloadProgressPercent = 0;
+        DownloadStatusText = null;
+    }
+
+    /// <summary>
+    /// Downloads and cryptographically verifies the currently offered update package.
+    /// User-initiated action. Coalesces concurrent callers for the same package.
+    /// Caller cancellation unblocks only that caller's wait.
+    /// </summary>
+    public async Task<UpdateAcquisitionResult?> DownloadUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        if (_updateAcquisitionService == null || _offeredManifest == null)
+        {
+            return null;
+        }
+
+        var targetManifest = _offeredManifest;
+        var targetIdentity = CreatePackageIdentity(targetManifest);
+        Task<UpdateAcquisitionResult?> downloadTask;
+
+        lock (_downloadLock)
+        {
+            if (_inFlightDownloadTask != null && !_inFlightDownloadTask.IsCompleted)
+            {
+                if (_inFlightDownloadIdentity == targetIdentity)
+                {
+                    downloadTask = _inFlightDownloadTask;
+                }
+                else
+                {
+                    // Programmatic request for a different package while an acquisition is active:
+                    // do NOT join the wrong task; return safe busy failure.
+                    return UpdateAcquisitionResult.Failed(
+                        "Another update package acquisition is already in progress.",
+                        DateTimeOffset.UtcNow,
+                        targetManifest.Version);
+                }
+            }
+            else
+            {
+                if (!CanDownloadUpdate)
+                {
+                    return null;
+                }
+
+                _inFlightDownloadIdentity = targetIdentity;
+                _inFlightDownloadTask = RunDownloadCoreAsync(targetManifest, targetIdentity);
+                downloadTask = _inFlightDownloadTask;
+            }
+        }
+
+        return await downloadTask.WaitAsync(cancellationToken);
+    }
+
+    private async Task<UpdateAcquisitionResult?> RunDownloadCoreAsync(ReleaseManifest targetManifest, PackageIdentity targetIdentity)
+    {
+        RunOnUiSafe(() =>
+        {
+            if (IsCurrentOffer(targetIdentity))
+            {
+                AcquisitionState = UpdateAcquisitionState.Downloading;
+                DownloadProgressPercent = 0;
+                DownloadStatusText = "Downloading update...";
+            }
+        }, nameof(DownloadUpdateAsync));
+
+        var progress = new Progress<UpdateDownloadProgress>(p =>
+        {
+            RunOnUiSafe(() =>
+            {
+                // Guard: ignore stale progress reports if the offered package changed
+                if (!IsCurrentOffer(targetIdentity))
+                {
+                    return;
+                }
+
+                DownloadProgressPercent = p.Percent;
+                if (AcquisitionState == UpdateAcquisitionState.Downloading)
+                {
+                    double mbReceived = p.BytesReceived / 1048576.0;
+                    double mbTotal = p.TotalExpectedBytes / 1048576.0;
+                    DownloadStatusText = $"Downloading... {mbReceived:F1} MB / {mbTotal:F1} MB ({p.Percent}%)";
+                }
+                else if (AcquisitionState == UpdateAcquisitionState.Verifying)
+                {
+                    DownloadStatusText = "Verifying update...";
+                }
+            }, nameof(DownloadUpdateAsync));
+        });
+
+        UpdateAcquisitionResult result;
+        try
+        {
+            result = await _updateAcquisitionService!.AcquirePackageAsync(
+                targetManifest,
+                progress,
+                _disposeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            result = UpdateAcquisitionResult.Cancelled(DateTimeOffset.UtcNow, targetManifest.Version);
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLogger.Error("Updates", "DownloadExecutionError", $"Error during package download: {ex.Message}", ex: ex);
+            result = UpdateAcquisitionResult.Failed("Unable to download update.", DateTimeOffset.UtcNow, targetManifest.Version);
+        }
+        finally
+        {
+            lock (_downloadLock)
+            {
+                _inFlightDownloadTask = null;
+                _inFlightDownloadIdentity = null;
+            }
+
+            RunOnUiSafe(() =>
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDownloadUpdate)));
+            }, nameof(DownloadUpdateAsync));
+        }
+
+        RunOnUiSafe(() =>
+        {
+            // Only apply state if the offered manifest still matches the downloaded package identity
+            if (IsCurrentOffer(targetIdentity))
+            {
+                AcquisitionState = result.State;
+                if (result.State == UpdateAcquisitionState.Verified)
+                {
+                    VerifiedPackagePath = result.LocalPackagePath;
+                    DownloadProgressPercent = 100;
+                    DownloadStatusText = "Update downloaded and verified.";
+                }
+                else if (result.State == UpdateAcquisitionState.Failed)
+                {
+                    VerifiedPackagePath = null;
+                    DownloadStatusText = $"Download failed: {result.Message}";
+                }
+                else if (result.State == UpdateAcquisitionState.Cancelled)
+                {
+                    VerifiedPackagePath = null;
+                    DownloadStatusText = "Download was cancelled.";
+                }
+            }
+        }, nameof(DownloadUpdateAsync));
+
+        return result;
     }
 
     /// <summary>

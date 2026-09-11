@@ -558,6 +558,31 @@
                                                 FontSize="11"
                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         </ScrollViewer>
+
+                                        <!-- Download Update Action & Progress -->
+                                        <StackPanel Spacing="6" Margin="0,6,0,0">
+                                            <ProgressBar
+                                                x:Name="UpdateDownloadProgressBar"
+                                                Visibility="Collapsed"
+                                                Minimum="0"
+                                                Maximum="100"
+                                                Value="0"
+                                                HorizontalAlignment="Stretch" />
+
+                                            <TextBlock
+                                                x:Name="UpdateDownloadStatusText"
+                                                Visibility="Collapsed"
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                TextWrapping="Wrap" />
+
+                                            <Button
+                                                x:Name="DownloadUpdateButton"
+                                                Content="Download update"
+                                                Style="{ThemeResource AccentButtonStyle}"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnDownloadUpdateClick" />
+                                        </StackPanel>
                                     </StackPanel>
                                 </Border>
 
