@@ -1,0 +1,17 @@
+FootballTray v1.0.3
+============================================================
+Maintenance Release — Windows PowerShell 5.1 Updater Compatibility
+
+Changes since v1.0.2:
+- Fixed updater installation compatibility with Windows PowerShell 5.1 by removing a modern .NET path API unavailable in .NET Framework 4.8.
+- Hardened updater path handling with rooted/canonical path validation and traversal/boundary protection.
+- Added the trusted client uninstaller to the published Windows payload.
+- Fixed update handoff companion-script resolution so the uninstaller is loaded from the verified release payload rather than the isolated handoff directory.
+- Hardened pre-transaction staging cleanup while preserving the original installation error.
+- Expanded strict release validation for installer/uninstaller ASCII safety, Windows PowerShell 5.1 parsing, and trusted-source parity.
+- Added Windows PowerShell 5.1 runtime regression coverage for updater path and handoff behavior.
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
