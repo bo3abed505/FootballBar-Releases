@@ -109,11 +109,12 @@ $requiredFiles = @(
     "Microsoft.Windows.AppNotifications.Projection.dll"
 )
 
-# install-client.ps1 is required for auto-update-capable releases (v1.1.0+).
-# Historical artifacts (e.g. v1.0.0) pre-date this component; only enforce
+# install-client.ps1 and uninstall-client.ps1 are required for auto-update-capable releases.
+# Historical artifacts (e.g. v1.0.0) pre-date these components; only enforce
 # when the caller explicitly requests it via -RequireAutoUpdateInstaller.
 if ($RequireAutoUpdateInstaller) {
     $requiredFiles += "install-client.ps1"
+    $requiredFiles += "uninstall-client.ps1"
 }
 
 foreach ($req in $requiredFiles) {
@@ -122,6 +123,75 @@ foreach ($req in $requiredFiles) {
         Write-Host "  Found $req" -ForegroundColor Green
     } else {
         $validationErrors.Add("Missing required release component: $req")
+    }
+}
+
+# When auto-update lifecycle scripts are required, validate them thoroughly
+if ($RequireAutoUpdateInstaller) {
+    $lifecycleScripts = @("install-client.ps1", "uninstall-client.ps1")
+    $ps51Exe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    foreach ($scriptName in $lifecycleScripts) {
+        $scriptPath = Join-Path $PublishDir $scriptName
+        if (Test-Path -LiteralPath $scriptPath) {
+            $item = Get-Item -LiteralPath $scriptPath
+            if ($item.Length -eq 0) {
+                $validationErrors.Add("Lifecycle script '$scriptName' in publish directory is empty.")
+            } else {
+                # Strict ASCII check
+                $bytes = [System.IO.File]::ReadAllBytes($scriptPath)
+                $hasNonAscii = $false
+                for ($bi = 0; $bi -lt $bytes.Length; $bi++) {
+                    if ($bytes[$bi] -gt 0x7F) {
+                        $hasNonAscii = $true
+                        break
+                    }
+                }
+                if ($hasNonAscii) {
+                    $validationErrors.Add("Lifecycle script '$scriptName' contains non-ASCII characters; must be strictly ASCII for Windows PowerShell 5.1 compatibility.")
+                } else {
+                    Write-Host "  $scriptName verified strictly ASCII" -ForegroundColor Green
+                }
+
+                # Windows PowerShell 5.1 AST parser check
+                if (Test-Path -LiteralPath $ps51Exe) {
+                    $escapedPath = $scriptPath.Replace("'", "''")
+                    $parseCmd = "`$t = `$null; `$e = `$null; [System.Management.Automation.Language.Parser]::ParseFile('$escapedPath', [ref]`$t, [ref]`$e) | Out-Null; if (`$e.Count -gt 0) { exit `$e.Count } else { exit 0 }"
+                    $procInfo = New-Object System.Diagnostics.ProcessStartInfo
+                    $procInfo.FileName = $ps51Exe
+                    $procInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"$parseCmd`""
+                    $procInfo.UseShellExecute = $false
+                    $procInfo.CreateNoWindow = $true
+                    $p = [System.Diagnostics.Process]::Start($procInfo)
+                    $p.WaitForExit(15000) | Out-Null
+                    if ($p.ExitCode -ne 0) {
+                        $validationErrors.Add("Lifecycle script '$scriptName' failed Windows PowerShell 5.1 AST parsing with $($p.ExitCode) error(s).")
+                    } else {
+                        Write-Host "  $scriptName verified Windows PowerShell 5.1 parser clean" -ForegroundColor Green
+                    }
+                }
+
+                # Byte-identical to repository source if source exists
+                $repoSource = Join-Path $RootDir "scripts\$scriptName"
+                if (Test-Path -LiteralPath $repoSource) {
+                    $srcBytes = [System.IO.File]::ReadAllBytes($repoSource)
+                    $pubBytes = [System.IO.File]::ReadAllBytes($scriptPath)
+                    $identical = ($srcBytes.Length -eq $pubBytes.Length)
+                    if ($identical) {
+                        for ($k = 0; $k -lt $srcBytes.Length; $k++) {
+                            if ($srcBytes[$k] -ne $pubBytes[$k]) {
+                                $identical = $false
+                                break
+                            }
+                        }
+                    }
+                    if (-not $identical) {
+                        $validationErrors.Add("Lifecycle script '$scriptName' in publish directory is not byte-identical to repository source '$repoSource'.")
+                    } else {
+                        Write-Host "  $scriptName verified byte-identical to repository source" -ForegroundColor Green
+                    }
+                }
+            }
+        }
     }
 }
 

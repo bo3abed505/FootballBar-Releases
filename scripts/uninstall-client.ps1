@@ -77,7 +77,7 @@ Assert-NotUserDataPath -Path $StagingDir -Operation "staging"
 Assert-NotUserDataPath -Path $BackupDir -Operation "backup"
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " FootballTray — Windows Client Uninstaller" -ForegroundColor Cyan
+Write-Host " FootballTray - Windows Client Uninstaller" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Target Directory:       $TargetDir"
 Write-Host " User Data Directory:    $UserDataDir (Will be PRESERVED)"

@@ -101,6 +101,80 @@ Assert-NotUserDataPath -Path $BackupDir -Operation "use as backup"
 # ----------------------------------------------------------------------
 # 2. Pure Helper Functions (Testable)
 # ----------------------------------------------------------------------
+function Get-RelativeChildPath {
+    param (
+        [string]$BasePath,
+        [string]$FullPath
+    )
+    if ([string]::IsNullOrWhiteSpace($BasePath)) {
+        throw "Base path cannot be empty."
+    }
+    if ([string]::IsNullOrWhiteSpace($FullPath)) {
+        throw "Full path cannot be empty."
+    }
+    if (-not [System.IO.Path]::IsPathRooted($BasePath)) {
+        throw "CRITICAL: Base path '$BasePath' must be an absolute rooted path."
+    }
+    if (-not [System.IO.Path]::IsPathRooted($FullPath)) {
+        throw "CRITICAL: Full path '$FullPath' must be an absolute rooted path."
+    }
+
+    # Canonicalize and enforce strict trailing separator boundary on base directory
+    $normBase = [System.IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'
+    $normFull = [System.IO.Path]::GetFullPath($FullPath)
+
+    if (-not $normFull.StartsWith($normBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "CRITICAL: Path '$FullPath' is not beneath base directory '$BasePath'."
+    }
+
+    $rel = $normFull.Substring($normBase.Length)
+    if ([string]::IsNullOrWhiteSpace($rel) -or [System.IO.Path]::IsPathRooted($rel) -or $rel -match '(?:^|[\\/])\.\.(?:[\\/]|$)') {
+        throw "CRITICAL: Invalid relative child path resolved: '$rel'."
+    }
+    return $rel
+}
+
+function Resolve-CompanionUninstaller {
+    param (
+        [string]$SourceDir
+    )
+    if ([string]::IsNullOrWhiteSpace($SourceDir)) {
+        throw "CRITICAL: Source directory cannot be empty."
+    }
+    if (-not [System.IO.Path]::IsPathRooted($SourceDir)) {
+        throw "CRITICAL: Source directory '$SourceDir' must be an absolute rooted path."
+    }
+
+    $canonicalSource = [System.IO.Path]::GetFullPath($SourceDir).TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $canonicalSource -PathType Container)) {
+        throw "CRITICAL: Source directory does not exist or is not a directory: '$canonicalSource'."
+    }
+
+    $candidatePath = Join-Path $canonicalSource "uninstall-client.ps1"
+    $canonicalCandidate = [System.IO.Path]::GetFullPath($candidatePath)
+
+    # Ensure canonicalCandidate is strictly beneath canonicalSource with directory separator boundary
+    $baseWithSep = $canonicalSource + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $canonicalCandidate.StartsWith($baseWithSep, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "CRITICAL: Companion uninstaller path '$canonicalCandidate' is not beneath source directory '$canonicalSource'."
+    }
+
+    if (-not (Test-Path -LiteralPath $canonicalCandidate)) {
+        throw "CRITICAL: Required companion uninstaller script was not found at '$canonicalCandidate'."
+    }
+
+    $item = Get-Item -LiteralPath $canonicalCandidate
+    if ($item.PSIsContainer) {
+        throw "CRITICAL: Companion uninstaller path '$canonicalCandidate' is a directory, not a file."
+    }
+
+    if ($item.Length -eq 0) {
+        throw "CRITICAL: Companion uninstaller script at '$canonicalCandidate' is empty."
+    }
+
+    return $canonicalCandidate
+}
+
 function Test-IsX64Executable {
     param ([string]$FilePath)
     if (-not (Test-Path -LiteralPath $FilePath)) { return $false }
@@ -461,30 +535,44 @@ if (Test-Path -LiteralPath $BackupDir) {
 Write-Host "  Staging release payload..."
 New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
 
-Get-ChildItem -Path $SourceDir -Recurse | Where-Object {
-    -not $_.PSIsContainer -and $_.Name -notlike ".env*" -and $_.Name -notlike "*.tmp"
-} | ForEach-Object {
-    $rel = [System.IO.Path]::GetRelativePath($SourceDir, $_.FullName)
-    $dest = Join-Path $StagingDir $rel
-    $parent = Split-Path -Parent $dest
-    if (-not (Test-Path -LiteralPath $parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+try {
+    Get-ChildItem -Path $SourceDir -Recurse | Where-Object {
+        -not $_.PSIsContainer -and $_.Name -notlike ".env*" -and $_.Name -notlike "*.tmp"
+    } | ForEach-Object {
+        $rel = Get-RelativeChildPath -BasePath $SourceDir -FullPath $_.FullName
+        $dest = Join-Path $StagingDir $rel
+        $parent = Split-Path -Parent $dest
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
     }
-    Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
-}
 
-# Copy self-contained uninstaller into staging
-$uninstallerSource = Join-Path $PSScriptRoot "uninstall-client.ps1"
-if (Test-Path -LiteralPath $uninstallerSource) {
+    # Copy self-contained uninstaller into staging as uninstall.ps1
+    $uninstallerSource = Resolve-CompanionUninstaller -SourceDir $SourceDir
     Copy-Item -LiteralPath $uninstallerSource -Destination (Join-Path $StagingDir "uninstall.ps1") -Force
-}
 
-# Validate staged payload
-$stagedExe = Join-Path $StagingDir "FootballTray.exe"
-if (-not (Test-Path -LiteralPath $stagedExe) -or (Get-Item -LiteralPath $stagedExe).Length -eq 0) {
-    Assert-NotUserDataPath -Path $StagingDir -Operation "remove staging"
-    Remove-Item -LiteralPath $StagingDir -Recurse -Force
-    throw "CRITICAL: Staging validation failed; staged executable is missing or empty."
+    # Validate staged payload
+    $stagedExe = Join-Path $StagingDir "FootballTray.exe"
+    if (-not (Test-Path -LiteralPath $stagedExe) -or (Get-Item -LiteralPath $stagedExe).Length -eq 0) {
+        throw "CRITICAL: Staging validation failed; staged executable is missing or empty."
+    }
+
+    $stagedUninstaller = Join-Path $StagingDir "uninstall.ps1"
+    if (-not (Test-Path -LiteralPath $stagedUninstaller) -or (Get-Item -LiteralPath $stagedUninstaller).Length -eq 0) {
+        throw "CRITICAL: Staging validation failed; staged uninstaller is missing or empty."
+    }
+} catch {
+    $stagingException = $_
+    if (Test-Path -LiteralPath $StagingDir) {
+        try {
+            Assert-NotUserDataPath -Path $StagingDir -Operation "remove staging"
+            Remove-Item -LiteralPath $StagingDir -Recurse -Force
+        } catch {
+            Write-Warning "Failed to cleanup staging directory '$StagingDir': $_"
+        }
+    }
+    throw $stagingException
 }
 
 # ----------------------------------------------------------------------
