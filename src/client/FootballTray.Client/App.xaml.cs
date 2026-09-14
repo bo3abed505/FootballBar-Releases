@@ -1,9 +1,11 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
 using Microsoft.UI.Xaml;
+using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
 using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Taskbar;
@@ -118,6 +120,36 @@ public partial class App : Application
         // 3. Create Main Application Window
         _window = new MainWindow();
         _window.Activate();
+
+        var activationWindow = _window;
+        var activationDispatcher = activationWindow?.DispatcherQueue;
+
+        // Register UI activation handler with coordinator now that MainWindow and DispatcherQueue exist
+        AppActivationCoordinator.RegisterUiHandler(activatedArgs =>
+        {
+            if (activationDispatcher == null) return;
+
+            bool enqueued = activationDispatcher.TryEnqueue(() =>
+            {
+                if (ClassifyActivation(activatedArgs.Kind) == ActivationDispatchAction.ProcessNotification &&
+                    activatedArgs.Data is AppNotificationActivatedEventArgs notificationArgs)
+                {
+                    HandleAppNotificationActivation(notificationArgs, activationWindow);
+                }
+                else
+                {
+                    BringMainWindowToForeground(activationWindow);
+                }
+            });
+
+            if (!enqueued)
+            {
+                AppLogger.Warn(
+                    "App",
+                    "ActivationDispatchFailed",
+                    "Failed to enqueue foreground activation onto MainWindow DispatcherQueue.");
+            }
+        });
 
         // 4. Register AppNotificationManager
         InitializeAppNotifications();
@@ -239,6 +271,71 @@ public partial class App : Application
             {
                 _window.Activate();
             });
+        }
+    }
+
+    internal enum ActivationDispatchAction
+    {
+        BringToForeground,
+        ProcessNotification,
+    }
+
+    internal static ActivationDispatchAction ClassifyActivation(ExtendedActivationKind kind)
+    {
+        return kind == ExtendedActivationKind.AppNotification
+            ? ActivationDispatchAction.ProcessNotification
+            : ActivationDispatchAction.BringToForeground;
+    }
+
+    private void HandleAppNotificationActivation(AppNotificationActivatedEventArgs notificationArgs, Window? window)
+    {
+        NotificationActivationResult result = (notificationArgs.Arguments != null && notificationArgs.Arguments.Count > 0)
+            ? NotificationActivationHandler.Parse(notificationArgs.Arguments)
+            : NotificationActivationHandler.Parse(notificationArgs.Argument);
+
+        OnNotificationActivated(result);
+        BringMainWindowToForeground(window);
+    }
+
+    private const int SW_RESTORE = 9;
+    private const int SW_SHOW = 5;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    private static void BringMainWindowToForeground(Window? window)
+    {
+        if (window == null) return;
+
+        try
+        {
+            IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            if (hwnd == IntPtr.Zero) return;
+
+            if (IsIconic(hwnd))
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            else
+            {
+                ShowWindow(hwnd, SW_SHOW);
+            }
+
+            window.Activate();
+            SetForegroundWindow(hwnd);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("App", "ForegroundActivationFailed", $"Non-fatal error restoring MainWindow: {ex.Message}");
         }
     }
 
