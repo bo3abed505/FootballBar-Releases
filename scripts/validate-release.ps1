@@ -329,6 +329,88 @@ if ($leakedDevFiles.Count -gt 0) {
     Write-Host "  Zero development/test artifacts detected in release output." -ForegroundColor Green
 }
 
+# 7.1 Verify Absence of Forbidden AI/ML Payload and Dependency Metadata
+Write-Host "`n[7.1/8] Verifying absence of forbidden AI/ML payload and dependencies..." -ForegroundColor Yellow
+$forbiddenAiMlFiles = @(
+    "DirectML.dll",
+    "Microsoft.Graphics.Imaging.Projection.dll",
+    "Microsoft.ML.OnnxRuntime.dll",
+    "Microsoft.Windows.AI.ContentSafety.Projection.dll",
+    "Microsoft.Windows.AI.Foundation.Projection.dll",
+    "Microsoft.Windows.AI.Imaging.Projection.dll",
+    "Microsoft.Windows.AI.MachineLearning.dll",
+    "Microsoft.Windows.AI.MachineLearning.Projection.dll",
+    "Microsoft.Windows.AI.Projection.dll",
+    "Microsoft.Windows.AI.Text.Projection.dll",
+    "Microsoft.Windows.AI.Video.Projection.dll",
+    "onnxruntime.dll",
+    "System.Numerics.Tensors.dll"
+)
+
+$foundAiMlCount = 0
+foreach ($forbiddenFile in $forbiddenAiMlFiles) {
+    $foundMatches = @(Get-ChildItem -Path $PublishDir -Recurse -Filter $forbiddenFile -File -ErrorAction SilentlyContinue)
+    foreach ($fm in $foundMatches) {
+        $foundAiMlCount++
+        $validationErrors.Add("AI/ML PAYLOAD REGRESSION: Forbidden AI/ML payload file '$($fm.Name)' found in release output at '$($fm.FullName)'.")
+    }
+}
+if ($foundAiMlCount -eq 0) {
+    Write-Host "  Zero forbidden AI/ML payload files detected." -ForegroundColor Green
+}
+
+$depsJsonPath = Join-Path $PublishDir "FootballTray.deps.json"
+if (Test-Path -LiteralPath $depsJsonPath) {
+    try {
+        $deps = Get-Content -LiteralPath $depsJsonPath -Raw | ConvertFrom-Json
+        $forbiddenIdentities = @(
+            "Microsoft.WindowsAppSDK.ML",
+            "Microsoft.WindowsAppSDK.AI",
+            "Microsoft.Windows.AI.MachineLearning",
+            "Microsoft.ML.OnnxRuntime",
+            "System.Numerics.Tensors"
+        )
+
+        # Check libraries
+        if ($deps.libraries) {
+            foreach ($libProp in $deps.libraries.psobject.properties) {
+                foreach ($fId in $forbiddenIdentities) {
+                    if ($libProp.Name -eq $fId -or $libProp.Name.StartsWith("$fId/", [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $validationErrors.Add("AI/ML METADATA REGRESSION: Forbidden package identity '$($libProp.Name)' found in deps.json libraries.")
+                    }
+                }
+            }
+        }
+
+        # Check targets
+        if ($deps.targets) {
+            foreach ($tProp in $deps.targets.psobject.properties) {
+                if ($tProp.Value) {
+                    foreach ($pkgProp in $tProp.Value.psobject.properties) {
+                        foreach ($fId in $forbiddenIdentities) {
+                            if ($pkgProp.Name -eq $fId -or $pkgProp.Name.StartsWith("$fId/", [System.StringComparison]::OrdinalIgnoreCase)) {
+                                $validationErrors.Add("AI/ML METADATA REGRESSION: Forbidden package target '$($pkgProp.Name)' found in deps.json targets under '$($tProp.Name)'.")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        # Guard against raw runtime/native asset string tokens
+        $rawDepsContent = Get-Content -LiteralPath $depsJsonPath -Raw
+        $forbiddenTokens = @("onnxruntime.dll", "DirectML.dll")
+        foreach ($tok in $forbiddenTokens) {
+            if ($rawDepsContent.IndexOf($tok, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $validationErrors.Add("AI/ML METADATA REGRESSION: Forbidden native asset token '$tok' found in deps.json.")
+            }
+        }
+        Write-Host "  deps.json metadata verified free of forbidden AI/ML dependencies." -ForegroundColor Green
+    } catch {
+        $validationErrors.Add("Failed to parse FootballTray.deps.json for AI/ML validation: $_")
+    }
+}
+
 # 8. Verify Release Manifest (if present)
 $ManifestFilePath = Join-Path $ReleaseDir "release-manifest.json"
 Write-Host "`n[8/8] Checking release manifest (optional)..." -ForegroundColor Yellow

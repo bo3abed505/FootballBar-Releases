@@ -1,6 +1,9 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using FootballTray.Client.Services;
@@ -160,36 +163,24 @@ public class ReleaseEngineeringTests
         public string ArchivePath { get; }
         public string ChecksumPath { get; }
 
-        public IsolatedReleaseFixture(string root, string version = "1.0.0")
+        public IsolatedReleaseFixture(string root, string version = "1.0.0", bool makeA2Compliant = false)
         {
             string realRelease = Path.Combine(root, "artifacts", "releases", $"v{version}");
             FixturePath = Path.Combine(root, "artifacts", $".tmp_fixture_{Guid.NewGuid():N}");
             Directory.CreateDirectory(FixturePath);
 
-            // Create individual file-level hardlinks for every file in the real win-x64 directory.
-            // File hardlinks — unlike directory junctions — do NOT have write-through semantics:
-            // creating a new file inside the fixture's win-x64 stays in the fixture and never
-            // touches the real release directory. This protects the immutable historical artifact.
+            // Copy win-x64 directory independently (zero hardlinks) to ensure complete test isolation.
+            // Using independent copies guarantees that mutating fixture files (such as deps.json
+            // in MakeA2Compliant, or release notes in tests) never writes through or modifies the immutable historical release.
             string realPublish = Path.Combine(realRelease, "win-x64");
             string fixturePublish = Path.Combine(FixturePath, "win-x64");
-            RunPowerShell($@"
-                $src = '{realPublish}'
-                $dst = '{fixturePublish}'
-                New-Item -ItemType Directory -Path $dst -Force | Out-Null
-                Get-ChildItem -Path $src -Recurse -File | ForEach-Object {{
-                    $rel  = $_.FullName.Substring($src.Length).TrimStart('\', '/')
-                    $dest = Join-Path $dst $rel
-                    $parent = Split-Path $dest -Parent
-                    if (-not (Test-Path $parent)) {{ New-Item -ItemType Directory -Path $parent -Force | Out-Null }}
-                    New-Item -ItemType HardLink -Path $dest -Target $_.FullName | Out-Null
-                }}
-            ", root);
+            CopyDirectory(realPublish, fixturePublish);
 
-            // Create hardlink for ZIP to avoid copying 62MB archive
+            // Copy ZIP independently to ensure complete isolation
             string zipName = $"FootballTray-v{version}-win-x64.zip";
             string realZip = Path.Combine(realRelease, zipName);
             ArchivePath = Path.Combine(FixturePath, zipName);
-            RunPowerShell($"New-Item -ItemType HardLink -Path '{ArchivePath}' -Target '{realZip}' | Out-Null", root);
+            File.Copy(realZip, ArchivePath, overwrite: true);
 
             // Copy small metadata files
             File.Copy(Path.Combine(realRelease, "SHA256SUMS.txt"), Path.Combine(FixturePath, "SHA256SUMS.txt"));
@@ -201,6 +192,101 @@ public class ReleaseEngineeringTests
 
             ManifestPath = Path.Combine(FixturePath, "release-manifest.json");
             ChecksumPath = Path.Combine(FixturePath, "SHA256SUMS.txt");
+
+            if (makeA2Compliant)
+            {
+                MakeA2Compliant();
+            }
+        }
+
+        private static void CopyDirectory(string sourceDir, string destinationDir)
+        {
+            Directory.CreateDirectory(destinationDir);
+            foreach (var file in Directory.GetFiles(sourceDir))
+            {
+                string destFile = Path.Combine(destinationDir, Path.GetFileName(file));
+                File.Copy(file, destFile, overwrite: true);
+            }
+            foreach (var subDir in Directory.GetDirectories(sourceDir))
+            {
+                string destSubDir = Path.Combine(destinationDir, Path.GetFileName(subDir));
+                CopyDirectory(subDir, destSubDir);
+            }
+        }
+
+        public void MakeA2Compliant()
+        {
+            string fixturePublish = Path.Combine(FixturePath, "win-x64");
+            string[] forbiddenAiMlFiles =
+            [
+                "DirectML.dll",
+                "Microsoft.Graphics.Imaging.Projection.dll",
+                "Microsoft.ML.OnnxRuntime.dll",
+                "Microsoft.Windows.AI.ContentSafety.Projection.dll",
+                "Microsoft.Windows.AI.Foundation.Projection.dll",
+                "Microsoft.Windows.AI.Imaging.Projection.dll",
+                "Microsoft.Windows.AI.MachineLearning.dll",
+                "Microsoft.Windows.AI.MachineLearning.Projection.dll",
+                "Microsoft.Windows.AI.Projection.dll",
+                "Microsoft.Windows.AI.Text.Projection.dll",
+                "Microsoft.Windows.AI.Video.Projection.dll",
+                "onnxruntime.dll",
+                "System.Numerics.Tensors.dll"
+            ];
+            foreach (var forbidden in forbiddenAiMlFiles)
+            {
+                string target = Path.Combine(fixturePublish, forbidden);
+                if (File.Exists(target))
+                {
+                    File.Delete(target);
+                }
+            }
+
+            string fixtureDeps = Path.Combine(fixturePublish, "FootballTray.deps.json");
+            if (File.Exists(fixtureDeps))
+            {
+                var depsNode = JsonNode.Parse(File.ReadAllText(fixtureDeps));
+                if (depsNode != null)
+                {
+                    string[] forbiddenPrefixes =
+                    [
+                        "Microsoft.WindowsAppSDK.ML",
+                        "Microsoft.WindowsAppSDK.AI",
+                        "Microsoft.Windows.AI.MachineLearning",
+                        "Microsoft.ML.OnnxRuntime",
+                        "System.Numerics.Tensors"
+                    ];
+
+                    var targetsNode = depsNode["targets"]?.AsObject();
+                    if (targetsNode != null)
+                    {
+                        foreach (var targetKvp in targetsNode)
+                        {
+                            var targetObj = targetKvp.Value?.AsObject();
+                            if (targetObj != null)
+                            {
+                                var toRemove = targetObj
+                                    .Where(p => forbiddenPrefixes.Any(fp => p.Key == fp || p.Key.StartsWith(fp + "/")))
+                                    .Select(p => p.Key)
+                                    .ToList();
+                                foreach (var key in toRemove) targetObj.Remove(key);
+                            }
+                        }
+                    }
+
+                    var libsNode = depsNode["libraries"]?.AsObject();
+                    if (libsNode != null)
+                    {
+                        var toRemove = libsNode
+                            .Where(p => forbiddenPrefixes.Any(fp => p.Key == fp || p.Key.StartsWith(fp + "/")))
+                            .Select(p => p.Key)
+                            .ToList();
+                        foreach (var key in toRemove) libsNode.Remove(key);
+                    }
+
+                    File.WriteAllText(fixtureDeps, depsNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                }
+            }
         }
 
         public void Dispose()
@@ -485,7 +571,7 @@ public class ReleaseEngineeringTests
     {
         string root = FindRepoRoot();
         string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
-        using var fixture = new IsolatedReleaseFixture(root);
+        using var fixture = new IsolatedReleaseFixture(root, makeA2Compliant: true);
 
         // Case A: Manifest does NOT exist -> skipped and allowed
         var rWithout = RunScriptDirect(validateScript, $"-ReleaseDir \"{fixture.FixturePath}\"", root);
@@ -1361,7 +1447,7 @@ Write-Host 'RELPATH_MATRIX_PASSED'
     {
         string root = FindRepoRoot();
         string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
-        using var fixture = new IsolatedReleaseFixture(root);
+        using var fixture = new IsolatedReleaseFixture(root, makeA2Compliant: true);
 
         string fixturePublish = Path.Combine(fixture.FixturePath, "win-x64");
         string uninstallerInPublish = Path.Combine(fixturePublish, "uninstall-client.ps1");
@@ -1834,6 +1920,138 @@ Write-Host 'RESOLVE_COMPANION_MATRIX_PASSED'
 
         return (process.ExitCode, stdout, stderr);
     }
+
+    #region Phase 5 AI/ML Distribution Optimization Guardrail Tests
+
+    [TestMethod]
+    public void Test36_ValidateReleaseScript_RejectsForbiddenAiMlPayloadFiles()
+    {
+        string root = FindRepoRoot();
+        string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
+        using var fixture = new IsolatedReleaseFixture(root, makeA2Compliant: true);
+
+        // Inject forbidden onnxruntime.dll into the publish directory
+        string fixturePublish = Path.Combine(fixture.FixturePath, "win-x64");
+        string forbiddenFile = Path.Combine(fixturePublish, "onnxruntime.dll");
+        File.WriteAllBytes(forbiddenFile, "FAKE_ONNXRUNTIME_PAYLOAD"u8.ToArray());
+
+        var result = RunScriptDirect(validateScript, $"-ReleaseDir \"{fixture.FixturePath}\"", root);
+        Assert.AreEqual(1, result.ExitCode,
+            $"validate-release must fail when forbidden onnxruntime.dll is present. Output: {result.Stdout} {result.Stderr}");
+        Assert.IsTrue(result.Stdout.Contains("Forbidden AI/ML payload file 'onnxruntime.dll'") ||
+                      result.Stderr.Contains("Forbidden AI/ML payload file 'onnxruntime.dll'"),
+            $"Expected forbidden file diagnostic. Output: {result.Stdout} {result.Stderr}");
+    }
+
+    [TestMethod]
+    public void Test37_ValidateReleaseScript_RejectsForbiddenAiMlDepsMetadata()
+    {
+        string root = FindRepoRoot();
+        string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
+        using var fixture = new IsolatedReleaseFixture(root, makeA2Compliant: true);
+
+        // Inject forbidden Microsoft.Windows.AI.MachineLearning into FootballTray.deps.json
+        string fixturePublish = Path.Combine(fixture.FixturePath, "win-x64");
+        string fixtureDeps = Path.Combine(fixturePublish, "FootballTray.deps.json");
+        Assert.IsTrue(File.Exists(fixtureDeps), "deps.json must exist in fixture.");
+
+        var depsNode = JsonNode.Parse(File.ReadAllText(fixtureDeps))!;
+        var libsObj = depsNode["libraries"]?.AsObject()!;
+        libsObj["Microsoft.Windows.AI.MachineLearning/2.1.74"] = new JsonObject
+        {
+            ["type"] = "package",
+            ["serviceable"] = true
+        };
+        File.WriteAllText(fixtureDeps, depsNode.ToJsonString());
+
+        var result = RunScriptDirect(validateScript, $"-ReleaseDir \"{fixture.FixturePath}\"", root);
+        Assert.AreEqual(1, result.ExitCode,
+            $"validate-release must fail when forbidden metadata is present in deps.json. Output: {result.Stdout} {result.Stderr}");
+        Assert.IsTrue(result.Stdout.Contains("Forbidden package identity 'Microsoft.Windows.AI.MachineLearning/2.1.74'") ||
+                      result.Stdout.Contains("AI/ML METADATA REGRESSION") ||
+                      result.Stderr.Contains("AI/ML METADATA REGRESSION"),
+            $"Expected forbidden metadata diagnostic. Output: {result.Stdout} {result.Stderr}");
+    }
+
+    [TestMethod]
+    public void Test38_ValidateReleaseScript_AcceptsCleanA2ReleaseWithSearchPackage()
+    {
+        string root = FindRepoRoot();
+        string validateScript = Path.Combine(root, "scripts", "validate-release.ps1");
+        using var fixture = new IsolatedReleaseFixture(root, makeA2Compliant: true);
+
+        // Ensure clean fixture contains Microsoft.WindowsAppSDK.Search assembly/dependency
+        string fixturePublish = Path.Combine(fixture.FixturePath, "win-x64");
+        string searchDll = Path.Combine(fixturePublish, "Microsoft.Windows.Search.Projection.dll");
+        if (!File.Exists(searchDll))
+        {
+            File.WriteAllBytes(searchDll, "FAKE_SEARCH_PROJECTION"u8.ToArray());
+        }
+
+        string fixtureDeps = Path.Combine(fixturePublish, "FootballTray.deps.json");
+        var depsNode = JsonNode.Parse(File.ReadAllText(fixtureDeps))!;
+        var libsObj = depsNode["libraries"]?.AsObject()!;
+        if (libsObj["Microsoft.WindowsAppSDK.Search/2.4.4"] == null)
+        {
+            libsObj["Microsoft.WindowsAppSDK.Search/2.4.4"] = new JsonObject
+            {
+                ["type"] = "package",
+                ["serviceable"] = true
+            };
+            File.WriteAllText(fixtureDeps, depsNode.ToJsonString());
+        }
+
+        var result = RunScriptDirect(validateScript, $"-ReleaseDir \"{fixture.FixturePath}\"", root);
+        Assert.AreEqual(0, result.ExitCode,
+            $"validate-release must succeed for clean A2 release. Output: {result.Stdout} {result.Stderr}");
+        Assert.IsTrue(result.Stdout.Contains("Zero forbidden AI/ML payload files detected"),
+            $"Expected clean AI/ML file check output. Output: {result.Stdout}");
+        Assert.IsTrue(result.Stdout.Contains("deps.json metadata verified free of forbidden AI/ML dependencies"),
+            $"Expected clean deps.json check output. Output: {result.Stdout}");
+        Assert.IsTrue(result.Stdout.Contains("VALIDATION PASSED"),
+            $"Expected overall validation pass. Output: {result.Stdout}");
+    }
+
+    [TestMethod]
+    public void Test39_IsolatedReleaseFixture_DefaultPreservesHistoricalPayload_OptInStripsAiMl()
+    {
+        string root = FindRepoRoot();
+
+        // 1. Default fixture preserves historical v1.0.0 payload (onnxruntime.dll and dependencies remain)
+        using (var defaultFixture = new IsolatedReleaseFixture(root))
+        {
+            string onnxPath = Path.Combine(defaultFixture.FixturePath, "win-x64", "onnxruntime.dll");
+            Assert.IsTrue(File.Exists(onnxPath), "Default IsolatedReleaseFixture must preserve historical AI/ML files.");
+        }
+
+        // 2. Opt-in A2 fixture strips all 13 forbidden AI/ML payload files and cleans deps.json
+        using (var a2Fixture = new IsolatedReleaseFixture(root, makeA2Compliant: true))
+        {
+            string fixturePublish = Path.Combine(a2Fixture.FixturePath, "win-x64");
+            string[] forbiddenAiMlFiles =
+            [
+                "DirectML.dll", "Microsoft.Graphics.Imaging.Projection.dll", "Microsoft.ML.OnnxRuntime.dll",
+                "Microsoft.Windows.AI.ContentSafety.Projection.dll", "Microsoft.Windows.AI.Foundation.Projection.dll",
+                "Microsoft.Windows.AI.Imaging.Projection.dll", "Microsoft.Windows.AI.MachineLearning.dll",
+                "Microsoft.Windows.AI.MachineLearning.Projection.dll", "Microsoft.Windows.AI.Projection.dll",
+                "Microsoft.Windows.AI.Text.Projection.dll", "Microsoft.Windows.AI.Video.Projection.dll",
+                "onnxruntime.dll", "System.Numerics.Tensors.dll"
+            ];
+            foreach (var file in forbiddenAiMlFiles)
+            {
+                Assert.IsFalse(File.Exists(Path.Combine(fixturePublish, file)),
+                    $"Opt-in A2 fixture must strip forbidden file '{file}'.");
+            }
+
+            string fixtureDeps = Path.Combine(fixturePublish, "FootballTray.deps.json");
+            Assert.IsTrue(File.Exists(fixtureDeps), "deps.json must exist in fixture.");
+            string depsContent = File.ReadAllText(fixtureDeps);
+            Assert.IsFalse(depsContent.Contains("Microsoft.Windows.AI.MachineLearning/"),
+                "Opt-in A2 fixture deps.json must not contain Microsoft.Windows.AI.MachineLearning.");
+        }
+    }
+
+    #endregion
 
     #endregion
 }
