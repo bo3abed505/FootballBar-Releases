@@ -3,7 +3,8 @@
 ## Product Overview & Version Metadata
 
 - **Application Name**: FootballTray
-- **Current Version**: `1.0.0`
+- **Current Public Release**: `v1.0.3` (Immutable public release)
+- **Phase 5 A2 Implementation Commit**: `535b1faf9f91eaf78ca7631d4ab931ab08d8657e` (`perf(release): trim unused AI/ML payload`); this source milestone postdates the immutable public `v1.0.3` release.
 - **Target OS**: Windows 11 (64-bit) / Windows 10 build 17763+ (64-bit)
 - **Architecture**: `win-x64`
 - **Application Framework**: WinUI 3 / Windows App SDK 2.4.0 (.NET 10.0)
@@ -71,8 +72,8 @@ pwsh -ExecutionPolicy Bypass -File ./scripts/publish-release.ps1 -UpdateDownload
 > 1. `publish-release.ps1` creates release artifacts strictly **locally** under `artifacts/releases/`.
 > 2. The script performs **no** external network uploads.
 > 3. Public hosting, CDN deployment, or GitHub Releases asset publication remains a separate release-infrastructure step.
-> 4. Automatic client update checking/polling is **not** implemented yet.
-> 5. This checkpoint only establishes reproducible `release-manifest.json` generation and offline validation.
+> 4. Automatic client update checking and acquisition are implemented; `UpdateDiscoveryService` consumes `release-manifest.json` for remote update discovery.
+> 5. `publish-release.ps1` establishes reproducible release artifacts, manifest generation, and offline validation.
 
 The script will:
 1. Clean previous publish folders in `artifacts/releases/v1.0.0/`.
@@ -322,6 +323,40 @@ FootballTray supports user-approved automatic updates orchestrated from the clie
    - Subsequent releases automatically carry `install-client.ps1` forward through the installer's normal `$SourceDir` recursive payload copying.
    - Trust chain: First seeded auto-update-capable release -> its trusted local installer -> next verified release -> next release installs its own trusted installer -> repeat.
 5. **Process Handoff & Instance Protection**: The installer is invoked with `-WaitForProcessId <callerPid>`. It performs read-only preflight checks and waits up to 15 seconds for the exact caller PID to exit gracefully. If the caller fails to exit within 15 seconds, the installer fails closed without force-killing the caller. Once the caller exits, the installer cleans any other remaining FootballTray instances before beginning destructive file operations.
+
+---
+
+## Current Distribution & Phase 5 Status
+
+### 1. Authoritative Distribution Model
+FootballTray distributes as an **unpackaged, self-contained `win-x64` desktop application** (`WindowsPackageType=None`):
+- **Hosting**: Public releases and update manifests are hosted on GitHub Releases.
+- **Current Public Release**: `v1.0.3` remains the active, immutable public release.
+- **Current Source State**: Source commit `535b1faf9f91eaf78ca7631d4ab931ab08d8657e` contains the validated A2 distribution optimization; public `v1.0.3` predates this commit and remains immutable.
+- **Target Installation Directory**: `%LOCALAPPDATA%\Programs\FootballTray` (per-user, requiring zero UAC administrator elevation).
+- **User Data Isolation**: User preferences, local caches, and diagnostic logs reside in `%LOCALAPPDATA%\FootballTray` and are guaranteed to be preserved across updates and uninstallation.
+- **Transactional Upgrades**: Upgrades employ transactional staging (`.__staging`), atomic folder swap, and backup preservation (`.__backup`) with automatic rollback on any activation failure.
+
+### 2. Automatic Updates & Production Verification
+- **Architecture**: The in-app update pipeline comprises `UpdateDiscoveryService`, `UpdatePackageAcquisitionService`, and `UpdateInstallationService`. It validates SHA-256 hashes and byte sizes against `release-manifest.json` before initiating trusted installer handoff.
+- **Production Validation**: The end-to-end upgrade flow was validated from `v1.0.0` to `v1.0.3` through the real client update path using automated UI driving (verifying manifest discovery, download, integrity check, graceful shutdown, PowerShell handoff, and relaunch).
+
+### 3. Performance & Runtime Memory Audit
+- **Soak Telemetry**: A continuous 60-minute soak test under active tick cycles showed working set moving from approximately 232.48 MiB to 203.30 MiB and private memory from approximately 168.69 MiB to 179.88 MiB, with cyclical drops. Handles, threads, USER objects, and GDI objects remained stable, with low CPU usage.
+- **Conclusion**: No evidence of runaway memory growth was observed over the 60-minute soak.
+- **Engineering Posture**: Destructive artificial workarounds—such as forced full garbage collections (`GC.Collect()`) or working-set paging hacks (`EmptyWorkingSet` / `SetProcessWorkingSetSize`)—were explicitly not adopted, preserving standard .NET 10 generational memory management.
+
+### 4. A2 Release-Payload Distribution Optimization (Current Source)
+- **Scope**: Source commit `535b1faf` eliminates an unused transitive AI/ML dependency subtree (`Microsoft.WindowsAppSDK.ML`, `Microsoft.WindowsAppSDK.AI`, `Microsoft.Windows.AI.MachineLearning`, `System.Numerics.Tensors`) from release output.
+- **Savings**: Removes 13 out of 13 targeted AI/ML payload files, representing ~42,346,048 bytes (~40.38 MiB) uncompressed and ~16.74 MiB in ZIP entry reduction.
+- **Classification**: Pre-A2 module inspection showed `onnxruntime.dll` and `DirectML.dll` were not loaded, while the committed A2 candidate later loaded 0 of 13 targeted modules during its exclusive runtime smoke. Strategy A2 is therefore documented as a **distribution / disk / download optimization**, not a demonstrated runtime memory reduction.
+- **Release Enforcement**: Release integrity is enforced by `validate-release.ps1` and `ReleaseEngineeringTests.cs`, which reject published payloads or dependency metadata containing any forbidden AI/ML files or identities.
+
+### 5. MSIX Packaging Feasibility & Deferral Decision
+- **Evaluation**: An in-depth architectural feasibility audit evaluated Full MSIX, Sparse Packaging (packaging with external location), and the existing unpackaged model.
+- **Decision**: MSIX is **not rejected**, but implementation is **intentionally deferred** until FootballTray reaches a later product-stabilization or maintenance stage where a distribution migration offers clearer product value.
+- **Rationale**: The existing unpackaged installer and manifest-based GitHub updater are mature, thoroughly tested, zero-cost, and well matched to FootballTray's native Win32 taskbar architecture. Migrating distribution at this stage would add operational complexity without sufficient immediate product benefit.
+- **Future Precedent**: Future MSIX investigation may refer to [Awqat Salaat](https://github.com/Khiro95/Awqat-Salaat) as a comparative open-source precedent for a full-trust packaged WinUI 3 taskbar-integrated desktop application.
 
 ---
 
