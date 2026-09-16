@@ -13,7 +13,7 @@ namespace FootballTray.Client.Taskbar;
 
 public sealed partial class TaskbarTicker : UserControl
 {
-    private TrayDataDto? _currentTrayData;
+    private string? _currentDisplayedMatchId;
     private MatchCenterWindow? _matchCenterWindow;
 
     public TaskbarTicker()
@@ -22,26 +22,31 @@ public sealed partial class TaskbarTicker : UserControl
     }
 
     /// <summary>
-    /// Updates the ticker text and stored TrayData on the UI thread.
+    /// Updates the ticker text and click identity atomically on the UI thread.
     /// </summary>
-    public void Update(TrayDataDto? data, string formattedText)
+    public void UpdateDisplay(string? fixtureId, string formattedText)
     {
-        _currentTrayData = data;
-        DispatcherQueue.TryEnqueue(() =>
+        if (DispatcherQueue == null || DispatcherQueue.HasThreadAccess)
         {
+            _currentDisplayedMatchId = fixtureId;
             TickerText.Text = formattedText;
-        });
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _currentDisplayedMatchId = fixtureId;
+                TickerText.Text = formattedText;
+            });
+        }
     }
 
     /// <summary>
-    /// Updates the ticker text directly on the UI thread.
+    /// Updates the ticker text directly on the UI thread without altering match click identity.
     /// </summary>
     public void UpdateText(string text)
     {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            TickerText.Text = text;
-        });
+        UpdateDisplay(_currentDisplayedMatchId, text);
     }
 
     private void RootBorder_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -56,8 +61,8 @@ public sealed partial class TaskbarTicker : UserControl
 
     private async void RootBorder_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        var primaryMatch = TrayTickerFormatter.GetActiveMatch(_currentTrayData);
-        if (primaryMatch == null)
+        var matchId = _currentDisplayedMatchId;
+        if (string.IsNullOrWhiteSpace(matchId))
         {
             return;
         }
@@ -65,7 +70,7 @@ public sealed partial class TaskbarTicker : UserControl
         try
         {
             using var apiClient = new FootballApiClient();
-            var response = await apiClient.GetMatchDetailsAsync(primaryMatch.Id);
+            var response = await apiClient.GetMatchDetailsAsync(matchId);
 
             if (response.IsSuccess && response.Envelope?.Data != null)
             {

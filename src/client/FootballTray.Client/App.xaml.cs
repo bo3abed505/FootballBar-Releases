@@ -25,6 +25,7 @@ public partial class App : Application
     private Window? _window;
     private TaskbarHost? _taskbarHost;
     private TaskbarTicker? _tickerControl;
+    private TaskbarTickerCoordinator? _tickerCoordinator;
     private SyncService? _syncService;
     private FootballApiClient? _apiClient;
     private LocalCacheService? _cacheService;
@@ -174,6 +175,8 @@ public partial class App : Application
             _updatePackageAcquisitionService = null;
             _updateInstallationService?.Dispose();
             _updateInstallationService = null;
+            _tickerCoordinator?.Dispose();
+            _tickerCoordinator = null;
             _taskbarHost?.Dispose();
             _taskbarHost = null;
             CurrentTaskbarHost = null;
@@ -203,6 +206,13 @@ public partial class App : Application
             };
 
             _tickerControl = new TaskbarTicker();
+            if (activationDispatcher != null)
+            {
+                _tickerCoordinator = new TaskbarTickerCoordinator(
+                    activationDispatcher,
+                    (fixtureId, formattedText) => _tickerControl?.UpdateDisplay(fixtureId, formattedText));
+            }
+
             bool initialized = await _taskbarHost.InitializeAsync(_tickerControl);
 
             if (initialized)
@@ -220,7 +230,33 @@ public partial class App : Application
             _syncService.TrayUpdated += (sender, updateArgs) =>
             {
                 AppLogger.Debug("Sync", "TrayUpdated", $"Ticker update: '{updateArgs.FormattedText}' (v{updateArgs.Version})");
-                _tickerControl?.Update(updateArgs.TrayData, updateArgs.FormattedText);
+                var coordinator = _tickerCoordinator;
+                if (activationDispatcher == null || coordinator == null) return;
+
+                void ApplyUpdate()
+                {
+                    var prefs = _preferencesService?.GetPreferences();
+                    coordinator.ApplySnapshot(
+                        updateArgs.TrayData,
+                        updateArgs.ConnectionState,
+                        prefs);
+                }
+
+                if (activationDispatcher.HasThreadAccess)
+                {
+                    ApplyUpdate();
+                }
+                else
+                {
+                    bool enqueued = activationDispatcher.TryEnqueue(ApplyUpdate);
+                    if (!enqueued)
+                    {
+                        AppLogger.Warn(
+                            "Sync",
+                            "TrayUpdateDispatchFailed",
+                            "Failed to enqueue ticker update onto MainWindow DispatcherQueue.");
+                    }
+                }
             };
 
             // Start initial sync and periodic polling

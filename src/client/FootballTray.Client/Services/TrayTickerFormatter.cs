@@ -64,11 +64,10 @@ public static class TrayTickerFormatter
     }
 
     /// <summary>
-    /// Formats the current TrayDataDto into a compact taskbar ticker string based on data freshness state and user preferences.
+    /// Maps DataFreshnessState to corresponding TickerConnectionState.
     /// </summary>
-    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState, UserPreferences? preferences = null)
-    {
-        var connectionState = freshnessState switch
+    public static TickerConnectionState MapConnectionState(DataFreshnessState freshnessState) =>
+        freshnessState switch
         {
             DataFreshnessState.Fresh => TickerConnectionState.OnlineFresh,
             DataFreshnessState.NotModified => TickerConnectionState.OnlineFresh,
@@ -76,7 +75,71 @@ public static class TrayTickerFormatter
             DataFreshnessState.Empty => TickerConnectionState.NoCacheOffline,
             _ => TickerConnectionState.NoCacheOffline,
         };
-        return FormatTicker(trayData, connectionState, preferences);
+
+    /// <summary>
+    /// Evaluates candidate matches for ticker presentation and cycling.
+    /// If >= 1 LIVE match exists:
+    ///   candidate set = ALL LIVE matches in existing FixtureRelevanceEngine priority order.
+    /// If 0 LIVE matches exist:
+    ///   candidate set = ONLY the single top-priority match (or empty if no matches exist).
+    /// </summary>
+    public static IReadOnlyList<TrayMatchDto> GetTickerCandidates(TrayDataDto? trayData, UserPreferences? preferences = null)
+    {
+        if (trayData?.Matches == null || trayData.Matches.Count == 0)
+        {
+            return Array.Empty<TrayMatchDto>();
+        }
+
+        var prioritized = FixtureRelevanceEngine.PrioritizeMatches(trayData.Matches, preferences);
+        if (prioritized == null || prioritized.Count == 0)
+        {
+            return Array.Empty<TrayMatchDto>();
+        }
+
+        var liveCandidates = prioritized.Where(FixtureRelevanceEngine.IsLive).ToList();
+        if (liveCandidates.Count > 0)
+        {
+            return liveCandidates;
+        }
+
+        return prioritized.Take(1).ToList();
+    }
+
+    /// <summary>
+    /// Formats a single selected match into a compact ticker string based on data freshness state.
+    /// </summary>
+    public static string FormatMatchTicker(TrayMatchDto? match, DataFreshnessState freshnessState)
+    {
+        return FormatMatchTicker(match, MapConnectionState(freshnessState));
+    }
+
+    /// <summary>
+    /// Formats a single selected match into a compact ticker string based on connection state.
+    /// Preserves existing fallback and offline indication behavior.
+    /// </summary>
+    public static string FormatMatchTicker(TrayMatchDto? match, TickerConnectionState connectionState)
+    {
+        if (connectionState == TickerConnectionState.NoCacheOffline)
+        {
+            return "FootballTray · offline";
+        }
+
+        if (match == null)
+        {
+            return connectionState == TickerConnectionState.OfflineCached
+                ? "FootballTray · offline"
+                : "FootballTray";
+        }
+
+        return FormatMatch(match, connectionState);
+    }
+
+    /// <summary>
+    /// Formats the current TrayDataDto into a compact taskbar ticker string based on data freshness state and user preferences.
+    /// </summary>
+    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState, UserPreferences? preferences = null)
+    {
+        return FormatTicker(trayData, MapConnectionState(freshnessState), preferences);
     }
 
     /// <summary>
@@ -84,21 +147,8 @@ public static class TrayTickerFormatter
     /// </summary>
     public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState, UserPreferences? preferences = null)
     {
-        if (connectionState == TickerConnectionState.NoCacheOffline)
-        {
-            return "FootballTray · offline";
-        }
-
         var activeMatch = GetActiveMatch(trayData, preferences);
-
-        if (activeMatch == null)
-        {
-            return connectionState == TickerConnectionState.OfflineCached
-                ? "FootballTray · offline"
-                : "FootballTray";
-        }
-
-        return FormatMatch(activeMatch, connectionState);
+        return FormatMatchTicker(activeMatch, connectionState);
     }
 
     private static string FormatMatch(TrayMatchDto match, TickerConnectionState connectionState)
