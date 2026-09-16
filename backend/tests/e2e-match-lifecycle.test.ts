@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../src/db/index.js';
 import { SyncService } from '../src/acquisition/sync.service.js';
@@ -12,6 +12,8 @@ describe('Milestone 8 Work Package 5 - End-to-End Live Match Lifecycle & Freshne
   const TEST_HOME_TEAM_ID = 'team_wp5_ars';
   const TEST_AWAY_TEAM_ID = 'team_wp5_che';
   const TEST_FIXTURE_ID = 'fix_wp5_e2e_001';
+
+  let lifecycleKickoffTime: string;
 
   const createLifecycleFixture = (
     state: string,
@@ -62,7 +64,7 @@ describe('Milestone 8 Work Package 5 - End-to-End Live Match Lifecycle & Freshne
       venueName: 'Stamford Bridge',
     },
     round: 'Regular Season - 28',
-    kickoffTime: '2026-03-01T15:00:00Z',
+    kickoffTime: lifecycleKickoffTime,
     state,
     elapsedMinute,
     extraMinute,
@@ -86,14 +88,22 @@ describe('Milestone 8 Work Package 5 - End-to-End Live Match Lifecycle & Freshne
     getStandings: async () => [],
   });
 
-  beforeEach(async () => {
-    // Ensure clean state before each test
+  const cleanup = async () => {
     await db.delete(schema.events).where(eq(schema.events.fixtureId, TEST_FIXTURE_ID));
     await db.delete(schema.fixtures).where(eq(schema.fixtures.id, TEST_FIXTURE_ID));
     await db.delete(schema.teams).where(eq(schema.teams.id, TEST_HOME_TEAM_ID));
     await db.delete(schema.teams).where(eq(schema.teams.id, TEST_AWAY_TEAM_ID));
     await db.delete(schema.competitionSeasons).where(eq(schema.competitionSeasons.id, TEST_SEASON_ID));
     await db.delete(schema.competitions).where(eq(schema.competitions.id, TEST_COMP_ID));
+  };
+
+  beforeEach(async () => {
+    lifecycleKickoffTime = new Date(Date.now() - 60 * 1000).toISOString();
+    await cleanup();
+  });
+
+  afterAll(async () => {
+    await cleanup();
   });
 
   // ============================================================

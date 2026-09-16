@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../src/db/index.js';
 import { SyncService } from '../src/acquisition/sync.service.js';
@@ -56,7 +56,7 @@ describe('Milestone 8 Work Package 3 - Production Data Synchronization Completen
       venueName: 'Stamford Bridge',
     },
     round: 'Regular Season - 1',
-    kickoffTime: '2026-03-01T15:00:00Z',
+    kickoffTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     state: 'LIVE',
     elapsedMinute: 30,
     extraMinute: 0,
@@ -93,7 +93,7 @@ describe('Milestone 8 Work Package 3 - Production Data Synchronization Completen
     getStandings: async () => [],
   });
 
-  beforeEach(async () => {
+  const cleanup = async () => {
     // Clean up test records in dependency order
     await db.delete(schema.events).where(eq(schema.events.fixtureId, TEST_FIXTURE_ID));
     await db.delete(schema.fixtures).where(eq(schema.fixtures.id, TEST_FIXTURE_ID));
@@ -101,6 +101,15 @@ describe('Milestone 8 Work Package 3 - Production Data Synchronization Completen
     await db.delete(schema.teams).where(eq(schema.teams.id, TEST_AWAY_TEAM_ID));
     await db.delete(schema.competitionSeasons).where(eq(schema.competitionSeasons.id, TEST_SEASON_ID));
     await db.delete(schema.competitions).where(eq(schema.competitions.id, TEST_COMP_ID));
+  };
+
+  beforeEach(async () => {
+    baseFixture.kickoffTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    await cleanup();
+  });
+
+  afterAll(async () => {
+    await cleanup();
   });
 
   // ============================================================

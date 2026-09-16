@@ -1,4 +1,4 @@
-import { eq, desc, or, and, gte, lte, inArray, lt, like } from 'drizzle-orm';
+import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
 
@@ -35,9 +35,39 @@ export class FixturesRepository {
     });
   }
 
-  async getTrayMatches(limit = 10) {
-    // Return live matches first, then upcoming matches today, then recent finished
+  async getTrayMatches(limit = 10, now: Date = new Date()) {
+    const nowMs = now.getTime();
+
+    const LIVE_STATES = ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY'];
+    const PREMATCH_STATES = ['PREMATCH', 'NS', 'TBD'];
+    const FINISHED_STATES = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH'];
+
+    const livePastCutoff = new Date(nowMs - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS);
+    const liveFutureCutoff = new Date(nowMs + AcquisitionPolicyEngine.APPROACHING_WINDOW_MS);
+    const prematchPastCutoff = new Date(nowMs - AcquisitionPolicyEngine.APPROACHING_WINDOW_MS);
+    const prematchFutureCutoff = new Date(nowMs + 24 * 60 * 60 * 1000);
+    const finishedPastCutoff = new Date(nowMs - 4 * 60 * 60 * 1000);
+    const finishedFutureCutoff = now;
+
+    // Return live matches first, then upcoming matches within 24 hours, then recent finished matches.
     return await db.query.fixtures.findMany({
+      where: or(
+        and(
+          inArray(schema.fixtures.state, LIVE_STATES),
+          gte(schema.fixtures.kickoffTime, livePastCutoff),
+          lte(schema.fixtures.kickoffTime, liveFutureCutoff)
+        ),
+        and(
+          inArray(schema.fixtures.state, PREMATCH_STATES),
+          gte(schema.fixtures.kickoffTime, prematchPastCutoff),
+          lte(schema.fixtures.kickoffTime, prematchFutureCutoff)
+        ),
+        and(
+          inArray(schema.fixtures.state, FINISHED_STATES),
+          gte(schema.fixtures.kickoffTime, finishedPastCutoff),
+          lte(schema.fixtures.kickoffTime, finishedFutureCutoff)
+        )
+      ),
       with: {
         competition: true,
         homeTeam: true,
@@ -47,7 +77,23 @@ export class FixturesRepository {
           limit: 5,
         },
       },
-      orderBy: [desc(schema.fixtures.kickoffTime), desc(schema.fixtures.id)],
+      orderBy: [
+        sql`CASE
+          WHEN ${schema.fixtures.state} IN ('LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY') THEN 0
+          WHEN ${schema.fixtures.state} IN ('PREMATCH', 'NS', 'TBD') THEN 1
+          WHEN ${schema.fixtures.state} IN ('FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH') THEN 2
+          ELSE 3
+        END ASC`,
+        sql`CASE
+          WHEN ${schema.fixtures.state} IN ('LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY', 'PREMATCH', 'NS', 'TBD')
+            THEN ${schema.fixtures.kickoffTime}
+        END ASC NULLS LAST`,
+        sql`CASE
+          WHEN ${schema.fixtures.state} IN ('FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH')
+            THEN ${schema.fixtures.kickoffTime}
+        END DESC NULLS LAST`,
+        asc(schema.fixtures.id),
+      ],
       limit,
     });
   }
