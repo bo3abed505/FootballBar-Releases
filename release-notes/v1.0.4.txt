@@ -1,0 +1,18 @@
+FootballTray v1.0.4
+============================================================
+Maintenance Release — Payload Optimization, Single-Instance & Live Match Cycling
+
+Changes since v1.0.3:
+- Excluded unused transitive AI/ML dependencies from client publish output, reducing uncompressed package size by ~40.38 MiB (~16.74 MiB archive reduction).
+- Added strict release engineering validation enforcing zero AI/ML binaries and forbidden package identities in client distribution payloads.
+- Enforced single-instance application activation via Windows App SDK instance arbitration.
+- Added secondary-launch activation redirection and foreground window restoration, preventing duplicate persistent FootballTray instances.
+- Preserved redirected activation handling, including app-notification activation.
+- Added automatic taskbar ticker cycling for simultaneous LIVE matches at a fixed 7-second rotation interval.
+- Added multi-match ticker position indicators and relevance-based match priority sorting.
+- Preserved active fixture display stability across periodic background refreshes and maintained click navigation to the currently displayed fixture.
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
