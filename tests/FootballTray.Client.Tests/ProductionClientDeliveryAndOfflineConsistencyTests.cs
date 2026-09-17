@@ -704,4 +704,40 @@ public class ProductionClientDeliveryAndOfflineConsistencyTests
         Assert.IsNotNull(loaded);
         Assert.AreEqual(7, loaded.Envelope?.Version);
     }
+
+    [TestMethod]
+    public async Task Test27_ServerVersionLowerThanCached_AcceptsAuthoritativePayload_AndUpdatesCache()
+    {
+        var cacheService = new LocalCacheService(_tempDir);
+        var cachedEnvelope = CreateSampleEnvelope(version: 5, homeScore: "0", awayScore: "0");
+        await cacheService.SaveCacheAsync(cachedEnvelope, "\"etag_v5\"");
+
+        var updatedEnvelope = CreateSampleEnvelope(version: 1, homeScore: "3", awayScore: "1");
+        var mockHandler = new MockHttpMessageHandler
+        {
+            ResponseFactory = (req) => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(SerializeEnvelope(updatedEnvelope), Encoding.UTF8, "application/json"),
+                Headers = { ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag_v1\"") }
+            }
+        };
+
+        using var httpClient = new HttpClient(mockHandler) { BaseAddress = new Uri("http://localhost:4000") };
+        using var client = new FootballApiClient(httpClient);
+        using var syncService = new SyncService(client, cacheService);
+
+        await syncService.StartAsync();
+
+        Assert.AreEqual(DataFreshnessState.Fresh, syncService.FreshnessState);
+        Assert.AreEqual(1, syncService.LastKnownVersion);
+        Assert.AreEqual("\"etag_v1\"", syncService.LastKnownETag);
+        Assert.AreEqual(3, syncService.CurrentTrayData?.Matches[0].Score.Home);
+        Assert.AreEqual(1, syncService.CurrentTrayData?.Matches[0].Score.Away);
+
+        var diskCache = await cacheService.LoadCacheAsync();
+        Assert.IsNotNull(diskCache);
+        Assert.AreEqual(1, diskCache.Envelope?.Version);
+        Assert.AreEqual("\"etag_v1\"", diskCache.ETag);
+        Assert.AreEqual(3, diskCache.Envelope?.Data?.Matches[0].Score.Home);
+    }
 }

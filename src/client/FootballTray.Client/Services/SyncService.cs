@@ -212,31 +212,32 @@ public class SyncService : ISyncService
                 var envelope = response.Envelope;
                 var serverVersion = envelope.Version;
 
-                // Version check: update only if version is newer or uninitialized
-                if (_currentTrayData == null || serverVersion >= _lastKnownVersion)
+                if (_currentTrayData != null && serverVersion < _lastKnownVersion)
                 {
-                    var previousData = _currentTrayData;
-                    _currentTrayData = envelope.Data;
-                    _lastKnownVersion = serverVersion;
-                    _lastKnownEtag = response.ETag;
-                    _lastValidatedAt = DateTimeOffset.UtcNow;
-                    _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
-                    _freshnessState = DataFreshnessState.Fresh;
-
-                    // Atomically persist to disk
-                    await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
-
-                    // Evaluate and dispatch notifications for newly observed events/transitions
-                    if (_notificationService != null)
-                    {
-                        var preferences = _preferencesService?.GetPreferences();
-                        await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, cancellationToken);
-                    }
-
-                    AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
-                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
-                    return _freshnessState;
+                    AppLogger.Info("Sync", "LowerVersionAccepted", $"Server version v{serverVersion} is lower than cached v{_lastKnownVersion}. Accepting authoritative server payload.");
                 }
+
+                var previousData = _currentTrayData;
+                _currentTrayData = envelope.Data;
+                _lastKnownVersion = serverVersion;
+                _lastKnownEtag = response.ETag;
+                _lastValidatedAt = DateTimeOffset.UtcNow;
+                _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
+                _freshnessState = DataFreshnessState.Fresh;
+
+                // Atomically persist to disk
+                await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
+
+                // Evaluate and dispatch notifications for newly observed events/transitions
+                if (_notificationService != null)
+                {
+                    var preferences = _preferencesService?.GetPreferences();
+                    await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, cancellationToken);
+                }
+
+                AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
+                PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                return _freshnessState;
             }
 
             // Server returned error (4xx/5xx), network failure, or malformed payload
