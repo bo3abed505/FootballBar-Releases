@@ -1,0 +1,13 @@
+FootballTray v1.0.5
+============================================================
+Maintenance Release — Tray Synchronization Recovery
+
+Changes since v1.0.4:
+- Fixed an issue where a higher version number in the local tray cache could prevent the client from accepting a valid newer response from the authoritative backend after the server reported a lower version number.
+- Successful backend tray responses are now accepted as authoritative even when their version number is lower than the locally cached value, preventing the client from remaining stuck on stale offline data.
+- Tray cache persistence, ETag handling, freshness state, notifications, and ticker updates continue through the normal successful synchronization path after version realignment.
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)
