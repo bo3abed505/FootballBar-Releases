@@ -27,6 +27,19 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
 
   let pool: pg.Pool;
 
+  const resetToLegacySchema = async () => {
+    await pool.query('DROP TABLE IF EXISTS "competition_provider_aliases" CASCADE;');
+    await pool.query('DROP TABLE IF EXISTS "team_provider_aliases" CASCADE;');
+    await pool.query('DROP TABLE IF EXISTS "fixture_provider_aliases" CASCADE;');
+    await pool.query('ALTER TABLE "competitions" DROP COLUMN IF EXISTS "canonical_id";');
+    await pool.query('ALTER TABLE "teams" DROP COLUMN IF EXISTS "canonical_id";');
+    await pool.query('ALTER TABLE "fixtures" DROP COLUMN IF EXISTS "canonical_id";');
+    await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
+    await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
+    await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
+    await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+  };
+
   beforeAll(async () => {
     pool = new Pool({
       connectionString: testUrl,
@@ -39,25 +52,31 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     if (dbName !== 'footballtray_test') {
       throw new Error(`CRITICAL TEST SAFETY VIOLATION: Connected to '${dbName}' instead of 'footballtray_test'.`);
     }
+
+    // Ensure all packaged migrations are applied for initial state
+    try {
+      await runProductionMigration({
+        expectedDatabaseName: 'footballtray_test',
+        connectionString: testUrl,
+      });
+    } catch {
+      await resetToLegacySchema();
+      await runProductionMigration({
+        expectedDatabaseName: 'footballtray_test',
+        connectionString: testUrl,
+        baselineLegacySchema: true,
+      });
+    }
   });
 
   afterAll(async () => {
-    // Restore authentic migration records for footballtray_test
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS "drizzle";`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (
-        id SERIAL PRIMARY KEY,
-        hash text NOT NULL,
-        created_at bigint
-      );
-    `);
-    await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
-    for (const m of packagedMigrations) {
-      await pool.query(
-        'INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES ($1, $2);',
-        [m.hash, m.folderMillis]
-      );
-    }
+    // Restore authentic fully-migrated schema and migration records for footballtray_test
+    await resetToLegacySchema();
+    await runProductionMigration({
+      expectedDatabaseName: 'footballtray_test',
+      connectionString: testUrl,
+      baselineLegacySchema: true,
+    });
     await pool.end();
   });
 
@@ -290,12 +309,9 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
   // Mandatory Design Correction 4: Transactional Baseline Seeding
   // -------------------------------------------------------------------------
   describe('Correction 4: Transactional Baseline Seeding on Legacy Schema', () => {
-    it('CR4-1: Drops 0002 objects, runs with --baseline-legacy-schema, seeds authentic 0000/0001 in transaction, applies 0002, and passes verification', async () => {
-      // 1. Drop 0002 objects to simulate authentic legacy state (0000 + 0001 present, 0002 absent)
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+    it('CR4-1: Drops newer objects, runs with --baseline-legacy-schema, seeds authentic 0000/0001 in transaction, applies pending migrations, and passes verification', async () => {
+      // 1. Reset to authentic legacy state (0000 + 0001 present, 0002/0003 absent)
+      await resetToLegacySchema();
 
       // 2. Run with --baseline-legacy-schema
       const result = await runProductionMigration({
@@ -376,6 +392,48 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
       expect(latest.created_at.toString()).toBe(latestPackagedMigration.folderMillis.toString());
       expect(latest.hash).toBe(latestPackagedMigration.hash);
     });
+
+    it('CR5-5: Verifies additive canonical foundation tables exist in public schema', async () => {
+      const res = await pool.query(
+        `SELECT table_name FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name IN ('competition_provider_aliases', 'team_provider_aliases', 'fixture_provider_aliases')
+         ORDER BY table_name;`
+      );
+      expect(res.rows).toHaveLength(3);
+    });
+
+    it('CR5-6: Verifies canonical_id column exists and is nullable on competitions, teams, fixtures', async () => {
+      const res = await pool.query(`
+        SELECT table_name, column_name, is_nullable
+        FROM information_schema.columns
+        WHERE column_name = 'canonical_id'
+          AND table_name IN ('competitions', 'teams', 'fixtures')
+        ORDER BY table_name;
+      `);
+      expect(res.rows).toHaveLength(3);
+      for (const row of res.rows) {
+        expect(row.is_nullable).toBe('YES');
+      }
+    });
+
+    it('CR5-7: Verifies all canonical foundation indexes exist in database', async () => {
+      const expectedIndexes = [
+        'comp_provider_aliases_canonical_idx',
+        'team_provider_aliases_canonical_idx',
+        'fix_provider_aliases_canonical_idx',
+      ];
+
+      const res = await pool.query(
+        `SELECT indexname FROM pg_indexes
+         WHERE indexname = ANY($1::text[]);`,
+        [expectedIndexes]
+      );
+      const found = res.rows.map((r) => r.indexname);
+      for (const expected of expectedIndexes) {
+        expect(found).toContain(expected);
+      }
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -383,10 +441,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
   // -------------------------------------------------------------------------
   describe('Review Hardening: Legacy Baseline Verification & Transition State Semantics (Tests A-G)', () => {
     it('Test A: Legacy table exists but required 0000 column is missing -> fails closed with zero migration records written', async () => {
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+      await resetToLegacySchema();
 
       // Drop column 'venue' from 'fixtures'
       await pool.query('ALTER TABLE "fixtures" DROP COLUMN "venue";');
@@ -408,10 +463,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     });
 
     it('Test B1: Legacy schema has wrong column nullability -> fails closed with zero rows written', async () => {
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+      await resetToLegacySchema();
 
       // Make teams.name nullable (must be not null)
       await pool.query('ALTER TABLE "teams" ALTER COLUMN "name" DROP NOT NULL;');
@@ -432,10 +484,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     });
 
     it('Test B2: Legacy schema has wrong column data type -> fails closed with zero rows written', async () => {
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+      await resetToLegacySchema();
 
       // Alter fixtures.round to varchar(50) instead of text
       await pool.query('ALTER TABLE "fixtures" ALTER COLUMN "round" TYPE varchar(50);');
@@ -456,10 +505,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     });
 
     it('Test B3: Legacy schema is missing required index -> fails closed with zero rows written', async () => {
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+      await resetToLegacySchema();
 
       // Drop legacy index events_uid_idx
       await pool.query('DROP INDEX IF EXISTS "events_uid_idx";');
@@ -480,10 +526,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     });
 
     it('Test C: Baseline transaction succeeds but subsequent 0002 migration fails -> authentic 0000/0001 history remains, 0002 rolled back, state is BASELINE_COMMITTED', async () => {
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+      await resetToLegacySchema();
 
       const tempDir = path.resolve(currentDir, 'temp-broken-0002');
       try {
@@ -504,6 +547,10 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
           path.join(tempDir, '0002_shallow_umar.sql'),
           'THIS IS SYNTAX ERROR INVALID SQL STATMENT FOR TEST;\n',
           'utf8'
+        );
+        fs.copyFileSync(
+          path.join(migrationsFolder, '0003_additive_canonical_foundation.sql'),
+          path.join(tempDir, '0003_additive_canonical_foundation.sql')
         );
 
         let caughtError: unknown;
@@ -544,11 +591,8 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     });
 
     it('Test D: Normal migration succeeds and reports state MIGRATION_COMMITTED', async () => {
-      // Drop 0002 objects and clear drizzle migrations table
-      await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
-      await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
-      await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
+      // Reset to legacy schema
+      await resetToLegacySchema();
 
       const result = await runProductionMigration({
         expectedDatabaseName: 'footballtray_test',

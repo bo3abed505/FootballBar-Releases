@@ -5,10 +5,25 @@ import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisi
 export class FixturesRepository {
   async getAll(limit = 50) {
     return await db.query.fixtures.findMany({
+      columns: {
+        canonicalId: false,
+      },
       with: {
-        competition: true,
-        homeTeam: true,
-        awayTeam: true,
+        competition: {
+          columns: {
+            canonicalId: false,
+          },
+        },
+        homeTeam: {
+          columns: {
+            canonicalId: false,
+          },
+        },
+        awayTeam: {
+          columns: {
+            canonicalId: false,
+          },
+        },
         events: true,
       },
       orderBy: [desc(schema.fixtures.kickoffTime)],
@@ -19,11 +34,26 @@ export class FixturesRepository {
   async getById(id: string) {
     return await db.query.fixtures.findFirst({
       where: eq(schema.fixtures.id, id),
+      columns: {
+        canonicalId: false,
+      },
       with: {
-        competition: true,
+        competition: {
+          columns: {
+            canonicalId: false,
+          },
+        },
         season: true,
-        homeTeam: true,
-        awayTeam: true,
+        homeTeam: {
+          columns: {
+            canonicalId: false,
+          },
+        },
+        awayTeam: {
+          columns: {
+            canonicalId: false,
+          },
+        },
         events: true,
         lineups: {
           with: {

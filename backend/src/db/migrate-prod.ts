@@ -305,6 +305,18 @@ export const EXPECTED_PHASE2A_INDEXES = [
   'ledger_competition_id_idx',
 ];
 
+export const EXPECTED_CANONICAL_ALIAS_TABLES = [
+  'competition_provider_aliases',
+  'team_provider_aliases',
+  'fixture_provider_aliases',
+] as const;
+
+export const EXPECTED_CANONICAL_INDEXES = [
+  'comp_provider_aliases_canonical_idx',
+  'team_provider_aliases_canonical_idx',
+  'fix_provider_aliases_canonical_idx',
+] as const;
+
 /**
  * Deterministically verifies that the existing database schema materially represents
  * migrations 0000 + 0001 and that Phase 2A (0002) objects remain strictly absent.
@@ -434,6 +446,32 @@ export async function verifyLegacySchema(client: pg.PoolClient): Promise<void> {
     if (foundIdxSet.has(p2aIdx)) {
       throw new Error(
         `[MIGRATE_PROD] Inconsistent schema: Phase 2A index '${p2aIdx}' already exists before migration. Aborting baseline.`
+      );
+    }
+  }
+
+  // 6. Require additive canonical foundation objects to be ABSENT before baseline
+  for (const aliasTable of EXPECTED_CANONICAL_ALIAS_TABLES) {
+    if (tablesMap.has(aliasTable)) {
+      throw new Error(
+        `[MIGRATE_PROD] Inconsistent schema: '${aliasTable}' already exists before migration. Aborting baseline.`
+      );
+    }
+  }
+
+  for (const domainTable of ['competitions', 'teams', 'fixtures'] as const) {
+    const cols = tablesMap.get(domainTable);
+    if (cols && cols.has('canonical_id')) {
+      throw new Error(
+        `[MIGRATE_PROD] Inconsistent schema: 'canonical_id' already exists on '${domainTable}' before migration. Aborting baseline.`
+      );
+    }
+  }
+
+  for (const canonicalIdx of EXPECTED_CANONICAL_INDEXES) {
+    if (foundIdxSet.has(canonicalIdx)) {
+      throw new Error(
+        `[MIGRATE_PROD] Inconsistent schema: Canonical index '${canonicalIdx}' already exists before migration. Aborting baseline.`
       );
     }
   }
@@ -730,6 +768,62 @@ export async function runProductionMigration(
       if (missingIdx.length > 0) {
         throw new PostMigrationVerificationError(
           `[MIGRATE_PROD] Post-migration verification failed: Missing required Phase 2A indexes: ${missingIdx.join(', ')}`,
+          undefined,
+          currentState
+        );
+      }
+
+      // 6e. Verify additive canonical foundation tables exist
+      for (const aliasTable of EXPECTED_CANONICAL_ALIAS_TABLES) {
+        const aliasTableRes = await verifyClient.query(
+          `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1;`,
+          [aliasTable]
+        );
+        if (aliasTableRes.rows.length === 0) {
+          throw new PostMigrationVerificationError(
+            `[MIGRATE_PROD] Post-migration verification failed: Table '${aliasTable}' does not exist in public schema.`,
+            undefined,
+            currentState
+          );
+        }
+      }
+
+      // 6f. Verify canonical_id column on competitions, teams, fixtures exists and is nullable
+      for (const domainTable of ['competitions', 'teams', 'fixtures'] as const) {
+        const canColRes = await verifyClient.query(
+          `SELECT column_name, is_nullable
+           FROM information_schema.columns
+           WHERE table_name = $1 AND column_name = 'canonical_id';`,
+          [domainTable]
+        );
+        if (canColRes.rows.length !== 1) {
+          throw new PostMigrationVerificationError(
+            `[MIGRATE_PROD] Post-migration verification failed: Column 'canonical_id' missing on table '${domainTable}'.`,
+            undefined,
+            currentState
+          );
+        }
+        if (canColRes.rows[0].is_nullable !== 'YES') {
+          throw new PostMigrationVerificationError(
+            `[MIGRATE_PROD] Post-migration verification failed: Column 'canonical_id' on table '${domainTable}' must be nullable, found '${canColRes.rows[0].is_nullable}'.`,
+            undefined,
+            currentState
+          );
+        }
+      }
+
+      // 6g. Verify additive canonical indexes exist
+      const canIdxRes = await verifyClient.query(
+        `SELECT indexname FROM pg_indexes
+         WHERE tablename = ANY($1::text[])
+           AND indexname = ANY($2::text[]);`,
+        [EXPECTED_CANONICAL_ALIAS_TABLES, EXPECTED_CANONICAL_INDEXES]
+      );
+      const foundCanIdx: string[] = canIdxRes.rows.map((r) => r.indexname);
+      const missingCanIdx = EXPECTED_CANONICAL_INDEXES.filter((i) => !foundCanIdx.includes(i));
+      if (missingCanIdx.length > 0) {
+        throw new PostMigrationVerificationError(
+          `[MIGRATE_PROD] Post-migration verification failed: Missing required canonical indexes: ${missingCanIdx.join(', ')}`,
           undefined,
           currentState
         );

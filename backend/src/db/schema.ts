@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, date, jsonb, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, boolean, timestamp, date, jsonb, uniqueIndex, index, primaryKey } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // ----------------------------------------------------
@@ -6,6 +6,7 @@ import { relations } from 'drizzle-orm';
 // ----------------------------------------------------
 export const competitions = pgTable('competitions', {
   id: text('id').primaryKey(),
+  canonicalId: text('canonical_id').unique(),
   name: text('name').notNull(),
   code: text('code'),
   type: text('type').default('league'),
@@ -36,6 +37,7 @@ export const competitionSeasons = pgTable('competition_seasons', {
 // ----------------------------------------------------
 export const teams = pgTable('teams', {
   id: text('id').primaryKey(),
+  canonicalId: text('canonical_id').unique(),
   name: text('name').notNull(),
   shortName: text('short_name').notNull(),
   code: text('code'),
@@ -52,6 +54,7 @@ export const teams = pgTable('teams', {
 // ----------------------------------------------------
 export const fixtures = pgTable('fixtures', {
   id: text('id').primaryKey(),
+  canonicalId: text('canonical_id').unique(),
   competitionId: text('competition_id').notNull().references(() => competitions.id),
   seasonId: text('season_id').notNull().references(() => competitionSeasons.id),
   homeTeamId: text('home_team_id').notNull().references(() => teams.id),
@@ -318,12 +321,55 @@ export const installationSettings = pgTable('installation_settings', {
 });
 
 // ----------------------------------------------------
+// 16. Competition Provider Aliases
+// ----------------------------------------------------
+export const competitionProviderAliases = pgTable('competition_provider_aliases', {
+  canonicalCompetitionId: text('canonical_competition_id').notNull().references(() => competitions.canonicalId, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  providerId: text('provider_id').notNull(),
+  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.provider, table.providerId] }),
+  index('comp_provider_aliases_canonical_idx').on(table.canonicalCompetitionId),
+]);
+
+// ----------------------------------------------------
+// 17. Team Provider Aliases
+// ----------------------------------------------------
+export const teamProviderAliases = pgTable('team_provider_aliases', {
+  canonicalTeamId: text('canonical_team_id').notNull().references(() => teams.canonicalId, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  providerId: text('provider_id').notNull(),
+  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.provider, table.providerId] }),
+  index('team_provider_aliases_canonical_idx').on(table.canonicalTeamId),
+]);
+
+// ----------------------------------------------------
+// 18. Fixture Provider Aliases
+// ----------------------------------------------------
+export const fixtureProviderAliases = pgTable('fixture_provider_aliases', {
+  canonicalFixtureId: text('canonical_fixture_id').notNull().references(() => fixtures.canonicalId, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  providerId: text('provider_id').notNull(),
+  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.provider, table.providerId] }),
+  index('fix_provider_aliases_canonical_idx').on(table.canonicalFixtureId),
+]);
+
+// ----------------------------------------------------
 // Relations
 // ----------------------------------------------------
 export const competitionsRelations = relations(competitions, ({ many }) => ({
   seasons: many(competitionSeasons),
   fixtures: many(fixtures),
   standings: many(standings),
+  providerAliases: many(competitionProviderAliases),
 }));
 
 export const competitionSeasonsRelations = relations(competitionSeasons, ({ one, many }) => ({
@@ -342,6 +388,7 @@ export const teamsRelations = relations(teams, ({ many }) => ({
   standings: many(standings),
   lineups: many(lineups),
   statistics: many(fixtureStatistics),
+  providerAliases: many(teamProviderAliases),
 }));
 
 export const fixturesRelations = relations(fixtures, ({ one, many }) => ({
@@ -366,6 +413,28 @@ export const fixturesRelations = relations(fixtures, ({ one, many }) => ({
   events: many(events),
   lineups: many(lineups),
   statistics: many(fixtureStatistics),
+  providerAliases: many(fixtureProviderAliases),
+}));
+
+export const competitionProviderAliasesRelations = relations(competitionProviderAliases, ({ one }) => ({
+  competition: one(competitions, {
+    fields: [competitionProviderAliases.canonicalCompetitionId],
+    references: [competitions.canonicalId],
+  }),
+}));
+
+export const teamProviderAliasesRelations = relations(teamProviderAliases, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamProviderAliases.canonicalTeamId],
+    references: [teams.canonicalId],
+  }),
+}));
+
+export const fixtureProviderAliasesRelations = relations(fixtureProviderAliases, ({ one }) => ({
+  fixture: one(fixtures, {
+    fields: [fixtureProviderAliases.canonicalFixtureId],
+    references: [fixtures.canonicalId],
+  }),
 }));
 
 export const eventsRelations = relations(events, ({ one }) => ({
