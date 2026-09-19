@@ -730,10 +730,11 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       expect(budget1.rows[0].remaining_calls).toBe(94);
 
       // In production, Batch 2 occurred ~57 minutes after Batch 1 (00:00 UTC vs 00:57 UTC).
-      // Age Batch 1 ledger timestamps to 57 minutes ago so the 8/min rate limiter window is clear.
+      // Age Batch 1 ledger timestamps so the 8/min rate limiter window is clear (> 60s ago)
+      // without crossing backwards across the UTC midnight boundary if run near 00:00 UTC.
       await pool.query(
         `UPDATE api_request_ledger
-         SET requested_at = NOW() - INTERVAL '57 minutes'
+         SET requested_at = GREATEST((NOW() AT TIME ZONE 'UTC')::date + INTERVAL '1 second', NOW() - INTERVAL '2 minutes')
          WHERE provider = $1 AND requested_at >= (NOW() AT TIME ZONE 'UTC')::date`,
         [testProvider]
       );
@@ -975,10 +976,11 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       expect(diagAfterBatch1.remainingDaily).toBe(94);
 
       // In production, Batch 2 occurred ~57 minutes after Batch 1 (00:00 UTC vs 00:57 UTC).
-      // Age Batch 1 ledger timestamps to 57 minutes ago so the 8/min rate limiter window is clear.
+      // Age Batch 1 ledger timestamps so the 8/min rate limiter window is clear (> 60s ago)
+      // without crossing backwards across the UTC midnight boundary if run near 00:00 UTC.
       await pool.query(
         `UPDATE api_request_ledger
-         SET requested_at = NOW() - INTERVAL '57 minutes'
+         SET requested_at = GREATEST($2::timestamp + INTERVAL '1 second', NOW() - INTERVAL '2 minutes')
          WHERE provider = $1 AND requested_at >= $2`,
         [testProvider, startOfTodayUtc]
       );
