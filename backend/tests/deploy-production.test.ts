@@ -166,11 +166,12 @@ describe('Production Backend Deployment & Packaging Logic', () => {
     // 7. Arguments contain config/.env.production.local
     expect(scriptContent).toContain('$taskArgs -notlike "*--env-file=*config');
 
-    // 8. Health check
-    expect(scriptContent).toContain('http://127.0.0.1:4000/health');
+    // 8. Readiness check (/api/tray)
+    expect(scriptContent).toContain('http://127.0.0.1:4000/api/tray');
+    expect(scriptContent).not.toContain('http://127.0.0.1:4000/health');
 
     // 9. Update manifest only after all preceding checks pass
-    expect(scriptContent).toMatch(/health.*Set-DeploymentManifestStatus.*verified/s);
+    expect(scriptContent).toMatch(/api\/tray.*Set-DeploymentManifestStatus.*verified/s);
   });
 
   it('Test 12: Dual rollback restores previous junction and previous task XML', () => {
@@ -182,12 +183,12 @@ describe('Production Backend Deployment & Packaging Logic', () => {
     // Restores task XML from validated backup
     expect(scriptContent).toContain('Restore Task Definition from Backup');
 
-    // Verifies restored task and /health
+    // Verifies restored task and /api/tray readiness
     expect(scriptContent).toContain('Verify Restored Task XML');
-    expect(scriptContent).toContain('Verifying health of restored service');
+    expect(scriptContent).toContain('Verifying readiness of restored service via /api/tray');
 
-    // Refuses success if rollback health verification fails
-    expect(scriptContent).toContain('Rollback health verification failed');
+    // Refuses success if rollback readiness verification fails
+    expect(scriptContent).toContain('Rollback readiness verification failed');
     expect(scriptContent).toContain('throw "Deployment failed and rollback service verification also failed."');
   });
 
@@ -473,8 +474,8 @@ $result | ConvertTo-Json
     const step5 = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend")');
     // Step 6: Verify restored task configuration
     const step6 = catchBlock.indexOf('Verify Restored Task XML');
-    // Step 7: Verify /health of restored service
-    const step7 = catchBlock.indexOf('http://127.0.0.1:4000/health');
+    // Step 7: Verify readiness of restored service via /api/tray
+    const step7 = catchBlock.indexOf('http://127.0.0.1:4000/api/tray');
     // Step 8: Final failure throw
     const step8 = catchBlock.indexOf('throw "Deployment aborted due to verification failure');
 
@@ -511,12 +512,12 @@ describe('Production Backend Deployment -NoStart Mode Hardening (Milestone 16.5C
     expect(runMatch).not.toBeNull();
   });
 
-  it('Test NS3: HTTP /health probe is skipped when -NoStart is supplied', () => {
+  it('Test NS3: HTTP readiness probe is skipped when -NoStart is supplied', () => {
     const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
 
-    // Health check block is wrapped in if (-not $NoStart)
-    const healthMatch = scriptContent.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?http:\/\/127\.0\.0\.1:4000\/health[\s\S]*?throw "Health check probe timed out/);
-    expect(healthMatch).not.toBeNull();
+    // Readiness check block is wrapped in if (-not $NoStart)
+    const readinessMatch = scriptContent.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?http:\/\/127\.0\.0\.1:4000\/api\/tray[\s\S]*?throw "Readiness check probe timed out/);
+    expect(readinessMatch).not.toBeNull();
   });
 
   it('Test NS4: Task stopped state invariant is explicitly validated when -NoStart is active', () => {
@@ -527,14 +528,14 @@ describe('Production Backend Deployment -NoStart Mode Hardening (Milestone 16.5C
     expect(scriptContent).toContain('Query Registered Task Status');
   });
 
-  it('Test NS5: Default deployment mode preserves original service start and /health verification', () => {
+  it('Test NS5: Default deployment mode preserves service start and safe /api/tray readiness verification', () => {
     const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
 
     // Default mode retains Invoke-SchtasksChecked /Run
     expect(scriptContent).toContain('Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Updated Task"');
 
-    // Default mode retains /health probe
-    expect(scriptContent).toContain('Invoke-RestMethod -Uri "http://127.0.0.1:4000/health"');
+    // Default mode retains /api/tray probe
+    expect(scriptContent).toContain('Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray"');
 
     // Manifest marked verified after verification
     expect(scriptContent).toContain('Set-DeploymentManifestStatus -ReleaseDir $releaseDir -Status "verified"');
@@ -551,9 +552,9 @@ describe('Production Backend Deployment -NoStart Mode Hardening (Milestone 16.5C
     const rollbackRunMatch = catchBlock.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)\s+-Operation\s+"Start Restored Backend Service"/);
     expect(rollbackRunMatch).not.toBeNull();
 
-    // Rollback health check is guarded by -not $NoStart
-    const rollbackHealthMatch = catchBlock.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?http:\/\/127\.0\.0\.1:4000\/health/);
-    expect(rollbackHealthMatch).not.toBeNull();
+    // Rollback readiness check is guarded by -not $NoStart
+    const rollbackReadinessMatch = catchBlock.match(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?http:\/\/127\.0\.0\.1:4000\/api\/tray/);
+    expect(rollbackReadinessMatch).not.toBeNull();
 
     // Task XML restoration and validation still occur unconditionally in rollback
     expect(catchBlock).toContain('Restore Task Definition from Backup');
@@ -579,7 +580,7 @@ describe('Production Backend Deployment -NoStart Mode Hardening (Milestone 16.5C
     });
 
     expect(stdout).toContain('Mode: NO-START');
-    expect(stdout).toContain('-NoStart flag is set: service startup and HTTP /health probe would be skipped');
+    expect(stdout).toContain('-NoStart flag is set: service startup and HTTP readiness probe would be skipped');
     expect(stdout).toContain('Simulation completed successfully');
   });
 });
@@ -694,5 +695,185 @@ describe('Phase 2A Production Database Migration Deployment Integration', () => 
     for (let i = 0; i < scriptContent.length; i++) {
       expect(scriptContent.charCodeAt(i)).toBeLessThanOrEqual(127);
     }
+  });
+});
+
+describe('Deployment Tooling Safety Fix & Readiness Probe Validation (Safe /api/tray)', () => {
+  const scriptsDir = path.resolve(__dirname, '../../scripts');
+  const deployScriptPath = path.join(scriptsDir, 'deploy-backend-production.ps1');
+
+  it('Requirement 1: Deploy script contains no /health readiness probe', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    expect(scriptContent).not.toContain('/health');
+    expect(scriptContent).not.toContain('http://127.0.0.1:4000/health');
+  });
+
+  it('Requirement 2: Deploy script contains no /api/diagnostics probe', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    expect(scriptContent).not.toContain('/api/diagnostics');
+    expect(scriptContent).not.toContain('http://127.0.0.1:4000/api/diagnostics');
+  });
+
+  it('Requirement 3: All HTTP probes use safe /api/tray and introduce no unrelated external HTTP target', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    const probeMatches = scriptContent.match(/Invoke-RestMethod[^\r\n]+/g) || [];
+    expect(probeMatches.length).toBe(3); // (1) manual rollback, (2) normal deploy verification 8, (3) automatic rollback step 7
+
+    for (const probe of probeMatches) {
+      expect(probe).toContain('http://127.0.0.1:4000/api/tray');
+      expect(probe).toContain('-Method Get');
+      expect(probe).not.toContain('/health');
+      expect(probe).not.toContain('/api/diagnostics');
+    }
+
+    // No WebRequest calls
+    expect(scriptContent).not.toContain('Invoke-WebRequest');
+
+    // All Invoke-RestMethod probes strictly target local /api/tray
+    for (const probe of probeMatches) {
+      expect(probe).toMatch(/Invoke-RestMethod\s+-Uri\s+"http:\/\/127\.0\.0\.1:4000\/api\/tray"/);
+    }
+
+    // No external or provider endpoints introduced
+    expect(scriptContent).not.toContain('api-football');
+    expect(scriptContent).not.toContain('localhost');
+  });
+
+  it('Requirement 4: Normal post-start readiness uses only /api/tray and validates tray envelope', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    const v8Index = scriptContent.indexOf('Verification 8: Readiness Validation (/api/tray)');
+    expect(v8Index).toBeGreaterThan(0);
+    const v8Block = scriptContent.substring(v8Index, scriptContent.indexOf('Verification 9:', v8Index));
+
+    expect(v8Block).toContain('Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray" -Method Get -TimeoutSec 3');
+    expect(v8Block).toContain('$tray.PSObject.Properties["schemaVersion"]');
+    expect(v8Block).toContain('-not [string]::IsNullOrWhiteSpace($tray.schemaVersion)');
+    expect(v8Block).toContain('$tray.PSObject.Properties["data"]');
+    expect(v8Block).toContain('$tray.data.PSObject.Properties["matches"]');
+    expect(v8Block).toContain('($tray.data.matches -is [System.Array])');
+    expect(v8Block).not.toContain('/health');
+    expect(v8Block).not.toContain('/api/diagnostics');
+  });
+
+  it('Requirement 5: Explicit rollback (-Rollback) uses only /api/tray', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    const rollbackIndex = scriptContent.indexOf('[ROLLBACK] Initiating manual rollback');
+    expect(rollbackIndex).toBeGreaterThan(0);
+    const rollbackBlock = scriptContent.substring(rollbackIndex, scriptContent.indexOf('exit 0', rollbackIndex));
+
+    expect(rollbackBlock).toContain('Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray" -Method Get -TimeoutSec 3');
+    expect(rollbackBlock).toContain('$tray.PSObject.Properties["schemaVersion"]');
+    expect(rollbackBlock).toContain('-not [string]::IsNullOrWhiteSpace($tray.schemaVersion)');
+    expect(rollbackBlock).toContain('($tray.data.matches -is [System.Array])');
+    expect(rollbackBlock).not.toContain('/health');
+  });
+
+  it('Requirement 6: Automatic rollback / failure recovery uses only /api/tray', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+    const catchIndex = scriptContent.indexOf('Write-Host "CRITICAL: Deployment verification failed');
+    expect(catchIndex).toBeGreaterThan(0);
+    const catchBlock = scriptContent.substring(catchIndex);
+
+    expect(catchBlock).toContain('Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray" -Method Get -TimeoutSec 3');
+    expect(catchBlock).toContain('$rtray.PSObject.Properties["schemaVersion"]');
+    expect(catchBlock).toContain('-not [string]::IsNullOrWhiteSpace($rtray.schemaVersion)');
+    expect(catchBlock).toContain('($rtray.data.matches -is [System.Array])');
+    expect(catchBlock).not.toContain('/health');
+  });
+
+  it('Requirement 7: Timeout and retry logic remains bounded and throws on failure', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Normal deploy loop bounded by 30 seconds
+    expect(scriptContent).toContain('$stopwatch.Elapsed.TotalSeconds -lt 30');
+    expect(scriptContent).toContain('throw "Readiness check probe timed out or returned non-ready response within 30 seconds."');
+
+    // Explicit rollback bounded by 25 seconds
+    expect(scriptContent).toContain('$sw.Elapsed.TotalSeconds -lt 25');
+    expect(scriptContent).toContain('throw "Rollback verification failed."');
+
+    // Automatic rollback bounded by 25 seconds
+    expect(scriptContent).toContain('$rbSw.Elapsed.TotalSeconds -lt 25');
+    expect(scriptContent).toContain('throw "Deployment failed and rollback service verification also failed."');
+  });
+
+  it('Requirement 8: Readiness probe accepts valid tray envelopes and rejects invalid/missing schemaVersion or non-tray responses', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ft-tray-probe-test-'));
+    try {
+      const runnerScript = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+function Test-TrayEnvelope {
+    param([string]$Json)
+    try {
+        $tray = $Json | ConvertFrom-Json
+        $isReady = ($null -ne $tray -and
+            $null -ne $tray.PSObject.Properties["schemaVersion"] -and
+            -not [string]::IsNullOrWhiteSpace($tray.schemaVersion) -and
+            $null -ne $tray.PSObject.Properties["data"] -and
+            $null -ne $tray.data -and
+            $null -ne $tray.data.PSObject.Properties["matches"] -and
+            ($tray.data.matches -is [System.Array]))
+        return [bool]$isReady
+    } catch {
+        return $false
+    }
+}
+
+$cases = @(
+    @{ Name = "emptyTray"; Json = '{"schemaVersion":"1.0","data":{"matches":[]}}'; Expected = $true },
+    @{ Name = "trayWithMatches"; Json = '{"schemaVersion":"1.0","data":{"matches":[{"id":1}]}}'; Expected = $true },
+    @{ Name = "missingSchemaVersion"; Json = '{"data":{"matches":[]}}'; Expected = $false },
+    @{ Name = "legacyHealth"; Json = '{"status":"ok","database":"connected","scheduler":{"running":true}}'; Expected = $false },
+    @{ Name = "dataNull"; Json = '{"schemaVersion":"1.0","data":null,"error":{"code":"ERR"}}'; Expected = $false },
+    @{ Name = "missingMatches"; Json = '{"schemaVersion":"1.0","data":{}}'; Expected = $false },
+    @{ Name = "nonArrayMatches"; Json = '{"schemaVersion":"1.0","data":{"matches":"invalid"}}'; Expected = $false },
+    @{ Name = "rawText"; Json = '"hello"'; Expected = $false }
+)
+
+$results = @{}
+foreach ($c in $cases) {
+    $results[$c.Name] = Test-TrayEnvelope -Json $c.Json
+}
+$results | ConvertTo-Json
+`;
+      const runnerPath = path.join(tempDir, 'test-tray-probe.ps1');
+      fs.writeFileSync(runnerPath, runnerScript, 'utf8');
+
+      const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${runnerPath}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const parsedResults = JSON.parse(stdout);
+
+      expect(parsedResults.emptyTray).toBe(true);
+      expect(parsedResults.trayWithMatches).toBe(true);
+      expect(parsedResults.missingSchemaVersion).toBe(false);
+      expect(parsedResults.legacyHealth).toBe(false);
+      expect(parsedResults.dataNull).toBe(false);
+      expect(parsedResults.missingMatches).toBe(false);
+      expect(parsedResults.nonArrayMatches).toBe(false);
+      expect(parsedResults.rawText).toBe(false);
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+
+  it('Requirement 9: -NoStart semantics remain intact across normal deploy and rollback', () => {
+    const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+    // Normal deploy startup and readiness check guarded by -not $NoStart
+    expect(scriptContent).toMatch(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)[\s\S]*?http:\/\/127\.0\.0\.1:4000\/api\/tray/);
+
+    // Automatic rollback startup and readiness check guarded by -not $NoStart
+    const catchBlock = scriptContent.substring(scriptContent.indexOf('Write-Host "CRITICAL: Deployment verification failed'));
+    expect(catchBlock).toMatch(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)\s+-Operation\s+"Start Restored Backend Service"[\s\S]*?http:\/\/127\.0\.0\.1:4000\/api\/tray/);
+
+    // Manual rollback startup and readiness check guarded by -not $NoStart
+    const manualBlock = scriptContent.substring(scriptContent.indexOf('[ROLLBACK] Initiating manual rollback'));
+    expect(manualBlock).toMatch(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)\s+-Operation\s+"Start Rolled-Back Service"[\s\S]*?http:\/\/127\.0\.0\.1:4000\/api\/tray/);
   });
 });

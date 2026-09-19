@@ -18,7 +18,7 @@
 .PARAMETER SkipTaskUpdate
     Performs directory deployment and dependency installation without updating the scheduled task.
 .PARAMETER NoStart
-    Deploys, packages, activates the release junction, and updates the scheduled task definition without starting the backend service or performing HTTP health probes.
+    Deploys, packages, activates the release junction, and updates the scheduled task definition without starting the backend service or performing HTTP readiness probes.
 .PARAMETER BaselineLegacySchema
     Instructs the production migration runner to perform the one-time legacy baseline verification and transactional baseline metadata insertion before applying pending migrations.
 #>
@@ -513,15 +513,21 @@ if ($Rollback) {
             Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend") -Operation "Start Rolled-Back Service"
             Start-Sleep -Seconds 4
 
-            # Health verification
-            Write-Host "Verifying health after rollback..."
-            $rollbackHealthy = $false
+            # Readiness verification
+            Write-Host "Verifying readiness after rollback via /api/tray..."
+            $rollbackReady = $false
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             while ($sw.Elapsed.TotalSeconds -lt 25) {
                 try {
-                    $h = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
-                    if ($h.status -eq "ok" -and $h.database -eq "connected" -and $h.scheduler.running -eq $true) {
-                        $rollbackHealthy = $true
+                    $tray = Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray" -Method Get -TimeoutSec 3
+                    if ($null -ne $tray -and
+                        $null -ne $tray.PSObject.Properties["schemaVersion"] -and
+                        -not [string]::IsNullOrWhiteSpace($tray.schemaVersion) -and
+                        $null -ne $tray.PSObject.Properties["data"] -and
+                        $null -ne $tray.data -and
+                        $null -ne $tray.data.PSObject.Properties["matches"] -and
+                        ($tray.data.matches -is [System.Array])) {
+                        $rollbackReady = $true
                         break
                     }
                 } catch {
@@ -529,10 +535,10 @@ if ($Rollback) {
                 }
             }
 
-            if ($rollbackHealthy) {
-                Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back and verified healthy." -ForegroundColor Green
+            if ($rollbackReady) {
+                Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back and verified ready." -ForegroundColor Green
             } else {
-                Write-Host "CRITICAL: Rollback health verification failed! Service did not report healthy status." -ForegroundColor Red
+                Write-Host "CRITICAL: Rollback readiness verification failed! Service did not report ready status." -ForegroundColor Red
                 throw "Rollback verification failed."
             }
         } else {
@@ -540,7 +546,7 @@ if ($Rollback) {
             Write-Host "[ROLLBACK SUCCESS] Service successfully rolled back (service intentionally left stopped)." -ForegroundColor Green
         }
     } else {
-        Write-Host "  [DryRun] Would redirect 'current' to $targetRelease, restore task XML, restart task, and verify /health." -ForegroundColor Gray
+        Write-Host "  [DryRun] Would redirect 'current' to $targetRelease, restore task XML, restart task, and verify readiness via /api/tray." -ForegroundColor Gray
     }
 
     exit 0
@@ -715,7 +721,7 @@ if ($DryRun) {
     Write-Host "`n=== [DryRun] Planned Task XML ===" -ForegroundColor Cyan
     Write-Host $taskXml
     if ($NoStart) {
-        Write-Host "`n[DryRun] -NoStart flag is set: service startup and HTTP /health probe would be skipped." -ForegroundColor Yellow
+        Write-Host "`n[DryRun] -NoStart flag is set: service startup and HTTP readiness probe would be skipped." -ForegroundColor Yellow
     }
     Write-Host "`n[DryRun] Simulation completed successfully. No system state was modified." -ForegroundColor Green
     exit 0
@@ -891,18 +897,25 @@ if (-not $SkipTaskUpdate) {
         }
 
         # --------------------------------------------------------------
-        # Verification 8: Health Validation
+        # Verification 8: Readiness Validation (/api/tray)
         # --------------------------------------------------------------
         if (-not $NoStart) {
-            Write-Host "  Validating backend health..."
-            $healthy = $false
+            Write-Host "  Validating backend readiness via /api/tray..."
+            $ready = $false
             $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
             while ($stopwatch.Elapsed.TotalSeconds -lt 30) {
                 try {
-                    $h = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
-                    if ($h.status -eq "ok" -and $h.database -eq "connected" -and $h.scheduler.running -eq $true) {
-                        $healthy = $true
-                        Write-Host "  Backend health check verified: status=$($h.status), db=$($h.database), scheduler=$($h.scheduler.running)" -ForegroundColor Green
+                    $tray = Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray" -Method Get -TimeoutSec 3
+                    if ($null -ne $tray -and
+                        $null -ne $tray.PSObject.Properties["schemaVersion"] -and
+                        -not [string]::IsNullOrWhiteSpace($tray.schemaVersion) -and
+                        $null -ne $tray.PSObject.Properties["data"] -and
+                        $null -ne $tray.data -and
+                        $null -ne $tray.data.PSObject.Properties["matches"] -and
+                        ($tray.data.matches -is [System.Array])) {
+                        $ready = $true
+                        $matchCount = @($tray.data.matches).Count
+                        Write-Host "  Backend readiness verified via /api/tray: matches=$matchCount" -ForegroundColor Green
                         break
                     }
                 } catch {
@@ -910,11 +923,11 @@ if (-not $SkipTaskUpdate) {
                 }
             }
 
-            if (-not $healthy) {
-                throw "Health check probe timed out or returned non-healthy response within 30 seconds."
+            if (-not $ready) {
+                throw "Readiness check probe timed out or returned non-ready response within 30 seconds."
             }
         } else {
-            Write-Host "  [-NoStart] Skipping HTTP health validation probe (service intentionally stopped)." -ForegroundColor Yellow
+            Write-Host "  [-NoStart] Skipping HTTP readiness validation probe (service intentionally stopped)." -ForegroundColor Yellow
 
             # Confirm task is not running
             $statusLines = Invoke-SchtasksChecked -Arguments @("/Query", "/TN", "FootballTray-Backend", "/FO", "CSV", "/NH") -Operation "Query Registered Task Status"
@@ -983,16 +996,22 @@ if (-not $SkipTaskUpdate) {
             throw "CRITICAL: Restored task definition is invalid XML!"
         }
 
-        # 7. Verify /health of restored service
+        # 7. Verify readiness of restored service via /api/tray
         if (-not $NoStart) {
-            Write-Host "  Verifying health of restored service..."
-            $rollbackHealthy = $false
+            Write-Host "  Verifying readiness of restored service via /api/tray..."
+            $rollbackReady = $false
             $rbSw = [System.Diagnostics.Stopwatch]::StartNew()
             while ($rbSw.Elapsed.TotalSeconds -lt 25) {
                 try {
-                    $rh = Invoke-RestMethod -Uri "http://127.0.0.1:4000/health" -Method Get -TimeoutSec 3
-                    if ($rh.status -eq "ok" -and $rh.database -eq "connected" -and $rh.scheduler.running -eq $true) {
-                        $rollbackHealthy = $true
+                    $rtray = Invoke-RestMethod -Uri "http://127.0.0.1:4000/api/tray" -Method Get -TimeoutSec 3
+                    if ($null -ne $rtray -and
+                        $null -ne $rtray.PSObject.Properties["schemaVersion"] -and
+                        -not [string]::IsNullOrWhiteSpace($rtray.schemaVersion) -and
+                        $null -ne $rtray.PSObject.Properties["data"] -and
+                        $null -ne $rtray.data -and
+                        $null -ne $rtray.data.PSObject.Properties["matches"] -and
+                        ($rtray.data.matches -is [System.Array])) {
+                        $rollbackReady = $true
                         break
                     }
                 } catch {
@@ -1001,10 +1020,10 @@ if (-not $SkipTaskUpdate) {
             }
 
             # 8. Report rollback result
-            if ($rollbackHealthy) {
-                Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified service health." -ForegroundColor Yellow
+            if ($rollbackReady) {
+                Write-Host "  [ROLLBACK SUCCESS] Restored previous release and verified service readiness." -ForegroundColor Yellow
             } else {
-                Write-Host "CRITICAL: Rollback health verification failed! The previous service did not recover within the timeout period." -ForegroundColor Red
+                Write-Host "CRITICAL: Rollback readiness verification failed! The previous service did not recover within the timeout period." -ForegroundColor Red
                 throw "Deployment failed and rollback service verification also failed."
             }
         } else {
