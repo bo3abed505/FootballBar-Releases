@@ -1,6 +1,7 @@
 import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
+import { generateCanonicalId } from '../db/canonical-id.js';
 
 export class FixturesRepository {
   async getAll(limit = 50) {
@@ -129,7 +130,8 @@ export class FixturesRepository {
   }
 
   async insert(fixture: typeof schema.fixtures.$inferInsert) {
-    const results = await db.insert(schema.fixtures).values(fixture).onConflictDoNothing().returning();
+    const canonicalId = fixture.canonicalId || generateCanonicalId('fix');
+    const results = await db.insert(schema.fixtures).values({ ...fixture, canonicalId }).onConflictDoNothing().returning();
     return results[0] ?? null;
   }
 

@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
+import { generateCanonicalId } from '../db/canonical-id.js';
 
 export class CompetitionsRepository {
   async getAll() {
@@ -12,7 +13,8 @@ export class CompetitionsRepository {
   }
 
   async insert(competition: typeof schema.competitions.$inferInsert) {
-    const results = await db.insert(schema.competitions).values(competition).onConflictDoNothing().returning();
+    const canonicalId = competition.canonicalId || generateCanonicalId('comp');
+    const results = await db.insert(schema.competitions).values({ ...competition, canonicalId }).onConflictDoNothing().returning();
     return results[0] ?? null;
   }
 }

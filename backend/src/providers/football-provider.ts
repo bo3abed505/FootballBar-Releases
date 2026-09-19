@@ -5,6 +5,8 @@ export interface ProviderCompetition {
   type?: string;
   country?: string;
   logoUrl?: string;
+  provider?: string;
+  providerId?: string;
 }
 
 export interface ProviderSeason {
@@ -25,6 +27,8 @@ export interface ProviderTeam {
   country?: string;
   logoUrl?: string;
   venueName?: string;
+  provider?: string;
+  providerId?: string;
 }
 
 export interface ProviderScore {
@@ -73,6 +77,8 @@ export interface ProviderFixture {
   venue?: string;
   referee?: string;
   events?: ProviderEvent[];
+  provider?: string;
+  providerId?: string;
 }
 
 export interface ProviderFixtureDetail extends ProviderFixture {

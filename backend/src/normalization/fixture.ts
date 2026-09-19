@@ -1,10 +1,19 @@
 import { ProviderCompetition, ProviderSeason, ProviderTeam, ProviderFixture } from '../providers/football-provider.js';
 import type { schema } from '../db/index.js';
 
-export type CanonicalCompetition = typeof schema.competitions.$inferInsert;
+export type CanonicalCompetition = typeof schema.competitions.$inferInsert & {
+  provider?: string;
+  providerId?: string;
+};
 export type CanonicalSeason = typeof schema.competitionSeasons.$inferInsert;
-export type CanonicalTeam = typeof schema.teams.$inferInsert;
-export type CanonicalFixture = typeof schema.fixtures.$inferInsert;
+export type CanonicalTeam = typeof schema.teams.$inferInsert & {
+  provider?: string;
+  providerId?: string;
+};
+export type CanonicalFixture = typeof schema.fixtures.$inferInsert & {
+  provider?: string;
+  providerId?: string;
+};
 
 export function normalizeCompetition(raw: ProviderCompetition): CanonicalCompetition {
   return {
@@ -14,6 +23,8 @@ export function normalizeCompetition(raw: ProviderCompetition): CanonicalCompeti
     type: raw.type?.trim() || 'league',
     country: raw.country?.trim() || null,
     logoUrl: raw.logoUrl?.trim() || null,
+    provider: raw.provider,
+    providerId: raw.providerId,
   };
 }
 
@@ -38,6 +49,8 @@ export function normalizeTeam(raw: ProviderTeam): CanonicalTeam {
     country: raw.country?.trim() || null,
     logoUrl: raw.logoUrl?.trim() || null,
     venueName: raw.venueName?.trim() || null,
+    provider: raw.provider,
+    providerId: raw.providerId,
   };
 }
 
@@ -64,5 +77,7 @@ export function normalizeFixture(raw: ProviderFixture): CanonicalFixture {
     venue: raw.venue?.trim() || null,
     referee: raw.referee?.trim() || null,
     lastPolledAt: new Date(),
+    provider: raw.provider,
+    providerId: raw.providerId,
   };
 }

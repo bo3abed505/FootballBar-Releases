@@ -66,6 +66,8 @@ export class ApiFootballMapper {
       type: item.league.type === 'Cup' ? 'cup' : 'league',
       country: item.country.name,
       logoUrl: item.league.logo,
+      provider: 'api_football',
+      providerId: String(item.league.id),
     };
   }
 
@@ -89,6 +91,8 @@ export class ApiFootballMapper {
       shortName: teamObj.name.length <= 4 ? teamObj.name : teamObj.name.substring(0, 3).toUpperCase(),
       code: teamObj.name.substring(0, 3).toUpperCase(),
       logoUrl: teamObj.logo,
+      provider: 'api_football',
+      providerId: String(teamObj.id),
     };
   }
 
@@ -101,6 +105,8 @@ export class ApiFootballMapper {
       code: item.league.name.substring(0, 3).toUpperCase(),
       country: item.league.country,
       logoUrl: item.league.logo,
+      provider: 'api_football',
+      providerId: String(item.league.id),
     };
     const season: ProviderSeason = {
       id: `season_${item.league.id}_${item.league.season}`,
@@ -143,6 +149,8 @@ export class ApiFootballMapper {
       venue: item.fixture.venue?.name || undefined,
       referee: item.fixture.referee || undefined,
       events,
+      provider: 'api_football',
+      providerId: String(item.fixture.id),
     };
   }
 

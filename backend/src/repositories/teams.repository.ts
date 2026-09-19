@@ -1,5 +1,6 @@
 import { eq, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
+import { generateCanonicalId } from '../db/canonical-id.js';
 
 export class TeamsRepository {
   async getAll() {
@@ -17,7 +18,8 @@ export class TeamsRepository {
   }
 
   async insert(team: typeof schema.teams.$inferInsert) {
-    const results = await db.insert(schema.teams).values(team).onConflictDoNothing().returning();
+    const canonicalId = team.canonicalId || generateCanonicalId('team');
+    const results = await db.insert(schema.teams).values({ ...team, canonicalId }).onConflictDoNothing().returning();
     return results[0] ?? null;
   }
 }

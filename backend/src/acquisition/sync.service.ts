@@ -1,9 +1,11 @@
-import { inArray, eq, and, gte } from 'drizzle-orm';
+import { inArray, eq, and, gte, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { FootballProvider, FixtureFilter } from '../providers/football-provider.js';
 import { AcquisitionService } from './acquisition.service.js';
 import { normalizeEvent } from '../normalization/event.js';
 import { AcquisitionPolicyEngine } from './acquisition-policy.js';
+import { generateCanonicalId } from '../db/canonical-id.js';
+import { ensureProviderAlias } from '../db/provider-alias.js';
 
 export interface SyncSummary {
   provider: string;
@@ -43,41 +45,72 @@ export class SyncService {
       hasChanges: false,
     };
 
-    // 1. Upsert Competitions (Safe non-destructive merge)
+    // 1. Upsert Competitions (Safe non-destructive merge with canonical identity)
     for (const comp of batch.competitions) {
-      const existing = await db.query.competitions.findFirst({
-        where: eq(schema.competitions.id, comp.id),
-      });
+      const { provider, providerId, ...compValues } = comp;
+      await db.transaction(async (tx) => {
+        const existing = await tx.query.competitions.findFirst({
+          where: eq(schema.competitions.id, comp.id),
+        });
 
-      if (!existing) {
-        await db.insert(schema.competitions).values(comp);
-      } else {
-        const updatedName = comp.name || existing.name;
-        const updatedCode = comp.code ?? existing.code;
-        const updatedType = comp.type ?? existing.type;
-        const updatedCountry = comp.country ?? existing.country;
-        const updatedLogoUrl = comp.logoUrl ?? existing.logoUrl;
+        let canonicalId: string;
 
-        if (
-          existing.name !== updatedName ||
-          existing.code !== updatedCode ||
-          existing.type !== updatedType ||
-          existing.country !== updatedCountry ||
-          existing.logoUrl !== updatedLogoUrl
-        ) {
-          await db
-            .update(schema.competitions)
-            .set({
-              name: updatedName,
-              code: updatedCode,
-              type: updatedType,
-              country: updatedCountry,
-              logoUrl: updatedLogoUrl,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.competitions.id, comp.id));
+        if (!existing) {
+          canonicalId = comp.canonicalId || generateCanonicalId('comp');
+          await tx.insert(schema.competitions).values({
+            ...compValues,
+            canonicalId,
+          });
+        } else {
+          if (!existing.canonicalId) {
+            // Existing row with canonical_id NULL: assign atomically
+            const candidateId = generateCanonicalId('comp');
+            const updated = await tx
+              .update(schema.competitions)
+              .set({
+                canonicalId: sql`COALESCE(${schema.competitions.canonicalId}, ${candidateId})`,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.competitions.id, comp.id))
+              .returning({ canonicalId: schema.competitions.canonicalId });
+            canonicalId = updated[0]?.canonicalId || candidateId;
+          } else {
+            // Existing canonical_id is preserved exactly
+            canonicalId = existing.canonicalId;
+          }
+
+          const updatedName = comp.name || existing.name;
+          const updatedCode = comp.code ?? existing.code;
+          const updatedType = comp.type ?? existing.type;
+          const updatedCountry = comp.country ?? existing.country;
+          const updatedLogoUrl = comp.logoUrl ?? existing.logoUrl;
+
+          if (
+            existing.name !== updatedName ||
+            existing.code !== updatedCode ||
+            existing.type !== updatedType ||
+            existing.country !== updatedCountry ||
+            existing.logoUrl !== updatedLogoUrl
+          ) {
+            await tx
+              .update(schema.competitions)
+              .set({
+                name: updatedName,
+                code: updatedCode,
+                type: updatedType,
+                country: updatedCountry,
+                logoUrl: updatedLogoUrl,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.competitions.id, comp.id));
+          }
         }
-      }
+
+        // Establish alias if explicit provider identity is present
+        if (provider === 'api_football' && providerId) {
+          await ensureProviderAlias(tx, 'competition', canonicalId, provider, providerId);
+        }
+      });
     }
 
     // 2. Upsert Seasons (Safe non-destructive merge)
@@ -98,138 +131,200 @@ export class SyncService {
       }
     }
 
-    // 3. Upsert Teams (Safe non-destructive merge)
+    // 3. Upsert Teams (Safe non-destructive merge with canonical identity)
     for (const team of batch.teams) {
-      const existing = await db.query.teams.findFirst({
-        where: eq(schema.teams.id, team.id),
-      });
+      const { provider, providerId, ...teamValues } = team;
+      await db.transaction(async (tx) => {
+        const existing = await tx.query.teams.findFirst({
+          where: eq(schema.teams.id, team.id),
+        });
 
-      if (!existing) {
-        await db.insert(schema.teams).values(team);
-      } else {
-        const updatedName = team.name || existing.name;
-        const updatedShortName = team.shortName || existing.shortName;
-        const updatedCode = team.code ?? existing.code;
-        const updatedCountry = team.country ?? existing.country;
-        const updatedLogoUrl = team.logoUrl ?? existing.logoUrl;
-        const updatedVenue = team.venueName ?? existing.venueName;
+        let canonicalId: string;
 
-        if (
-          existing.name !== updatedName ||
-          existing.shortName !== updatedShortName ||
-          existing.code !== updatedCode ||
-          existing.country !== updatedCountry ||
-          existing.logoUrl !== updatedLogoUrl ||
-          existing.venueName !== updatedVenue
-        ) {
-          await db
-            .update(schema.teams)
-            .set({
-              name: updatedName,
-              shortName: updatedShortName,
-              code: updatedCode,
-              country: updatedCountry,
-              logoUrl: updatedLogoUrl,
-              venueName: updatedVenue,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.teams.id, team.id));
+        if (!existing) {
+          canonicalId = team.canonicalId || generateCanonicalId('team');
+          await tx.insert(schema.teams).values({
+            ...teamValues,
+            canonicalId,
+          });
+        } else {
+          if (!existing.canonicalId) {
+            // Existing row with canonical_id NULL: assign atomically
+            const candidateId = generateCanonicalId('team');
+            const updated = await tx
+              .update(schema.teams)
+              .set({
+                canonicalId: sql`COALESCE(${schema.teams.canonicalId}, ${candidateId})`,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.teams.id, team.id))
+              .returning({ canonicalId: schema.teams.canonicalId });
+            canonicalId = updated[0]?.canonicalId || candidateId;
+          } else {
+            // Existing canonical_id is preserved exactly
+            canonicalId = existing.canonicalId;
+          }
+
+          const updatedName = team.name || existing.name;
+          const updatedShortName = team.shortName || existing.shortName;
+          const updatedCode = team.code ?? existing.code;
+          const updatedCountry = team.country ?? existing.country;
+          const updatedLogoUrl = team.logoUrl ?? existing.logoUrl;
+          const updatedVenue = team.venueName ?? existing.venueName;
+
+          if (
+            existing.name !== updatedName ||
+            existing.shortName !== updatedShortName ||
+            existing.code !== updatedCode ||
+            existing.country !== updatedCountry ||
+            existing.logoUrl !== updatedLogoUrl ||
+            existing.venueName !== updatedVenue
+          ) {
+            await tx
+              .update(schema.teams)
+              .set({
+                name: updatedName,
+                shortName: updatedShortName,
+                code: updatedCode,
+                country: updatedCountry,
+                logoUrl: updatedLogoUrl,
+                venueName: updatedVenue,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.teams.id, team.id));
+          }
         }
-      }
+
+        // Establish alias if explicit provider identity is present
+        if (provider === 'api_football' && providerId) {
+          await ensureProviderAlias(tx, 'team', canonicalId, provider, providerId);
+        }
+      });
     }
 
     // 4. Upsert Fixtures with Comprehensive Change Detection & Non-destructive Merge
     for (const incoming of batch.fixtures) {
-      const existing = await db.query.fixtures.findFirst({
-        where: eq(schema.fixtures.id, incoming.id),
-      });
+      const { provider, providerId, ...incomingValues } = incoming;
+      await db.transaction(async (tx) => {
+        const existing = await tx.query.fixtures.findFirst({
+          where: eq(schema.fixtures.id, incoming.id),
+        });
 
-      if (!existing) {
-        // New fixture insertion
-        await db.insert(schema.fixtures).values(incoming);
-        summary.fixturesInserted++;
-        summary.hasChanges = true;
-      } else {
-        // Non-destructive preservation of already known good optional data
-        const mergedHomeScoreHt = incoming.homeScoreHt ?? existing.homeScoreHt;
-        const mergedAwayScoreHt = incoming.awayScoreHt ?? existing.awayScoreHt;
-        const mergedHomeScoreEt = incoming.homeScoreEt ?? existing.homeScoreEt;
-        const mergedAwayScoreEt = incoming.awayScoreEt ?? existing.awayScoreEt;
-        const mergedHomeScorePen = incoming.homeScorePen ?? existing.homeScorePen;
-        const mergedAwayScorePen = incoming.awayScorePen ?? existing.awayScorePen;
-        const mergedVenue = incoming.venue ?? existing.venue;
-        const mergedReferee = incoming.referee ?? existing.referee;
-        const mergedRound = incoming.round ?? existing.round;
-        const mergedKickoff = incoming.kickoffTime ?? existing.kickoffTime;
+        let canonicalId: string;
 
-        // Check for meaningful changes
-        const hasScoreChanged =
-          existing.homeScore !== incoming.homeScore ||
-          existing.awayScore !== incoming.awayScore;
-        const hasStateChanged = existing.state !== incoming.state;
-        const hasMinuteChanged =
-          existing.elapsedMinute !== incoming.elapsedMinute ||
-          existing.extraMinute !== incoming.extraMinute;
-        const hasHtChanged =
-          existing.homeScoreHt !== mergedHomeScoreHt ||
-          existing.awayScoreHt !== mergedAwayScoreHt;
-        const hasEtChanged =
-          existing.homeScoreEt !== mergedHomeScoreEt ||
-          existing.awayScoreEt !== mergedAwayScoreEt;
-        const hasPenChanged =
-          existing.homeScorePen !== mergedHomeScorePen ||
-          existing.awayScorePen !== mergedAwayScorePen;
-        const hasKickoffChanged =
-          existing.kickoffTime.getTime() !== mergedKickoff.getTime();
-        const hasMetadataChanged =
-          existing.venue !== mergedVenue ||
-          existing.referee !== mergedReferee ||
-          existing.round !== mergedRound;
-
-        const isChanged =
-          hasScoreChanged ||
-          hasStateChanged ||
-          hasMinuteChanged ||
-          hasHtChanged ||
-          hasEtChanged ||
-          hasPenChanged ||
-          hasKickoffChanged ||
-          hasMetadataChanged;
-
-        if (isChanged) {
-          await db
-            .update(schema.fixtures)
-            .set({
-              state: incoming.state,
-              elapsedMinute: incoming.elapsedMinute,
-              extraMinute: incoming.extraMinute,
-              homeScore: incoming.homeScore,
-              awayScore: incoming.awayScore,
-              homeScoreHt: mergedHomeScoreHt,
-              awayScoreHt: mergedAwayScoreHt,
-              homeScoreEt: mergedHomeScoreEt,
-              awayScoreEt: mergedAwayScoreEt,
-              homeScorePen: mergedHomeScorePen,
-              awayScorePen: mergedAwayScorePen,
-              kickoffTime: mergedKickoff,
-              round: mergedRound,
-              venue: mergedVenue,
-              referee: mergedReferee,
-              lastPolledAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.fixtures.id, incoming.id));
-
-          summary.fixturesUpdated++;
+        if (!existing) {
+          // New fixture insertion
+          canonicalId = incoming.canonicalId || generateCanonicalId('fix');
+          await tx.insert(schema.fixtures).values({
+            ...incomingValues,
+            canonicalId,
+          });
+          summary.fixturesInserted++;
           summary.hasChanges = true;
         } else {
-          // Update lastPolledAt only without changing updatedAt version timestamp
-          await db
-            .update(schema.fixtures)
-            .set({ lastPolledAt: new Date() })
-            .where(eq(schema.fixtures.id, incoming.id));
+          if (!existing.canonicalId) {
+            // Existing row with canonical_id NULL: assign atomically
+            const candidateId = generateCanonicalId('fix');
+            const updated = await tx
+              .update(schema.fixtures)
+              .set({
+                canonicalId: sql`COALESCE(${schema.fixtures.canonicalId}, ${candidateId})`,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.fixtures.id, incoming.id))
+              .returning({ canonicalId: schema.fixtures.canonicalId });
+            canonicalId = updated[0]?.canonicalId || candidateId;
+          } else {
+            // Existing canonical_id is preserved exactly
+            canonicalId = existing.canonicalId;
+          }
+
+          // Non-destructive preservation of already known good optional data
+          const mergedHomeScoreHt = incoming.homeScoreHt ?? existing.homeScoreHt;
+          const mergedAwayScoreHt = incoming.awayScoreHt ?? existing.awayScoreHt;
+          const mergedHomeScoreEt = incoming.homeScoreEt ?? existing.homeScoreEt;
+          const mergedAwayScoreEt = incoming.awayScoreEt ?? existing.awayScoreEt;
+          const mergedHomeScorePen = incoming.homeScorePen ?? existing.homeScorePen;
+          const mergedAwayScorePen = incoming.awayScorePen ?? existing.awayScorePen;
+          const mergedVenue = incoming.venue ?? existing.venue;
+          const mergedReferee = incoming.referee ?? existing.referee;
+          const mergedRound = incoming.round ?? existing.round;
+          const mergedKickoff = incoming.kickoffTime ?? existing.kickoffTime;
+
+          // Check for meaningful changes
+          const hasScoreChanged =
+            existing.homeScore !== incoming.homeScore ||
+            existing.awayScore !== incoming.awayScore;
+          const hasStateChanged = existing.state !== incoming.state;
+          const hasMinuteChanged =
+            existing.elapsedMinute !== incoming.elapsedMinute ||
+            existing.extraMinute !== incoming.extraMinute;
+          const hasHtChanged =
+            existing.homeScoreHt !== mergedHomeScoreHt ||
+            existing.awayScoreHt !== mergedAwayScoreHt;
+          const hasEtChanged =
+            existing.homeScoreEt !== mergedHomeScoreEt ||
+            existing.awayScoreEt !== mergedAwayScoreEt;
+          const hasPenChanged =
+            existing.homeScorePen !== mergedHomeScorePen ||
+            existing.awayScorePen !== mergedAwayScorePen;
+          const hasKickoffChanged =
+            existing.kickoffTime.getTime() !== mergedKickoff.getTime();
+          const hasMetadataChanged =
+            existing.venue !== mergedVenue ||
+            existing.referee !== mergedReferee ||
+            existing.round !== mergedRound;
+
+          const isChanged =
+            hasScoreChanged ||
+            hasStateChanged ||
+            hasMinuteChanged ||
+            hasHtChanged ||
+            hasEtChanged ||
+            hasPenChanged ||
+            hasKickoffChanged ||
+            hasMetadataChanged;
+
+          if (isChanged) {
+            await tx
+              .update(schema.fixtures)
+              .set({
+                state: incoming.state,
+                elapsedMinute: incoming.elapsedMinute,
+                extraMinute: incoming.extraMinute,
+                homeScore: incoming.homeScore,
+                awayScore: incoming.awayScore,
+                homeScoreHt: mergedHomeScoreHt,
+                awayScoreHt: mergedAwayScoreHt,
+                homeScoreEt: mergedHomeScoreEt,
+                awayScoreEt: mergedAwayScoreEt,
+                homeScorePen: mergedHomeScorePen,
+                awayScorePen: mergedAwayScorePen,
+                kickoffTime: mergedKickoff,
+                round: mergedRound,
+                venue: mergedVenue,
+                referee: mergedReferee,
+                lastPolledAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.fixtures.id, incoming.id));
+
+            summary.fixturesUpdated++;
+            summary.hasChanges = true;
+          } else {
+            // Update lastPolledAt only without changing updatedAt version timestamp
+            await tx
+              .update(schema.fixtures)
+              .set({ lastPolledAt: new Date() })
+              .where(eq(schema.fixtures.id, incoming.id));
+          }
         }
-      }
+
+        // Establish alias if explicit provider identity is present
+        if (provider === 'api_football' && providerId) {
+          await ensureProviderAlias(tx, 'fixture', canonicalId, provider, providerId);
+        }
+      });
     }
 
     // 5. Upsert Events with Duplicate Deduplication
