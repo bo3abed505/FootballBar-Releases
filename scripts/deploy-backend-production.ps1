@@ -114,8 +114,47 @@ function Assert-SourceValid {
 }
 
 # ----------------------------------------------------------------------
-# 4. Junction Resolution Helpers
+# 4. Junction Resolution and Path Normalization Helpers
 # ----------------------------------------------------------------------
+function Normalize-JunctionPath {
+    param ([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $clean = $Path.Trim()
+
+    # Strip NT Object Manager (\??\) or Win32 file namespace (\\?\) prefixes
+    if ($clean -match '^(?:\\\?\?\\|\\\\\?\\)(UNC[\\/].*)$') {
+        $clean = "\\$($Matches[1].Substring(4))"
+    } elseif ($clean -match '^(?:\\\?\?\\|\\\\\?\\)([a-zA-Z]:[\\/].*)$') {
+        $clean = $Matches[1]
+    }
+
+    try {
+        return [System.IO.Path]::GetFullPath($clean).TrimEnd('\', '/')
+    } catch {
+        return $clean.TrimEnd('\', '/')
+    }
+}
+
+function Test-JunctionPathEqual {
+    param (
+        [string]$Path1,
+        [string]$Path2
+    )
+
+    $norm1 = Normalize-JunctionPath -Path $Path1
+    $norm2 = Normalize-JunctionPath -Path $Path2
+
+    if ($null -eq $norm1 -or $null -eq $norm2) {
+        return $false
+    }
+
+    return [string]::Equals($norm1, $norm2, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Get-JunctionTarget {
     param ([string]$Path)
 
@@ -123,30 +162,37 @@ function Get-JunctionTarget {
         return $null
     }
 
+    $raw = $null
     try {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         if ($item.LinkTarget) {
-            return [System.IO.Path]::GetFullPath($item.LinkTarget)
+            $raw = $item.LinkTarget
+        } elseif ($item.Target) {
+            $raw = $item.Target | Select-Object -First 1
+        } else {
+            $resolved = [System.IO.Directory]::ResolveLinkTarget($Path, $true)
+            if ($resolved) {
+                $raw = $resolved.FullName
+            }
         }
-        if ($item.Target) {
-            $t = $item.Target | Select-Object -First 1
-            if ($t) { return [System.IO.Path]::GetFullPath($t) }
-        }
-        $resolved = [System.IO.Directory]::ResolveLinkTarget($Path, $true)
-        if ($resolved) {
-            return [System.IO.Path]::GetFullPath($resolved.FullName)
-        }
-    } catch {
+    } catch { }
+
+    if (-not $raw) {
         try {
             $parent = Split-Path -Parent $Path
             $leaf = Split-Path -Leaf $Path
             $dirOutput = cmd /c "dir /AL `"$parent`"" 2>$null
             $match = $dirOutput | Select-String "<JUNCTION>\s+$leaf\s+\[(.*)\]"
             if ($match -and $match.Matches.Groups.Count -gt 1) {
-                return [System.IO.Path]::GetFullPath($match.Matches.Groups[1].Value)
+                $raw = $match.Matches.Groups[1].Value
             }
         } catch { }
     }
+
+    if ($raw) {
+        return Normalize-JunctionPath -Path $raw
+    }
+
     return $null
 }
 
@@ -167,7 +213,7 @@ function Get-PreviousKnownGoodRelease {
 
     $normalizedActive = $null
     if ($CurrentActivePath) {
-        $normalizedActive = [System.IO.Path]::GetFullPath($CurrentActivePath).TrimEnd('\')
+        $normalizedActive = Normalize-JunctionPath -Path $CurrentActivePath
     }
 
     $parsedList = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -193,8 +239,8 @@ function Get-PreviousKnownGoodRelease {
                 $deployedAt = $dir.CreationTimeUtc
             }
 
-            $dirNorm = [System.IO.Path]::GetFullPath($dir.FullName).TrimEnd('\')
-            $isActive = ($normalizedActive -and [string]::Equals($dirNorm, $normalizedActive, [System.StringComparison]::OrdinalIgnoreCase))
+            $dirNorm = Normalize-JunctionPath -Path $dir.FullName
+            $isActive = ($normalizedActive -and (Test-JunctionPathEqual -Path1 $dirNorm -Path2 $normalizedActive))
 
             $parsedList.Add([PSCustomObject]@{
                 Path       = $dir.FullName
@@ -493,11 +539,19 @@ if ($Rollback) {
         Start-Sleep -Seconds 2
 
         # Restore junction
+        $normalizedTarget = Normalize-JunctionPath -Path $targetRelease
         if (Test-Path $currentJunction) {
             cmd /c "rmdir `"$currentJunction`"" | Out-Null
         }
-        New-Item -ItemType Junction -Path $currentJunction -Target $targetRelease | Out-Null
-        Write-Host "Junction 'current' redirected to: $targetRelease" -ForegroundColor Green
+        New-Item -ItemType Junction -Path $currentJunction -Target $normalizedTarget | Out-Null
+        Write-Host "Junction 'current' redirected to: $normalizedTarget" -ForegroundColor Green
+
+        # Verify restored junction resolves to intended target release
+        $restoredJuncTarget = Get-JunctionTarget -Path $currentJunction
+        if (-not (Test-JunctionPathEqual -Path1 $restoredJuncTarget -Path2 $normalizedTarget)) {
+            throw "CRITICAL: Manual rollback failed to redirect 'current' junction! 'current' resolves to '$restoredJuncTarget', expected '$normalizedTarget'."
+        }
+        Write-Host "Junction 'current' verified pointing to: $normalizedTarget" -ForegroundColor Green
 
         # Look for latest task backup XML
         $backupXmls = @(Get-ChildItem -Path $configDir -Filter "task-backup-*.xml" | Sort-Object Name -Descending)
@@ -854,8 +908,8 @@ if (-not $SkipTaskUpdate) {
 
         # 1. current junction resolves exactly to $releaseDir
         $resolvedJunction = Get-JunctionTarget -Path $currentJunction
-        $expectedNorm = [System.IO.Path]::GetFullPath($releaseDir).TrimEnd('\')
-        if (-not $resolvedJunction -or (-not [string]::Equals([System.IO.Path]::GetFullPath($resolvedJunction).TrimEnd('\'), $expectedNorm, [System.StringComparison]::OrdinalIgnoreCase))) {
+        $expectedNorm = Normalize-JunctionPath -Path $releaseDir
+        if (-not $resolvedJunction -or (-not (Test-JunctionPathEqual -Path1 $resolvedJunction -Path2 $expectedNorm))) {
             throw "Junction verification failed: 'current' resolved to '$resolvedJunction', expected '$expectedNorm'."
         }
 
@@ -965,14 +1019,27 @@ if (-not $SkipTaskUpdate) {
         Set-DeploymentManifestStatus -ReleaseDir $releaseDir -Status "failed"
         Write-Host "  Failed release manifest marked as 'failed'." -ForegroundColor Yellow
 
-        # 3. Restore previous junction
-        if ($previousJunctionTarget -and (Test-Path $previousJunctionTarget)) {
-            Write-Host "  Restoring 'current' junction to '$previousJunctionTarget'..."
-            if (Test-Path $currentJunction) {
-                cmd /c "rmdir `"$currentJunction`"" | Out-Null
-            }
-            New-Item -ItemType Junction -Path $currentJunction -Target $previousJunctionTarget | Out-Null
+        # 3. Restore and verify previous junction before any task or service operation
+        $previousJunctionTarget = Normalize-JunctionPath -Path $previousJunctionTarget
+        if ([string]::IsNullOrWhiteSpace($previousJunctionTarget)) {
+            throw "CRITICAL: Cannot roll back junction! Previous junction target is unknown or empty."
         }
+        if (-not (Test-Path -LiteralPath $previousJunctionTarget)) {
+            throw "CRITICAL: Cannot roll back junction! Intended previous release does not exist on disk: '$previousJunctionTarget'."
+        }
+
+        Write-Host "  Restoring 'current' junction to '$previousJunctionTarget'..."
+        if (Test-Path $currentJunction) {
+            cmd /c "rmdir `"$currentJunction`"" | Out-Null
+        }
+        New-Item -ItemType Junction -Path $currentJunction -Target $previousJunctionTarget | Out-Null
+
+        # Invariant: verify restored junction resolves to intended previous release BEFORE restoring or starting task
+        $restoredJuncTarget = Get-JunctionTarget -Path $currentJunction
+        if (-not (Test-JunctionPathEqual -Path1 $restoredJuncTarget -Path2 $previousJunctionTarget)) {
+            throw "CRITICAL: Rollback failed to restore 'current' junction! 'current' resolves to '$restoredJuncTarget', expected '$previousJunctionTarget'."
+        }
+        Write-Host "  Restored junction verified pointing to '$previousJunctionTarget'." -ForegroundColor Green
 
         # 4. Restore previous Task Scheduler XML
         if (Test-Path $taskBackupPath) {

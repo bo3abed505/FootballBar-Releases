@@ -146,7 +146,8 @@ describe('Production Backend Deployment & Packaging Logic', () => {
 
     // 1. Junction target matches releaseDir
     expect(scriptContent).toContain('$resolvedJunction = Get-JunctionTarget -Path $currentJunction');
-    expect(scriptContent).toContain('$expectedNorm = [System.IO.Path]::GetFullPath($releaseDir).TrimEnd');
+    expect(scriptContent).toContain('$expectedNorm = Normalize-JunctionPath -Path $releaseDir');
+    expect(scriptContent).toContain('Test-JunctionPathEqual -Path1 $resolvedJunction -Path2 $expectedNorm');
 
     // 2. Query registered XML
     expect(scriptContent).toContain('Query Registered Task');
@@ -875,5 +876,285 @@ $results | ConvertTo-Json
     // Manual rollback startup and readiness check guarded by -not $NoStart
     const manualBlock = scriptContent.substring(scriptContent.indexOf('[ROLLBACK] Initiating manual rollback'));
     expect(manualBlock).toMatch(/if\s*\(-not\s*\$NoStart\)\s*\{[\s\S]*?Invoke-SchtasksChecked\s+-Arguments\s+@\("\/Run",\s+"\/TN",\s+"FootballTray-Backend"\)\s+-Operation\s+"Start Rolled-Back Service"[\s\S]*?http:\/\/127\.0\.0\.1:4000\/api\/tray/);
+  });
+});
+
+describe('Junction Target Normalization and Rollback Path Safety (Regression Tests 1-10)', () => {
+  const scriptsDir = path.resolve(__dirname, '../../scripts');
+  const deployScriptPath = path.join(scriptsDir, 'deploy-backend-production.ps1');
+  const scriptContent = fs.readFileSync(deployScriptPath, 'utf8');
+
+  // Extract Normalize-JunctionPath, Test-JunctionPathEqual, and Get-JunctionTarget helpers
+  const fnStartIndex = scriptContent.indexOf('function Normalize-JunctionPath');
+  const fnEndIndex = scriptContent.indexOf('function Get-PreviousKnownGoodRelease');
+  const junctionHelpersPs1 = scriptContent.substring(fnStartIndex, fnEndIndex);
+
+  function runPowerShellJson(psScript: string): any {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ft-junc-test-'));
+    const runnerPath = path.join(tempDir, 'runner.ps1');
+    try {
+      const fullScript = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${junctionHelpersPs1}
+${psScript}
+`;
+      fs.writeFileSync(runnerPath, fullScript, 'utf8');
+      const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${runnerPath}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return JSON.parse(stdout.trim());
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  it('Regression 1: Plain expected vs NT-prefixed actual (\\??\\C:\\... vs C:\\...) compares equal', () => {
+    const result = runPowerShellJson(`
+      $nt = '\\??\\C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $plain = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $norm = Normalize-JunctionPath -Path $nt
+      $equal = Test-JunctionPathEqual -Path1 $nt -Path2 $plain
+      @{ Normalized = $norm; Equal = [bool]$equal } | ConvertTo-Json
+    `);
+    expect(result.Normalized).toBe('C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855');
+    expect(result.Equal).toBe(true);
+  });
+
+  it('Regression 2: Win32 extended prefix (\\\\?\\C:\\... vs C:\\...) compares equal', () => {
+    const result = runPowerShellJson(`
+      $extended = '\\\\?\\C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $plain = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $norm = Normalize-JunctionPath -Path $extended
+      $equal = Test-JunctionPathEqual -Path1 $extended -Path2 $plain
+      @{ Normalized = $norm; Equal = [bool]$equal } | ConvertTo-Json
+    `);
+    expect(result.Normalized).toBe('C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855');
+    expect(result.Equal).toBe(true);
+  });
+
+  it('Regression 3: Case differences (c:\\programdata\\... vs C:\\ProgramData\\...) compare equal', () => {
+    const result = runPowerShellJson(`
+      $lower = 'c:\\programdata\\footballtray\\backend\\releases\\v1.0.0-20260920-000855'
+      $canonical = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $equal = Test-JunctionPathEqual -Path1 $lower -Path2 $canonical
+      @{ Equal = [bool]$equal } | ConvertTo-Json
+    `);
+    expect(result.Equal).toBe(true);
+  });
+
+  it('Regression 4: Harmless trailing separator differences compare equal', () => {
+    const result = runPowerShellJson(`
+      $trailingBackslash = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855\\'
+      $trailingSlash = '\\??\\C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855/'
+      $plain = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $eq1 = Test-JunctionPathEqual -Path1 $trailingBackslash -Path2 $plain
+      $eq2 = Test-JunctionPathEqual -Path1 $trailingSlash -Path2 $plain
+      @{ Eq1 = [bool]$eq1; Eq2 = [bool]$eq2 } | ConvertTo-Json
+    `);
+    expect(result.Eq1).toBe(true);
+    expect(result.Eq2).toBe(true);
+  });
+
+  it('Regression 5: Genuinely different release directories compare not equal', () => {
+    const result = runPowerShellJson(`
+      $rel1 = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $rel2 = 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260916-234823'
+      $ntRel1 = '\\??\\C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $ntRel2 = '\\??\\C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260916-234823'
+      $eqPlain = Test-JunctionPathEqual -Path1 $rel1 -Path2 $rel2
+      $eqNt = Test-JunctionPathEqual -Path1 $ntRel1 -Path2 $ntRel2
+      $eqCross = Test-JunctionPathEqual -Path1 $ntRel1 -Path2 $rel2
+      @{ EqPlain = [bool]$eqPlain; EqNt = [bool]$eqNt; EqCross = [bool]$eqCross } | ConvertTo-Json
+    `);
+    expect(result.EqPlain).toBe(false);
+    expect(result.EqNt).toBe(false);
+    expect(result.EqCross).toBe(false);
+  });
+
+  it('Regression 6: Previous target preserved with \\??\\ prefix can be transformed and restored correctly for rollback', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ft-rollback-junc-'));
+    try {
+      const runnerPath = path.join(tempDir, 'test-rollback.ps1');
+      const testScript = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${junctionHelpersPs1}
+
+$isolatedBase = '${tempDir.replace(/'/g, "''")}'
+$oldRelDir = Join-Path $isolatedBase 'releases\\v1.0.0-old'
+$newRelDir = Join-Path $isolatedBase 'releases\\v1.0.0-new'
+$currentJunc = Join-Path $isolatedBase 'current'
+
+New-Item -ItemType Directory -Path $oldRelDir -Force | Out-Null
+New-Item -ItemType Directory -Path $newRelDir -Force | Out-Null
+
+# Simulate previous target captured with NT prefix
+$previousJunctionTarget = "\\??\\" + $oldRelDir
+
+# 1. Demonstrate naive Test-Path fails on NT-prefixed path in PowerShell (root cause of rollback failure)
+$naiveTestPath = Test-Path $previousJunctionTarget
+
+# 2. Normalization allows Test-Path to succeed
+$previousJunctionTarget = Normalize-JunctionPath -Path $previousJunctionTarget
+$normalizedTestPath = Test-Path -LiteralPath $previousJunctionTarget
+
+# 3. Create initial junction to new release
+New-Item -ItemType Junction -Path $currentJunc -Target $newRelDir | Out-Null
+
+# 4. Perform rollback restoration logic as in deploy script:
+if ($previousJunctionTarget -and (Test-Path -LiteralPath $previousJunctionTarget)) {
+    if (Test-Path $currentJunc) {
+        cmd /c "rmdir \`"$currentJunc\`"" | Out-Null
+    }
+    New-Item -ItemType Junction -Path $currentJunc -Target $previousJunctionTarget | Out-Null
+}
+
+# 5. Verify restored junction resolves to old release
+$resolved = Get-JunctionTarget -Path $currentJunc
+$isRestored = Test-JunctionPathEqual -Path1 $resolved -Path2 $oldRelDir
+
+# Cleanup junction
+if (Test-Path $currentJunc) {
+    cmd /c "rmdir \`"$currentJunc\`"" | Out-Null
+}
+
+@{
+    NaiveTestPath = [bool]$naiveTestPath
+    NormalizedTestPath = [bool]$normalizedTestPath
+    IsRestored = [bool]$isRestored
+    ResolvedTarget = $resolved
+} | ConvertTo-Json
+`;
+      fs.writeFileSync(runnerPath, testScript, 'utf8');
+      const stdout = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File "${runnerPath}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const res = JSON.parse(stdout.trim());
+      expect(res.NaiveTestPath).toBe(false); // Proves the bug! Naive Test-Path fails on \\??\\
+      expect(res.NormalizedTestPath).toBe(true); // Proves normalization fixes Test-Path
+      expect(res.IsRestored).toBe(true); // Proves junction successfully restores to old release
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+
+  it('Regression 7: Normal activation still fails when current actually points to a different release', () => {
+    // Statically verify the deploy script has the invariant verification throw
+    expect(scriptContent).toContain('$resolvedJunction = Get-JunctionTarget -Path $currentJunction');
+    expect(scriptContent).toContain('$expectedNorm = Normalize-JunctionPath -Path $releaseDir');
+    expect(scriptContent).toContain('if (-not $resolvedJunction -or (-not (Test-JunctionPathEqual -Path1 $resolvedJunction -Path2 $expectedNorm))) {');
+    expect(scriptContent).toContain('throw "Junction verification failed: \'current\' resolved to \'$resolvedJunction\', expected \'$expectedNorm\'."');
+
+    // Dynamically execute the verification expression when paths differ
+    const result = runPowerShellJson(`
+      $resolvedJunction = '\\??\\C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-DIFFERENT'
+      $expectedNorm = Normalize-JunctionPath -Path 'C:\\ProgramData\\FootballTray\\backend\\releases\\v1.0.0-20260920-000855'
+      $wouldFail = (-not $resolvedJunction -or (-not (Test-JunctionPathEqual -Path1 $resolvedJunction -Path2 $expectedNorm)))
+      @{ WouldFail = [bool]$wouldFail } | ConvertTo-Json
+    `);
+    expect(result.WouldFail).toBe(true);
+  });
+
+  it('Regression 8: Automatic rollback fail-closed sequencing verifies junction before task restore and service start', () => {
+    const catchIndex = scriptContent.indexOf('Write-Host "CRITICAL: Deployment verification failed');
+    expect(catchIndex).toBeGreaterThan(0);
+    const catchBlock = scriptContent.substring(catchIndex);
+
+    // Fail-closed checks: missing or nonexistent previous target throws immediately (never merely warns or continues)
+    expect(catchBlock).toMatch(/if\s*\(\[string\]::IsNullOrWhiteSpace\(\$previousJunctionTarget\)\)\s*\{\s*throw/);
+    expect(catchBlock).toMatch(/if\s*\(-not\s*\(Test-Path\s+-LiteralPath\s+\$previousJunctionTarget\)\)\s*\{\s*throw/);
+    expect(catchBlock).not.toContain('Write-Warning "CRITICAL: Previous junction target');
+
+    // Strict required ordering:
+    // 1. stop failed task
+    const stepStop = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/End", "/TN", "FootballTray-Backend")');
+    // 2. mark failed manifest
+    const stepMarkFailed = catchBlock.indexOf('Set-DeploymentManifestStatus -ReleaseDir $releaseDir -Status "failed"');
+    // 3. normalize previous target
+    const stepNorm = catchBlock.indexOf('Normalize-JunctionPath -Path $previousJunctionTarget');
+    // 4. restore current junction
+    const stepRestoreJunc = catchBlock.indexOf('New-Item -ItemType Junction -Path $currentJunction -Target $previousJunctionTarget');
+    // 5. verify restored junction target (pre-start invariant)
+    const stepVerifyJunc = catchBlock.indexOf('Test-JunctionPathEqual -Path1 $restoredJuncTarget -Path2 $previousJunctionTarget');
+    // 6. restore previous task XML
+    const stepRestoreTask = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Create", "/TN", "FootballTray-Backend", "/XML", $taskBackupPath, "/F")');
+    // 7. start restored backend
+    const stepStart = catchBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend")');
+    // 8. verify task
+    const stepVerifyTask = catchBlock.indexOf('Verify Restored Task XML');
+    // 9. /api/tray readiness
+    const stepTray = catchBlock.indexOf('http://127.0.0.1:4000/api/tray');
+    // 10. [ROLLBACK SUCCESS]
+    const stepSuccess = catchBlock.indexOf('[ROLLBACK SUCCESS]');
+    // Final throw
+    const stepFinal = catchBlock.indexOf('throw "Deployment aborted due to verification failure');
+
+    expect(stepStop).toBeGreaterThan(0);
+    expect(stepMarkFailed).toBeGreaterThan(stepStop);
+    expect(stepNorm).toBeGreaterThan(stepMarkFailed);
+    expect(stepRestoreJunc).toBeGreaterThan(stepNorm);
+    expect(stepVerifyJunc).toBeGreaterThan(stepRestoreJunc);
+    expect(stepRestoreTask).toBeGreaterThan(stepVerifyJunc);
+    expect(stepStart).toBeGreaterThan(stepRestoreTask);
+    expect(stepVerifyTask).toBeGreaterThan(stepStart);
+    expect(stepTray).toBeGreaterThan(stepVerifyTask);
+    expect(stepSuccess).toBeGreaterThan(stepTray);
+    expect(stepFinal).toBeGreaterThan(stepSuccess);
+  });
+
+  it('Regression 9: Existing explicit rollback sequencing remains intact with junction invariant', () => {
+    const manualIndex = scriptContent.indexOf('[ROLLBACK] Initiating manual rollback');
+    expect(manualIndex).toBeGreaterThan(0);
+    const manualBlock = scriptContent.substring(manualIndex);
+
+    // 1. Select rollback release
+    const step1 = manualBlock.indexOf('Get-PreviousKnownGoodRelease');
+    // 2. Stop service
+    const step2 = manualBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/End", "/TN", "FootballTray-Backend")');
+    // 3. Normalize and restore junction
+    const step3 = manualBlock.indexOf('Normalize-JunctionPath -Path $targetRelease');
+    const step3b = manualBlock.indexOf('New-Item -ItemType Junction -Path $currentJunction -Target $normalizedTarget');
+    // 4. Verify restored junction
+    const step4 = manualBlock.indexOf('Test-JunctionPathEqual -Path1 $restoredJuncTarget -Path2 $normalizedTarget');
+    // 5. Restore task XML
+    const step5 = manualBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Create", "/TN", "FootballTray-Backend", "/XML", $restoreXmlPath, "/F")');
+    // 6. Start service
+    const step6 = manualBlock.indexOf('Invoke-SchtasksChecked -Arguments @("/Run", "/TN", "FootballTray-Backend")');
+    // 7. Verify /api/tray
+    const step7 = manualBlock.indexOf('http://127.0.0.1:4000/api/tray');
+    // 8. Report success
+    const step8 = manualBlock.indexOf('[ROLLBACK SUCCESS]');
+
+    expect(step1).toBeGreaterThan(0);
+    expect(step2).toBeGreaterThan(step1);
+    expect(step3).toBeGreaterThan(step2);
+    expect(step3b).toBeGreaterThan(step3);
+    expect(step4).toBeGreaterThan(step3b);
+    expect(step5).toBeGreaterThan(step4);
+    expect(step6).toBeGreaterThan(step5);
+    expect(step7).toBeGreaterThan(step6);
+    expect(step8).toBeGreaterThan(step7);
+  });
+
+  it('Regression 10: /api/tray readiness fix remains intact; do not regress back to /health', () => {
+    expect(scriptContent).not.toContain('/health');
+    expect(scriptContent).not.toContain('/api/diagnostics');
+
+    // Confirm that /api/tray is present in all 3 verification points
+    const matches = scriptContent.match(/http:\/\/127\.0\.0\.1:4000\/api\/tray/g);
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBe(3); // Deploy verification, manual rollback, automatic rollback
+
+    // Confirm envelope validation logic is preserved in all 3 probe loops
+    const schemaMatches = scriptContent.match(/\$null\s*-ne\s*\$[a-zA-Z_]+\.PSObject\.Properties\["schemaVersion"\]/g);
+    expect(schemaMatches).not.toBeNull();
+    expect(schemaMatches!.length).toBe(3);
   });
 });
