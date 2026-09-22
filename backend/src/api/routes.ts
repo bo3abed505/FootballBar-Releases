@@ -4,6 +4,7 @@ import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import { checkDatabaseConnection } from '../db/index.js';
 import { createResponseEnvelope, createErrorEnvelope } from './envelope.js';
 import { RequestGateway } from '../gateway/request-gateway.js';
+import { formatV2TrayMatch, formatV2MatchDetail } from './v2-dto.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const fixturesRepo = new FixturesRepository();
@@ -208,6 +209,71 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     } catch (err: any) {
       request.log.error(err, `Failed to fetch match '${id}'`);
       return reply.status(500).send(createErrorEnvelope('INTERNAL_ERROR', 'Failed to retrieve match details', { details: err?.message }));
+    }
+  });
+
+  // ----------------------------------------------------
+  // Delivery API v2: Tray Matches (Canonical & Per-Fixture Freshness)
+  // ----------------------------------------------------
+  fastify.get('/api/v2/tray', async (request, reply) => {
+    try {
+      const matches = await fixturesRepo.getTrayMatches(10);
+      const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
+
+      // Compute deterministic ETag based on v2 match data
+      const dataHash = createHash('md5').update(JSON.stringify(formattedMatches)).digest('hex');
+      const etag = `"${dataHash}"`;
+
+      const ifNoneMatch = request.headers['if-none-match'];
+      if (ifNoneMatch && (ifNoneMatch === etag || ifNoneMatch === dataHash || ifNoneMatch === `W/${etag}`)) {
+        reply.header('ETag', etag);
+        return reply.status(304).send();
+      }
+
+      const envelope = createResponseEnvelope(
+        { matches: formattedMatches },
+        { schemaVersion: '2.0', version: 2 }
+      );
+
+      reply.header('ETag', etag);
+      return reply.send(envelope);
+    } catch (err: any) {
+      request.log.error(err, 'Failed to fetch v2 tray matches');
+      return reply.status(500).send(
+        createErrorEnvelope('INTERNAL_ERROR', 'Failed to retrieve tray matches', { details: err?.message }, { schemaVersion: '2.0' })
+      );
+    }
+  });
+
+  // ----------------------------------------------------
+  // Delivery API v2: Match Details (Canonical & Alias Resolution)
+  // ----------------------------------------------------
+  fastify.get<{ Params: { id: string } }>('/api/v2/match/:id', async (request, reply) => {
+    const { id } = request.params;
+
+    if (!id || typeof id !== 'string' || id.trim().length === 0) {
+      return reply.status(400).send(
+        createErrorEnvelope('INVALID_REQUEST', 'Match ID is required and must not be empty.', undefined, { schemaVersion: '2.0' })
+      );
+    }
+
+    try {
+      const fixture = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
+
+      if (!fixture) {
+        return reply.status(404).send(
+          createErrorEnvelope('MATCH_NOT_FOUND', `No match found with ID '${id}'.`, undefined, { schemaVersion: '2.0' })
+        );
+      }
+
+      const formatted = formatV2MatchDetail(fixture);
+      const envelope = createResponseEnvelope(formatted, { schemaVersion: '2.0', version: 2 });
+      return reply.send(envelope);
+    } catch (err: any) {
+      request.log.error(err, `Failed to fetch v2 match '${id}'`);
+      return reply.status(500).send(
+        createErrorEnvelope('INTERNAL_ERROR', 'Failed to retrieve match details', { details: err?.message }, { schemaVersion: '2.0' })
+      );
     }
   });
 };

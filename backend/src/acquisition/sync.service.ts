@@ -221,12 +221,17 @@ export class SyncService {
         });
 
         let canonicalId: string;
+        const now = new Date();
+        const provenanceFields = liveOnly
+          ? { liveSourceProvider: this.provider.providerName, liveObservedAt: now }
+          : { scheduleSourceProvider: this.provider.providerName, scheduleObservedAt: now };
 
         if (!existing) {
           // New fixture insertion
           canonicalId = incoming.canonicalId || generateCanonicalId('fix');
           await tx.insert(schema.fixtures).values({
             ...incomingValues,
+            ...provenanceFields,
             canonicalId,
           });
           summary.fixturesInserted++;
@@ -239,7 +244,7 @@ export class SyncService {
               .update(schema.fixtures)
               .set({
                 canonicalId: sql`COALESCE(${schema.fixtures.canonicalId}, ${candidateId})`,
-                updatedAt: new Date(),
+                updatedAt: now,
               })
               .where(eq(schema.fixtures.id, incoming.id))
               .returning({ canonicalId: schema.fixtures.canonicalId });
@@ -314,18 +319,22 @@ export class SyncService {
                 round: mergedRound,
                 venue: mergedVenue,
                 referee: mergedReferee,
-                lastPolledAt: new Date(),
-                updatedAt: new Date(),
+                ...provenanceFields,
+                lastPolledAt: now,
+                updatedAt: now,
               })
               .where(eq(schema.fixtures.id, incoming.id));
 
             summary.fixturesUpdated++;
             summary.hasChanges = true;
           } else {
-            // Update lastPolledAt only without changing updatedAt version timestamp
+            // Update lastPolledAt and provenance without changing updatedAt version timestamp
             await tx
               .update(schema.fixtures)
-              .set({ lastPolledAt: new Date() })
+              .set({
+                ...provenanceFields,
+                lastPolledAt: now,
+              })
               .where(eq(schema.fixtures.id, incoming.id));
           }
         }
@@ -657,6 +666,8 @@ export class SyncService {
                 awayScore: details.score.away,
                 homeScoreHt: details.score.homeHt ?? fix.homeScoreHt,
                 awayScoreHt: details.score.awayHt ?? fix.awayScoreHt,
+                liveSourceProvider: this.provider.providerName,
+                liveObservedAt: now,
                 lastPolledAt: now,
                 updatedAt: now,
               })

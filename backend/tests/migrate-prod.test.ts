@@ -34,9 +34,14 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
     await pool.query('ALTER TABLE "competitions" DROP COLUMN IF EXISTS "canonical_id";');
     await pool.query('ALTER TABLE "teams" DROP COLUMN IF EXISTS "canonical_id";');
     await pool.query('ALTER TABLE "fixtures" DROP COLUMN IF EXISTS "canonical_id";');
+    await pool.query('ALTER TABLE "fixtures" DROP COLUMN IF EXISTS "live_source_provider";');
+    await pool.query('ALTER TABLE "fixtures" DROP COLUMN IF EXISTS "live_observed_at";');
+    await pool.query('ALTER TABLE "fixtures" DROP COLUMN IF EXISTS "schedule_source_provider";');
+    await pool.query('ALTER TABLE "fixtures" DROP COLUMN IF EXISTS "schedule_observed_at";');
     await pool.query('DROP TABLE IF EXISTS "scheduler_cycles" CASCADE;');
     await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "cycle_id";');
     await pool.query('ALTER TABLE "api_request_ledger" DROP COLUMN IF EXISTS "competition_id";');
+    await pool.query('TRUNCATE TABLE "fixtures", "events", "fixture_statistics", "competition_seasons", "teams", "competitions" CASCADE;');
     await pool.query('DELETE FROM "drizzle"."__drizzle_migrations";');
   };
 

@@ -66,6 +66,54 @@ export class FixturesRepository {
     });
   }
 
+  async getByCanonicalOrLegacyId(identifier: string) {
+    const trimmed = identifier.trim();
+    if (!trimmed) return null;
+
+    const findFixture = (whereClause: any) =>
+      db.query.fixtures.findFirst({
+        where: whereClause,
+        with: {
+          competition: true,
+          season: true,
+          homeTeam: true,
+          awayTeam: true,
+          events: {
+            orderBy: [asc(schema.events.minute), asc(schema.events.extraMinute)],
+          },
+          lineups: {
+            with: {
+              players: true,
+            },
+          },
+          statistics: true,
+        },
+      });
+
+    // 1. Check directly by canonicalId
+    let fixture = await findFixture(eq(schema.fixtures.canonicalId, trimmed));
+    if (fixture) return fixture;
+
+    // 2. Check directly by primary ID
+    fixture = await findFixture(eq(schema.fixtures.id, trimmed));
+    if (fixture) return fixture;
+
+    // 3. Resolve via fixture_provider_aliases (e.g. provider_id = '123' or 'fix_123')
+    const strippedId = trimmed.replace(/^fix_/, '');
+    const alias = await db.query.fixtureProviderAliases.findFirst({
+      where: or(
+        eq(schema.fixtureProviderAliases.providerId, trimmed),
+        eq(schema.fixtureProviderAliases.providerId, strippedId)
+      ),
+    });
+
+    if (alias) {
+      return await findFixture(eq(schema.fixtures.canonicalId, alias.canonicalFixtureId));
+    }
+
+    return null;
+  }
+
   async getTrayMatches(limit = 10, now: Date = new Date()) {
     const nowMs = now.getTime();
 

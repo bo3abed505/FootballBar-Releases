@@ -75,6 +75,10 @@ export const fixtures = pgTable('fixtures', {
   venue: text('venue'),
   referee: text('referee'),
   lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+  liveSourceProvider: text('live_source_provider'),
+  liveObservedAt: timestamp('live_observed_at', { withTimezone: true }),
+  scheduleSourceProvider: text('schedule_source_provider'),
+  scheduleObservedAt: timestamp('schedule_observed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
