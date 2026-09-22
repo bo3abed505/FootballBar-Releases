@@ -17,7 +17,7 @@ export class TeamsRepository {
     return await db.select().from(schema.teams).where(inArray(schema.teams.id, ids));
   }
 
-  async insert(team: typeof schema.teams.$inferInsert) {
+  async insert(team: Omit<typeof schema.teams.$inferInsert, 'canonicalId'> & { canonicalId?: string }) {
     const canonicalId = team.canonicalId || generateCanonicalId('team');
     const results = await db.insert(schema.teams).values({ ...team, canonicalId }).onConflictDoNothing().returning();
     return results[0] ?? null;

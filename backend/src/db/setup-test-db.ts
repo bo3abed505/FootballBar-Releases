@@ -4,6 +4,7 @@ import * as path from 'path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import * as schema from './schema.js';
+import { generateCanonicalId } from './canonical-id.js';
 
 dotenv.config();
 
@@ -84,9 +85,9 @@ async function setupTestDatabase() {
     console.log('[TEST_DB_SETUP] Seeding baseline test data into test database...');
     // Competitions
     await testDb.insert(schema.competitions).values([
-      { id: 'comp_laliga', name: 'La Liga (Dev Mock)', code: 'ESP_L1', type: 'league', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/leagues/140.png' },
-      { id: 'comp_egypt_pl', name: 'Egyptian Premier League (Dev Mock)', code: 'EGY_PL', type: 'league', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/leagues/233.png' },
-      { id: 'comp_international', name: 'International Friendly (Dev Mock)', code: 'INT_FRN', type: 'cup', country: 'World', logoUrl: 'https://media.api-sports.io/football/leagues/10.png' },
+      { id: 'comp_laliga', canonicalId: generateCanonicalId('comp'), name: 'La Liga (Dev Mock)', code: 'ESP_L1', type: 'league', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/leagues/140.png' },
+      { id: 'comp_egypt_pl', canonicalId: generateCanonicalId('comp'), name: 'Egyptian Premier League (Dev Mock)', code: 'EGY_PL', type: 'league', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/leagues/233.png' },
+      { id: 'comp_international', canonicalId: generateCanonicalId('comp'), name: 'International Friendly (Dev Mock)', code: 'INT_FRN', type: 'cup', country: 'World', logoUrl: 'https://media.api-sports.io/football/leagues/10.png' },
     ]).onConflictDoNothing();
 
     // Seasons
@@ -98,17 +99,18 @@ async function setupTestDatabase() {
 
     // Teams
     await testDb.insert(schema.teams).values([
-      { id: 'team_barcelona', name: 'FC Barcelona', shortName: 'BAR', code: 'FCB', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/teams/529.png' },
-      { id: 'team_realmadrid', name: 'Real Madrid', shortName: 'RMA', code: 'RMA', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/teams/541.png' },
-      { id: 'team_alahly', name: 'Al Ahly SC', shortName: 'AHL', code: 'AHL', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/teams/1029.png' },
-      { id: 'team_egypt', name: 'Egypt', shortName: 'EGY', code: 'EGY', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/teams/32.png' },
-      { id: 'team_spain', name: 'Spain', shortName: 'ESP', code: 'ESP', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/teams/9.png' },
+      { id: 'team_barcelona', canonicalId: generateCanonicalId('team'), name: 'FC Barcelona', shortName: 'BAR', code: 'FCB', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/teams/529.png' },
+      { id: 'team_realmadrid', canonicalId: generateCanonicalId('team'), name: 'Real Madrid', shortName: 'RMA', code: 'RMA', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/teams/541.png' },
+      { id: 'team_alahly', canonicalId: generateCanonicalId('team'), name: 'Al Ahly SC', shortName: 'AHL', code: 'AHL', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/teams/1029.png' },
+      { id: 'team_egypt', canonicalId: generateCanonicalId('team'), name: 'Egypt', shortName: 'EGY', code: 'EGY', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/teams/32.png' },
+      { id: 'team_spain', canonicalId: generateCanonicalId('team'), name: 'Spain', shortName: 'ESP', code: 'ESP', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/teams/9.png' },
     ]).onConflictDoNothing();
 
     // Fixtures
     await testDb.insert(schema.fixtures).values([
       {
         id: 'fix_elclasico_2026',
+        canonicalId: generateCanonicalId('fix'),
         competitionId: 'comp_laliga',
         seasonId: 'season_laliga_2025',
         homeTeamId: 'team_barcelona',
@@ -128,6 +130,7 @@ async function setupTestDatabase() {
       },
       {
         id: 'fix_spain_egypt_2026',
+        canonicalId: generateCanonicalId('fix'),
         competitionId: 'comp_international',
         seasonId: 'season_international_2025',
         homeTeamId: 'team_spain',

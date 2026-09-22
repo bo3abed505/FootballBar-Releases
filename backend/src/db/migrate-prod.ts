@@ -788,7 +788,12 @@ export async function runProductionMigration(
         }
       }
 
-      // 6f. Verify canonical_id column on competitions, teams, fixtures exists and is nullable
+      // 6f. Verify canonical_id column on competitions, teams, fixtures exists and has expected nullability
+      const hasMigration0004 =
+        packagedMigrations.length >= 5 ||
+        packagedMigrations.some((m) => m.sql && m.sql.some((s: string) => s.includes('SET NOT NULL')));
+      const expectedCanonicalNullable = hasMigration0004 ? 'NO' : 'YES';
+
       for (const domainTable of ['competitions', 'teams', 'fixtures'] as const) {
         const canColRes = await verifyClient.query(
           `SELECT column_name, is_nullable
@@ -803,9 +808,9 @@ export async function runProductionMigration(
             currentState
           );
         }
-        if (canColRes.rows[0].is_nullable !== 'YES') {
+        if (canColRes.rows[0].is_nullable !== expectedCanonicalNullable) {
           throw new PostMigrationVerificationError(
-            `[MIGRATE_PROD] Post-migration verification failed: Column 'canonical_id' on table '${domainTable}' must be nullable, found '${canColRes.rows[0].is_nullable}'.`,
+            `[MIGRATE_PROD] Post-migration verification failed: Column 'canonical_id' on table '${domainTable}' must have is_nullable='${expectedCanonicalNullable}', found '${canColRes.rows[0].is_nullable}'.`,
             undefined,
             currentState
           );

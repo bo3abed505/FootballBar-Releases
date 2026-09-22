@@ -197,67 +197,79 @@ describe('Checkpoint 1B: Canonical Identity Maintenance During Ingestion', () =>
   });
 
   it('2. Existing NULL canonical_id is self-healed when touched by normal ingestion', async () => {
-    // Seed existing legacy records with canonical_id = NULL
-    await pool.query(
-      `INSERT INTO competitions (id, canonical_id, name, created_at, updated_at)
-       VALUES ($1, NULL, 'Legacy Null Comp', NOW(), NOW());`,
-      [TEST_COMP_ID]
-    );
+    // Under Migration 0004+, canonical_id is NOT NULL. Temporarily drop NOT NULL to test legacy self-healing
+    await pool.query('ALTER TABLE competitions ALTER COLUMN canonical_id DROP NOT NULL;');
+    await pool.query('ALTER TABLE teams ALTER COLUMN canonical_id DROP NOT NULL;');
+    await pool.query('ALTER TABLE fixtures ALTER COLUMN canonical_id DROP NOT NULL;');
 
-    await pool.query(
-      `INSERT INTO competition_seasons (id, competition_id, year, display_year, start_date, end_date, is_current, created_at)
-       VALUES ($1, $2, 2025, '2025/2026', NOW(), NOW(), true, NOW());`,
-      [TEST_SEASON_ID, TEST_COMP_ID]
-    );
+    try {
+      // Seed existing legacy records with canonical_id = NULL
+      await pool.query(
+        `INSERT INTO competitions (id, canonical_id, name, created_at, updated_at)
+         VALUES ($1, NULL, 'Legacy Null Comp', NOW(), NOW());`,
+        [TEST_COMP_ID]
+      );
 
-    await pool.query(
-      `INSERT INTO teams (id, canonical_id, name, short_name, created_at, updated_at)
-       VALUES ($1, NULL, 'Legacy Null Home', 'HOM', NOW(), NOW()),
-              ($2, NULL, 'Legacy Null Away', 'AWY', NOW(), NOW());`,
-      [TEST_HOME_TEAM_ID_STR, TEST_AWAY_TEAM_ID_STR]
-    );
+      await pool.query(
+        `INSERT INTO competition_seasons (id, competition_id, year, display_year, start_date, end_date, is_current, created_at)
+         VALUES ($1, $2, 2025, '2025/2026', NOW(), NOW(), true, NOW());`,
+        [TEST_SEASON_ID, TEST_COMP_ID]
+      );
 
-    await pool.query(
-      `INSERT INTO fixtures (id, canonical_id, competition_id, season_id, home_team_id, away_team_id, kickoff_time, state, elapsed_minute, extra_minute, home_score, away_score, created_at, updated_at)
-       VALUES ($1, NULL, $2, $3, $4, $5, NOW(), 'PREMATCH', 0, 0, 0, 0, NOW(), NOW());`,
-      [TEST_FIXTURE_ID_STR, TEST_COMP_ID, TEST_SEASON_ID, TEST_HOME_TEAM_ID_STR, TEST_AWAY_TEAM_ID_STR]
-    );
+      await pool.query(
+        `INSERT INTO teams (id, canonical_id, name, short_name, created_at, updated_at)
+         VALUES ($1, NULL, 'Legacy Null Home', 'HOM', NOW(), NOW()),
+                ($2, NULL, 'Legacy Null Away', 'AWY', NOW(), NOW());`,
+        [TEST_HOME_TEAM_ID_STR, TEST_AWAY_TEAM_ID_STR]
+      );
 
-    // Verify initial NULL state
-    const preComp = await db.query.competitions.findFirst({ where: eq(schema.competitions.id, TEST_COMP_ID) });
-    const preFix = await db.query.fixtures.findFirst({ where: eq(schema.fixtures.id, TEST_FIXTURE_ID_STR) });
-    expect(preComp!.canonicalId).toBeNull();
-    expect(preFix!.canonicalId).toBeNull();
+      await pool.query(
+        `INSERT INTO fixtures (id, canonical_id, competition_id, season_id, home_team_id, away_team_id, kickoff_time, state, elapsed_minute, extra_minute, home_score, away_score, created_at, updated_at)
+         VALUES ($1, NULL, $2, $3, $4, $5, NOW(), 'PREMATCH', 0, 0, 0, 0, NOW(), NOW());`,
+        [TEST_FIXTURE_ID_STR, TEST_COMP_ID, TEST_SEASON_ID, TEST_HOME_TEAM_ID_STR, TEST_AWAY_TEAM_ID_STR]
+      );
 
-    // Ingest via normal API-Football sync
-    const rawItem = createMockApiFootballFixtureItem();
-    const mappedFixture = ApiFootballMapper.mapFixture(rawItem);
-    const provider = createProviderWithFixtures('api_football', [mappedFixture]);
-    const syncService = new SyncService(provider);
+      // Verify initial NULL state
+      const preComp = await db.query.competitions.findFirst({ where: eq(schema.competitions.id, TEST_COMP_ID) });
+      const preFix = await db.query.fixtures.findFirst({ where: eq(schema.fixtures.id, TEST_FIXTURE_ID_STR) });
+      expect(preComp!.canonicalId).toBeNull();
+      expect(preFix!.canonicalId).toBeNull();
 
-    await syncService.sync();
+      // Ingest via normal API-Football sync
+      const rawItem = createMockApiFootballFixtureItem();
+      const mappedFixture = ApiFootballMapper.mapFixture(rawItem);
+      const provider = createProviderWithFixtures('api_football', [mappedFixture]);
+      const syncService = new SyncService(provider);
 
-    // Verify self-healed canonical IDs
-    const postComp = await db.query.competitions.findFirst({ where: eq(schema.competitions.id, TEST_COMP_ID) });
-    expect(postComp!.canonicalId).not.toBeNull();
-    expect(CANONICAL_COMP_REGEX.test(postComp!.canonicalId!)).toBe(true);
+      await syncService.sync();
 
-    const postFix = await db.query.fixtures.findFirst({ where: eq(schema.fixtures.id, TEST_FIXTURE_ID_STR) });
-    expect(postFix!.canonicalId).not.toBeNull();
-    expect(CANONICAL_FIX_REGEX.test(postFix!.canonicalId!)).toBe(true);
+      // Verify self-healed canonical IDs
+      const postComp = await db.query.competitions.findFirst({ where: eq(schema.competitions.id, TEST_COMP_ID) });
+      expect(postComp!.canonicalId).not.toBeNull();
+      expect(CANONICAL_COMP_REGEX.test(postComp!.canonicalId!)).toBe(true);
 
-    // Verify aliases were established
-    const compAlias = await db.query.competitionProviderAliases.findFirst({
-      where: eq(schema.competitionProviderAliases.providerId, String(TEST_LEAGUE_ID)),
-    });
-    expect(compAlias).toBeDefined();
-    expect(compAlias!.canonicalCompetitionId).toBe(postComp!.canonicalId);
+      const postFix = await db.query.fixtures.findFirst({ where: eq(schema.fixtures.id, TEST_FIXTURE_ID_STR) });
+      expect(postFix!.canonicalId).not.toBeNull();
+      expect(CANONICAL_FIX_REGEX.test(postFix!.canonicalId!)).toBe(true);
 
-    const fixAlias = await db.query.fixtureProviderAliases.findFirst({
-      where: eq(schema.fixtureProviderAliases.providerId, String(TEST_FIXTURE_ID)),
-    });
-    expect(fixAlias).toBeDefined();
-    expect(fixAlias!.canonicalFixtureId).toBe(postFix!.canonicalId);
+      // Verify aliases were established
+      const compAlias = await db.query.competitionProviderAliases.findFirst({
+        where: eq(schema.competitionProviderAliases.providerId, String(TEST_LEAGUE_ID)),
+      });
+      expect(compAlias).toBeDefined();
+      expect(compAlias!.canonicalCompetitionId).toBe(postComp!.canonicalId);
+
+      const fixAlias = await db.query.fixtureProviderAliases.findFirst({
+        where: eq(schema.fixtureProviderAliases.providerId, String(TEST_FIXTURE_ID)),
+      });
+      expect(fixAlias).toBeDefined();
+      expect(fixAlias!.canonicalFixtureId).toBe(postFix!.canonicalId);
+    } finally {
+      await cleanupTestRecords();
+      await pool.query('ALTER TABLE competitions ALTER COLUMN canonical_id SET NOT NULL;');
+      await pool.query('ALTER TABLE teams ALTER COLUMN canonical_id SET NOT NULL;');
+      await pool.query('ALTER TABLE fixtures ALTER COLUMN canonical_id SET NOT NULL;');
+    }
   });
 
   it('3. Existing non-null canonical_id is preserved and NEVER replaced on update or repeat ingestion', async () => {

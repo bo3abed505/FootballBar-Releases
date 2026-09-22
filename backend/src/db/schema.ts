@@ -6,7 +6,7 @@ import { relations } from 'drizzle-orm';
 // ----------------------------------------------------
 export const competitions = pgTable('competitions', {
   id: text('id').primaryKey(),
-  canonicalId: text('canonical_id').unique(),
+  canonicalId: text('canonical_id').notNull().unique(),
   name: text('name').notNull(),
   code: text('code'),
   type: text('type').default('league'),
@@ -37,7 +37,7 @@ export const competitionSeasons = pgTable('competition_seasons', {
 // ----------------------------------------------------
 export const teams = pgTable('teams', {
   id: text('id').primaryKey(),
-  canonicalId: text('canonical_id').unique(),
+  canonicalId: text('canonical_id').notNull().unique(),
   name: text('name').notNull(),
   shortName: text('short_name').notNull(),
   code: text('code'),
@@ -54,7 +54,7 @@ export const teams = pgTable('teams', {
 // ----------------------------------------------------
 export const fixtures = pgTable('fixtures', {
   id: text('id').primaryKey(),
-  canonicalId: text('canonical_id').unique(),
+  canonicalId: text('canonical_id').notNull().unique(),
   competitionId: text('competition_id').notNull().references(() => competitions.id),
   seasonId: text('season_id').notNull().references(() => competitionSeasons.id),
   homeTeamId: text('home_team_id').notNull().references(() => teams.id),

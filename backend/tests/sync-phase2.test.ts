@@ -51,6 +51,7 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
       // Seed isolated reference data
       await db.insert(schema.competitions).values({
         id: 'comp_phase2_39',
+        canonicalId: 'ft_comp_phase2_39',
         name: 'Premier League Phase 2 Test',
         code: 'PLP2',
         country: 'England',
@@ -66,13 +67,14 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
       }).onConflictDoNothing();
 
       await db.insert(schema.teams).values([
-        { id: 'team_phase2_1', name: 'Team A Test', shortName: 'TMA' },
-        { id: 'team_phase2_2', name: 'Team B Test', shortName: 'TMB' },
+        { id: 'team_phase2_1', canonicalId: 'ft_team_phase2_1', name: 'Team A Test', shortName: 'TMA' },
+        { id: 'team_phase2_2', canonicalId: 'ft_team_phase2_2', name: 'Team B Test', shortName: 'TMB' },
       ]).onConflictDoNothing();
 
       // 1. Live fixture
       await db.insert(schema.fixtures).values({
         id: 'fix_phase2_live_1',
+        canonicalId: 'ft_fix_phase2_live_1',
         competitionId: 'comp_phase2_39',
         seasonId: 'season_phase2_39_2025',
         homeTeamId: 'team_phase2_1',
@@ -87,6 +89,7 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
       // 2. Approaching fixture (10m away)
       await db.insert(schema.fixtures).values({
         id: 'fix_phase2_appr_1',
+        canonicalId: 'ft_fix_phase2_appr_1',
         competitionId: 'comp_phase2_39',
         seasonId: 'season_phase2_39_2025',
         homeTeamId: 'team_phase2_1',
@@ -98,6 +101,7 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
       // 3. Recently finished fixture (polled 5m ago)
       await db.insert(schema.fixtures).values({
         id: 'fix_phase2_fin_rec_1',
+        canonicalId: 'ft_fix_phase2_fin_rec_1',
         competitionId: 'comp_phase2_39',
         seasonId: 'season_phase2_39_2025',
         homeTeamId: 'team_phase2_1',
@@ -110,6 +114,7 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
       // 4. Old finished fixture (polled 1h ago) -> FINAL
       await db.insert(schema.fixtures).values({
         id: 'fix_phase2_fin_old_1',
+        canonicalId: 'ft_fix_phase2_fin_old_1',
         competitionId: 'comp_phase2_39',
         seasonId: 'season_phase2_39_2025',
         homeTeamId: 'team_phase2_1',
@@ -122,6 +127,7 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
       // 5. Stale prematch fixture (4h past kickoff)
       await db.insert(schema.fixtures).values({
         id: 'fix_phase2_stale_1',
+        canonicalId: 'ft_fix_phase2_stale_1',
         competitionId: 'comp_phase2_39',
         seasonId: 'season_phase2_39_2025',
         homeTeamId: 'team_phase2_1',

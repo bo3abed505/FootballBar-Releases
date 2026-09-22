@@ -1,16 +1,19 @@
 import { ProviderCompetition, ProviderSeason, ProviderTeam, ProviderFixture } from '../providers/football-provider.js';
 import type { schema } from '../db/index.js';
 
-export type CanonicalCompetition = typeof schema.competitions.$inferInsert & {
+export type CanonicalCompetition = Omit<typeof schema.competitions.$inferInsert, 'canonicalId'> & {
+  canonicalId?: string;
   provider?: string;
   providerId?: string;
 };
 export type CanonicalSeason = typeof schema.competitionSeasons.$inferInsert;
-export type CanonicalTeam = typeof schema.teams.$inferInsert & {
+export type CanonicalTeam = Omit<typeof schema.teams.$inferInsert, 'canonicalId'> & {
+  canonicalId?: string;
   provider?: string;
   providerId?: string;
 };
-export type CanonicalFixture = typeof schema.fixtures.$inferInsert & {
+export type CanonicalFixture = Omit<typeof schema.fixtures.$inferInsert, 'canonicalId'> & {
+  canonicalId?: string;
   provider?: string;
   providerId?: string;
 };

@@ -1,4 +1,5 @@
 import { db, schema, pool } from './index.js';
+import { generateCanonicalId } from './canonical-id.js';
 
 export async function seedDatabase() {
   console.log('[SEED] Starting development seed...');
@@ -8,6 +9,7 @@ export async function seedDatabase() {
   await db.insert(schema.competitions).values([
     {
       id: 'comp_laliga',
+      canonicalId: generateCanonicalId('comp'),
       name: 'La Liga (Dev Mock)',
       code: 'ESP_L1',
       type: 'league',
@@ -16,6 +18,7 @@ export async function seedDatabase() {
     },
     {
       id: 'comp_egypt_pl',
+      canonicalId: generateCanonicalId('comp'),
       name: 'Egyptian Premier League (Dev Mock)',
       code: 'EGY_PL',
       type: 'league',
@@ -24,6 +27,7 @@ export async function seedDatabase() {
     },
     {
       id: 'comp_international',
+      canonicalId: generateCanonicalId('comp'),
       name: 'International Friendly (Dev Mock)',
       code: 'INT_FRN',
       type: 'cup',
@@ -69,6 +73,7 @@ export async function seedDatabase() {
   await db.insert(schema.teams).values([
     {
       id: 'team_barcelona',
+      canonicalId: generateCanonicalId('team'),
       name: 'FC Barcelona',
       shortName: 'BAR',
       code: 'FCB',
@@ -79,6 +84,7 @@ export async function seedDatabase() {
     },
     {
       id: 'team_realmadrid',
+      canonicalId: generateCanonicalId('team'),
       name: 'Real Madrid',
       shortName: 'RMA',
       code: 'RMA',
@@ -89,6 +95,7 @@ export async function seedDatabase() {
     },
     {
       id: 'team_alahly',
+      canonicalId: generateCanonicalId('team'),
       name: 'Al Ahly SC',
       shortName: 'AHL',
       code: 'AHL',
@@ -99,6 +106,7 @@ export async function seedDatabase() {
     },
     {
       id: 'team_egypt',
+      canonicalId: generateCanonicalId('team'),
       name: 'Egypt',
       shortName: 'EGY',
       code: 'EGY',
@@ -109,6 +117,7 @@ export async function seedDatabase() {
     },
     {
       id: 'team_spain',
+      canonicalId: generateCanonicalId('team'),
       name: 'Spain',
       shortName: 'ESP',
       code: 'ESP',
@@ -124,6 +133,7 @@ export async function seedDatabase() {
   await db.insert(schema.fixtures).values([
     {
       id: 'fix_elclasico_2026',
+      canonicalId: generateCanonicalId('fix'),
       competitionId: 'comp_laliga',
       seasonId: 'season_laliga_2025',
       homeTeamId: 'team_barcelona',
@@ -143,6 +153,7 @@ export async function seedDatabase() {
     },
     {
       id: 'fix_spain_egypt_2026',
+      canonicalId: generateCanonicalId('fix'),
       competitionId: 'comp_international',
       seasonId: 'season_international_2025',
       homeTeamId: 'team_spain',

@@ -403,7 +403,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
       expect(res.rows).toHaveLength(3);
     });
 
-    it('CR5-6: Verifies canonical_id column exists and is nullable on competitions, teams, fixtures', async () => {
+    it('CR5-6: Verifies canonical_id column exists and is NOT NULL on competitions, teams, fixtures', async () => {
       const res = await pool.query(`
         SELECT table_name, column_name, is_nullable
         FROM information_schema.columns
@@ -413,7 +413,7 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
       `);
       expect(res.rows).toHaveLength(3);
       for (const row of res.rows) {
-        expect(row.is_nullable).toBe('YES');
+        expect(row.is_nullable).toBe('NO');
       }
     });
 
@@ -534,24 +534,18 @@ describe('Production Database Migration Support Architecture (migrate-prod.ts)',
         const journalContent = fs.readFileSync(path.join(migrationsFolder, 'meta', '_journal.json'), 'utf8');
         fs.writeFileSync(path.join(tempDir, 'meta', '_journal.json'), journalContent, 'utf8');
 
-        fs.copyFileSync(
-          path.join(migrationsFolder, '0000_regular_wild_pack.sql'),
-          path.join(tempDir, '0000_regular_wild_pack.sql')
-        );
-        fs.copyFileSync(
-          path.join(migrationsFolder, '0001_crazy_jimmy_woo.sql'),
-          path.join(tempDir, '0001_crazy_jimmy_woo.sql')
-        );
-        // Faulty 0002
-        fs.writeFileSync(
-          path.join(tempDir, '0002_shallow_umar.sql'),
-          'THIS IS SYNTAX ERROR INVALID SQL STATMENT FOR TEST;\n',
-          'utf8'
-        );
-        fs.copyFileSync(
-          path.join(migrationsFolder, '0003_additive_canonical_foundation.sql'),
-          path.join(tempDir, '0003_additive_canonical_foundation.sql')
-        );
+        const sqlFiles = fs.readdirSync(migrationsFolder).filter(f => f.endsWith('.sql'));
+        for (const file of sqlFiles) {
+          if (file.startsWith('0002_')) {
+            fs.writeFileSync(
+              path.join(tempDir, file),
+              'THIS IS SYNTAX ERROR INVALID SQL STATMENT FOR TEST;\n',
+              'utf8'
+            );
+          } else {
+            fs.copyFileSync(path.join(migrationsFolder, file), path.join(tempDir, file));
+          }
+        }
 
         let caughtError: unknown;
         try {

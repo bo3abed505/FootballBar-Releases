@@ -5,6 +5,7 @@ import { FixturesRepository } from '../src/repositories/fixtures.repository.js';
 import { EventsRepository } from '../src/repositories/events.repository.js';
 import { db, schema } from '../src/db/index.js';
 import { inArray } from 'drizzle-orm';
+import { generateCanonicalId } from '../src/db/canonical-id.js';
 
 describe('Repository Classes & Schema Definitions', () => {
   it('instantiates all repository classes cleanly', () => {
@@ -64,6 +65,15 @@ describe('FixturesRepository.getTrayMatches()', () => {
     'fix_repo_cancelled',
   ];
 
+  const insertFixtures = async (fixtures: (Omit<typeof schema.fixtures.$inferInsert, 'canonicalId'> & { canonicalId?: string })[]) => {
+    return db.insert(schema.fixtures).values(
+      fixtures.map((f) => ({
+        canonicalId: f.canonicalId || generateCanonicalId('fix'),
+        ...f,
+      }))
+    );
+  };
+
   const cleanup = async () => {
     await db.delete(schema.events).where(inArray(schema.events.fixtureId, testFixtureIds));
     await db.delete(schema.fixtures).where(inArray(schema.fixtures.id, testFixtureIds));
@@ -78,6 +88,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
     // Insert test competition, season, and teams
     await db.insert(schema.competitions).values({
       id: testCompId,
+      canonicalId: 'ft_comp_repo_test',
       name: 'Repo Test League',
       code: 'RTL',
       country: 'TestLand',
@@ -94,8 +105,8 @@ describe('FixturesRepository.getTrayMatches()', () => {
     }).onConflictDoNothing();
 
     await db.insert(schema.teams).values([
-      { id: testTeamA, name: 'Team Alpha', shortName: 'ALP' },
-      { id: testTeamB, name: 'Team Beta', shortName: 'BET' },
+      { id: testTeamA, canonicalId: 'ft_team_repo_test_a', name: 'Team Alpha', shortName: 'ALP' },
+      { id: testTeamB, canonicalId: 'ft_team_repo_test_b', name: 'Team Beta', shortName: 'BET' },
     ]).onConflictDoNothing();
   });
 
@@ -105,7 +116,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
 
   it('correctly prioritizes LIVE over PREMATCH over FINISHED and enforces multi-tier sort orders', async () => {
     // 1. LIVE matches (kickoff 60m ago and 20m ago)
-    await db.insert(schema.fixtures).values([
+    await insertFixtures([
       {
         id: 'fix_repo_live_early',
         competitionId: testCompId,
@@ -127,7 +138,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
     ]);
 
     // 2. PREMATCH matches (+1h and +6h)
-    await db.insert(schema.fixtures).values([
+    await insertFixtures([
       {
         id: 'fix_repo_prematch_near',
         competitionId: testCompId,
@@ -149,7 +160,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
     ]);
 
     // 3. FINISHED matches (-1h and -3h)
-    await db.insert(schema.fixtures).values([
+    await insertFixtures([
       {
         id: 'fix_repo_finished_recent',
         competitionId: testCompId,
@@ -184,7 +195,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
   });
 
   it('excludes stale LIVE, far-future PREMATCH, old FINISHED, and terminal states (POSTPONED/CANCELLED)', async () => {
-    await db.insert(schema.fixtures).values([
+    await insertFixtures([
       // Stale LIVE (4 hours past kickoff, beyond 3.5h max age)
       {
         id: 'fix_repo_live_stale',
@@ -266,7 +277,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
   });
 
   it('applies caller-supplied limit AFTER priority ordering', async () => {
-    await db.insert(schema.fixtures).values([
+    await insertFixtures([
       {
         id: 'fix_repo_live_early',
         competitionId: testCompId,
@@ -309,7 +320,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
 
   it('breaks ties deterministically by id ASC when state and kickoff are identical', async () => {
     const sharedKickoff = new Date(fixedNow.getTime() - 30 * 60 * 1000);
-    await db.insert(schema.fixtures).values([
+    await insertFixtures([
       {
         id: 'fix_repo_live_tie_b',
         competitionId: testCompId,

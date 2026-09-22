@@ -12,7 +12,7 @@ export class CompetitionsRepository {
     return results[0] ?? null;
   }
 
-  async insert(competition: typeof schema.competitions.$inferInsert) {
+  async insert(competition: Omit<typeof schema.competitions.$inferInsert, 'canonicalId'> & { canonicalId?: string }) {
     const canonicalId = competition.canonicalId || generateCanonicalId('comp');
     const results = await db.insert(schema.competitions).values({ ...competition, canonicalId }).onConflictDoNothing().returning();
     return results[0] ?? null;

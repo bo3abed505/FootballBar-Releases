@@ -336,7 +336,7 @@ describe('Additive Canonical Foundation & Existing-Data Backfill (Checkpoint 1A)
   // Part A: Real PostgreSQL Integration Tests (footballtray_test)
   // -------------------------------------------------------------------------
   describe('Part A: Real PostgreSQL Integration Tests', () => {
-    it('A.1: Migration creates exactly the three nullable canonical_id columns', async () => {
+    it('A.1: Migration creates exactly the three NOT NULL canonical_id columns (0004+)', async () => {
       const colRes = await pool.query<{ table_name: string; column_name: string; data_type: string; is_nullable: string }>(`
         SELECT table_name, column_name, data_type, is_nullable
         FROM information_schema.columns
@@ -351,7 +351,7 @@ describe('Additive Canonical Foundation & Existing-Data Backfill (Checkpoint 1A)
 
       for (const row of colRes.rows) {
         expect(row.data_type).toBe('text');
-        expect(row.is_nullable).toBe('YES'); // strictly nullable in this checkpoint
+        expect(row.is_nullable).toBe('NO');
       }
     });
 

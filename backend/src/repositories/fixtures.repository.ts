@@ -129,7 +129,7 @@ export class FixturesRepository {
     });
   }
 
-  async insert(fixture: typeof schema.fixtures.$inferInsert) {
+  async insert(fixture: Omit<typeof schema.fixtures.$inferInsert, 'canonicalId'> & { canonicalId?: string }) {
     const canonicalId = fixture.canonicalId || generateCanonicalId('fix');
     const results = await db.insert(schema.fixtures).values({ ...fixture, canonicalId }).onConflictDoNothing().returning();
     return results[0] ?? null;

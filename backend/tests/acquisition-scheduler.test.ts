@@ -118,9 +118,17 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
     it('stop() cancels a pending sleep immediately without waiting for timeout', async () => {
       const startTime = Date.now();
       let aborted = false;
+      let sleepEntered!: () => void;
+      const sleepEnteredPromise = new Promise<void>((r) => { sleepEntered = r; });
 
       const customSleep = vi.fn().mockImplementation(async (ms, signal) => {
+        sleepEntered();
         return new Promise<void>((resolve) => {
+          if (signal?.aborted) {
+            aborted = true;
+            resolve();
+            return;
+          }
           const timer = setTimeout(resolve, 600_000); // 10 minutes
           signal?.addEventListener('abort', () => {
             clearTimeout(timer);
@@ -149,7 +157,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       });
 
       scheduler.start();
-      await new Promise((r) => setTimeout(r, 10));
+      await sleepEnteredPromise;
 
       // Stop should abort immediately
       await scheduler.stop();

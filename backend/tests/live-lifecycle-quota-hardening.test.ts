@@ -7,6 +7,7 @@ import { AcquisitionScheduler, getDatabaseBudgetContext } from '../src/acquisiti
 import { FixturesRepository } from '../src/repositories/fixtures.repository.js';
 import { FootballProvider, ProviderFixture, ProviderEvent } from '../src/providers/football-provider.js';
 import { RequestGateway } from '../src/gateway/request-gateway.js';
+import { generateCanonicalId } from '../src/db/canonical-id.js';
 
 describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
   const TEST_COMP_ID = 'comp_m16_5';
@@ -16,6 +17,13 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
   const FIXTURE_RECENT = 'fix_m16_5_recent';
   const FIXTURE_OLD = 'fix_m16_5_old';
   const FIXTURE_ANCIENT = 'fix_m16_5_ancient';
+
+  const insertFixture = async (fixture: Omit<typeof schema.fixtures.$inferInsert, 'canonicalId'> & { canonicalId?: string }) => {
+    return db.insert(schema.fixtures).values({
+      canonicalId: fixture.canonicalId || generateCanonicalId('fix'),
+      ...fixture,
+    });
+  };
 
   const createFixtureDto = (
     id: string,
@@ -61,6 +69,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       code: 'AWY',
       country: 'England',
     },
+    round: 'Regular Season - 1',
     kickoffTime,
     state,
     elapsedMinute,
@@ -97,6 +106,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
     // Seed test competition & teams
     await db.insert(schema.competitions).values({
       id: TEST_COMP_ID,
+      canonicalId: 'ft_comp_m16_5',
       name: 'Test League M16.5',
       code: 'TL',
       country: 'England',
@@ -112,8 +122,8 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       isCurrent: true,
     });
     await db.insert(schema.teams).values([
-      { id: TEST_HOME_ID, name: 'Team Home', shortName: 'HOM', code: 'HOM', country: 'England' },
-      { id: TEST_AWAY_ID, name: 'Team Away', shortName: 'AWY', code: 'AWY', country: 'England' },
+      { id: TEST_HOME_ID, canonicalId: 'ft_team_m16_5_home', name: 'Team Home', shortName: 'HOM', code: 'HOM', country: 'England' },
+      { id: TEST_AWAY_ID, canonicalId: 'ft_team_m16_5_away', name: 'Team Away', shortName: 'AWY', code: 'AWY', country: 'England' },
     ]);
   });
 
@@ -168,7 +178,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       const baselineLive = baseline.liveCount;
 
       // Ancient live fixture: kickoff was 4 hours ago (exceeds MAX_LIVE_MATCH_AGE_MS 3.5h)
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_ANCIENT,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -181,7 +191,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       });
 
       // Valid current live fixture: kickoff was 45 minutes ago (< 3.5h)
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_RECENT,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -208,7 +218,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
     it('3. Provider live response contains the fixture -> normal live update', async () => {
       const kickoff = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30m ago
       // Seed initially as 0-0
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_RECENT,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -241,7 +251,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
     it('4. Provider live response omits a recently started live fixture -> does NOT immediately mark FINISHED', async () => {
       // Kickoff was only 25 minutes ago (< 105m safe elapsed threshold)
       const kickoff = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_RECENT,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -269,7 +279,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('5a. Provider live response omits an old LIVE fixture (>= 105m) and details confirm FINISHED -> transitions to FINISHED with confirmed details', async () => {
       const kickoff = new Date(Date.now() - 115 * 60 * 1000).toISOString();
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_OLD,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -301,7 +311,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('5b. Provider live response omits a match and details confirm POSTPONED -> transitions to POSTPONED (not blindly FINISHED)', async () => {
       const kickoff = new Date(Date.now() - 115 * 60 * 1000).toISOString();
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_OLD,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -329,7 +339,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('5c. Provider live response omits a match (110m) and details are unavailable -> remains LIVE to protect delayed/omitted match', async () => {
       const kickoff = new Date(Date.now() - 110 * 60 * 1000).toISOString(); // 110m ago (< 210m max age)
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_OLD,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -358,7 +368,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('5d. Provider live response omits an expired LIVE fixture (> 3.5h) with unconfirmed details -> hard max age cutoff transitions to FINISHED', async () => {
       const kickoff = new Date(Date.now() - 220 * 60 * 1000).toISOString(); // 220m ago (> 210m max age)
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_OLD,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -392,7 +402,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
   describe('Requirement 6: Bounded Finalization', () => {
     it('6. Finalization failure or missing details is bounded and does not create infinite loop', async () => {
       const now = new Date();
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_OLD,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -505,7 +515,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('13. reconcileExpiredLiveFixtures transitions ancient LIVE fixtures to FINISHED locally without external calls', async () => {
       const ancientKickoff = new Date(Date.now() - 5 * 60 * 60 * 1000); // 5 hours ago
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_ANCIENT,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -527,7 +537,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('14. getActiveSummary sweeps stale LIVE rows so liveCount is 0 and idle is evaluated', async () => {
       const ancientKickoff = new Date(Date.now() - 10 * 60 * 60 * 1000); // 10 hours ago
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_OLD,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -550,7 +560,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
     it('15. Genuinely live match (within 3.5h) is not swept and increments liveCount', async () => {
       const recentKickoff = new Date(Date.now() - 45 * 60 * 1000); // 45 minutes ago
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: FIXTURE_RECENT,
         competitionId: TEST_COMP_ID,
         seasonId: TEST_SEASON_ID,
@@ -1044,6 +1054,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       // 3. Stale LIVE fixture (kickoff 6 hours ago on Sept 3)
       await db.insert(schema.competitions).values({
         id: 'comp_comb_1',
+        canonicalId: 'ft_comp_comb_1',
         name: 'Combined Comp',
         code: 'CC1',
         country: 'England',
@@ -1059,11 +1070,11 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       }).onConflictDoNothing();
 
       await db.insert(schema.teams).values([
-        { id: 'team_comb_h', name: 'Home Comb', shortName: 'HC' },
-        { id: 'team_comb_a', name: 'Away Comb', shortName: 'AC' },
+        { id: 'team_comb_h', canonicalId: 'ft_team_comb_h', name: 'Home Comb', shortName: 'HC' },
+        { id: 'team_comb_a', canonicalId: 'ft_team_comb_a', name: 'Away Comb', shortName: 'AC' },
       ]).onConflictDoNothing();
 
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: 'fix_ancient_live_comb',
         competitionId: 'comp_comb_1',
         seasonId: 'season_comb_1',
@@ -1207,6 +1218,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       // 2. Insert ancient prematch fixture (kickoff 3 days ago, e.g. fix_spain_egypt_2026)
       await db.insert(schema.competitions).values({
         id: 'comp_test_ancient',
+        canonicalId: 'ft_comp_test_ancient',
         name: 'Ancient Comp',
         code: 'AC',
         country: 'International',
@@ -1222,11 +1234,11 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       }).onConflictDoNothing();
 
       await db.insert(schema.teams).values([
-        { id: 'team_test_h', name: 'Home Team', shortName: 'HT' },
-        { id: 'team_test_a', name: 'Away Team', shortName: 'AT' },
+        { id: 'team_test_h', canonicalId: 'ft_team_test_h', name: 'Home Team', shortName: 'HT' },
+        { id: 'team_test_a', canonicalId: 'ft_team_test_a', name: 'Away Team', shortName: 'AT' },
       ]).onConflictDoNothing();
 
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: 'fix_ancient_prematch_test',
         competitionId: 'comp_test_ancient',
         seasonId: 'season_test_ancient',
@@ -1403,6 +1415,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       // Seed single competition for Premier League (comp_39)
       await db.insert(schema.competitions).values({
         id: 'comp_39',
+        canonicalId: 'ft_comp_39_live',
         name: 'Premier League',
         code: 'PL',
         country: 'England',
@@ -1418,12 +1431,12 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       }).onConflictDoNothing();
 
       await db.insert(schema.teams).values([
-        { id: 'team_39_h', name: 'Arsenal', shortName: 'ARS' },
-        { id: 'team_39_a', name: 'Chelsea', shortName: 'CHE' },
+        { id: 'team_39_h', canonicalId: 'ft_team_39_h', name: 'Arsenal', shortName: 'ARS' },
+        { id: 'team_39_a', canonicalId: 'ft_team_39_a', name: 'Chelsea', shortName: 'CHE' },
       ]).onConflictDoNothing();
 
       // Insert genuine stale prematch fixture in comp_39
-      await db.insert(schema.fixtures).values({
+      await insertFixture({
         id: 'fix_stale_prematch_39',
         competitionId: 'comp_39',
         seasonId: 'season_39_2026',
