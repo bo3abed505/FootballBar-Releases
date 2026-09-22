@@ -125,6 +125,7 @@ export interface FootballProvider {
   readonly providerName: string;
   getCompetitions(): Promise<ProviderCompetition[]>;
   getFixtures(filter?: FixtureFilter): Promise<ProviderFixture[]>;
+  getFixturesByDate?(date: string, cycleId?: string): Promise<ProviderFixture[]>;
   getFixtureDetails(fixtureId: string, cycleId?: string): Promise<ProviderFixtureDetail | null>;
   getFixtureEvents(fixtureId: string): Promise<ProviderEvent[]>;
   getStandings(competitionId: string, seasonYear: number): Promise<ProviderStanding[]>;

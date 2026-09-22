@@ -20,6 +20,7 @@ export class ApiFootballClient {
   private readonly baseUrl: string;
   private readonly gateway: RequestGateway;
   private readonly fetchFn: typeof fetch;
+  private readonly inFlight = new Map<string, Promise<any>>();
 
   constructor(config: ApiFootballClientConfig) {
     this.apiKey = config.apiKey || '';
@@ -30,6 +31,7 @@ export class ApiFootballClient {
 
   /**
    * Internal request executor routing exclusively through RequestGateway.
+   * In-flight single-flight promise coalescing deduplicates identical concurrent requests.
    */
   private async executeRequest<T>(
     endpoint: string,
@@ -38,34 +40,49 @@ export class ApiFootballClient {
     cycleId?: string,
     competitionId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<T>>> {
-    const url = `${this.baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    const key = endpoint;
+    const existing = this.inFlight.get(key);
+    if (existing) {
+      return existing as Promise<GatewayResponse<ApiFootballEnvelope<T>>>;
+    }
 
-    return this.gateway.execute<ApiFootballEnvelope<T>>(
-      {
-        provider: 'api_football',
-        endpoint,
-        operation,
-        priority,
-        cycleId,
-        competitionId,
-      },
-      async () => {
-        const response = await this.fetchFn(url, {
-          method: 'GET',
-          headers: {
-            'x-apisports-key': this.apiKey,
-            'Accept': 'application/json',
+    const promise = (async () => {
+      try {
+        const url = `${this.baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+
+        return await this.gateway.execute<ApiFootballEnvelope<T>>(
+          {
+            provider: 'api_football',
+            endpoint,
+            operation,
+            priority,
+            cycleId,
+            competitionId,
           },
-        });
+          async () => {
+            const response = await this.fetchFn(url, {
+              method: 'GET',
+              headers: {
+                'x-apisports-key': this.apiKey,
+                'Accept': 'application/json',
+              },
+            });
 
-        const data = (await response.json()) as ApiFootballEnvelope<T>;
-        return {
-          status: response.status,
-          headers: response.headers,
-          data,
-        };
+            const data = (await response.json()) as ApiFootballEnvelope<T>;
+            return {
+              status: response.status,
+              headers: response.headers,
+              data,
+            };
+          }
+        );
+      } finally {
+        this.inFlight.delete(key);
       }
-    );
+    })();
+
+    this.inFlight.set(key, promise);
+    return promise;
   }
 
   async getStatus(priority: RequestPriority = 'NORMAL', cycleId?: string): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballStatusResponse>>> {
@@ -87,12 +104,29 @@ export class ApiFootballClient {
     return this.executeRequest<ApiFootballLeagueItem[]>(endpoint, 'get_leagues', priority, cycleId, params?.id ? params.id.toString() : undefined);
   }
 
+  /**
+   * Fetches full date-wide fixtures across all competitions via GET /fixtures?date=YYYY-MM-DD.
+   */
+  async getFixturesByDate(
+    date: string,
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string
+  ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
+    const dateStr = date.slice(0, 10);
+    const endpoint = `/fixtures?date=${dateStr}`;
+    return this.executeRequest<ApiFootballFixtureItem[]>(endpoint, 'get_fixtures', priority, cycleId);
+  }
+
   async getFixtures(
     params: { id?: number; date?: string; league?: number; season?: number; live?: string },
     priority: RequestPriority = 'NORMAL',
     cycleId?: string,
     competitionId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
+    if (params.date && !params.league && !params.id && !params.season && !params.live) {
+      return this.getFixturesByDate(params.date, priority, cycleId);
+    }
+
     const query = new URLSearchParams();
     if (params.id) query.set('id', params.id.toString());
     if (params.date) query.set('date', params.date);

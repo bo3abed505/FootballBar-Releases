@@ -809,8 +809,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
         providerName: 'mock_discovery_provider',
         getCompetitions: async () => [],
         getFixtures: async (filter) => {
-          const count = filter?.competitionIds?.length ?? 1;
-          discoverCallCount += count;
+          discoverCallCount++;
           return []; // Empty schedule today: returns ZERO fixtures for all 6 competitions
         },
         getFixtureDetails: async () => null,
@@ -839,12 +838,12 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
       // Cycle 1:
       // * DISCOVER_SCHEDULE
-      // * six provider requests
+      // * single date-wide provider request
       // * successful
       // * marks date discovered
       const cycle1 = await scheduler.executeSingleCycle();
       expect(cycle1.plan.action).toBe('DISCOVER_SCHEDULE');
-      expect(discoverCallCount).toBe(6); // exactly 6 provider requests
+      expect(discoverCallCount).toBe(1); // exactly 1 date-wide provider request
       expect(repo.isScheduleDiscovered(todayStr)).toBe(true);
 
       // Cycle 2:
@@ -852,14 +851,14 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       // * zero provider calls
       const cycle2 = await scheduler.executeSingleCycle();
       expect(cycle2.plan.action).toBe('IDLE');
-      expect(discoverCallCount).toBe(6); // zero new calls
+      expect(discoverCallCount).toBe(1); // zero new calls
 
       // Cycle 3:
       // * must NOT DISCOVER_SCHEDULE
       // * zero provider calls
       const cycle3 = await scheduler.executeSingleCycle();
       expect(cycle3.plan.action).toBe('IDLE');
-      expect(discoverCallCount).toBe(6); // zero new calls
+      expect(discoverCallCount).toBe(1); // zero new calls
 
       // Simulated backend restart / new repository instance:
       // * date must still be known
@@ -881,18 +880,18 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
       const restartCycle = await restartScheduler.executeSingleCycle();
       expect(restartCycle.plan.action).toBe('IDLE');
-      expect(discoverCallCount).toBe(6); // zero discovery calls on restart!
+      expect(discoverCallCount).toBe(1); // zero discovery calls on restart!
       expect(restartRepo.isScheduleDiscovered(todayStr)).toBe(true);
 
       // Explicit invalidation:
       // * discovery may run again
-      // * six calls maximum
+      // * single date-wide call
       await restartRepo.invalidateSchedule(todayStr);
       expect(restartRepo.isScheduleDiscovered(todayStr)).toBe(false);
 
       const invalidationCycle = await restartScheduler.executeSingleCycle();
       expect(invalidationCycle.plan.action).toBe('DISCOVER_SCHEDULE');
-      expect(discoverCallCount).toBe(12); // exactly six calls on rediscovery (6 + 6 = 12)
+      expect(discoverCallCount).toBe(2); // exactly one call on rediscovery (1 + 1 = 2)
       expect(restartRepo.isScheduleDiscovered(todayStr)).toBe(true);
     });
 
@@ -1356,8 +1355,7 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
         providerName: testProvider,
         getCompetitions: async () => [],
         getFixtures: async (filter) => {
-          const count = filter?.competitionIds?.length ?? 1;
-          discoverCalls += count;
+          discoverCalls++;
           return [];
         },
         getFixtureDetails: async () => null,
@@ -1382,13 +1380,13 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
       const cycle1 = await scheduler.executeSingleCycle();
       expect(cycle1.plan.action).toBe('DISCOVER_SCHEDULE');
-      expect(discoverCalls).toBe(6); // exactly 6 discovery calls
+      expect(discoverCalls).toBe(1); // exactly 1 date-wide discovery call
       expect(restartRepo1.isScheduleDiscovered(todayStr)).toBe(true);
 
       // Next cycle at T3: must be IDLE
       const cycle2 = await scheduler.executeSingleCycle();
       expect(cycle2.plan.action).toBe('IDLE');
-      expect(discoverCalls).toBe(6); // zero new calls
+      expect(discoverCalls).toBe(1); // zero new calls
 
       // 5. Second restart (T4): instantiate another fresh repository instance
       const restartRepo2 = new FixturesRepository();

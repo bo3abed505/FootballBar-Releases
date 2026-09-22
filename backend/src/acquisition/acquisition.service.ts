@@ -20,53 +20,71 @@ export interface NormalizedAcquisitionBatch {
 }
 
 export class AcquisitionService {
+  private readonly inFlight = new Map<string, Promise<NormalizedAcquisitionBatch>>();
+
   constructor(private readonly provider: FootballProvider) {}
 
   /**
-   * Fetches data from provider and normalizes all entities into canonical format
+   * Fetches data from provider and normalizes all entities into canonical format.
+   * Single-flight promise coalescing deduplicates identical concurrent requests.
    */
   async acquireAll(filter?: FixtureFilter): Promise<NormalizedAcquisitionBatch> {
-    const rawFixtures: ProviderFixture[] = await this.provider.getFixtures(filter);
-
-    const compMap = new Map<string, CanonicalCompetition>();
-    const seasonMap = new Map<string, CanonicalSeason>();
-    const teamMap = new Map<string, CanonicalTeam>();
-    const fixtureList: CanonicalFixture[] = [];
-    const eventList: CanonicalEvent[] = [];
-
-    for (const raw of rawFixtures) {
-      if (raw.competition && !compMap.has(raw.competition.id)) {
-        compMap.set(raw.competition.id, normalizeCompetition(raw.competition));
-      }
-
-      if (raw.season && !seasonMap.has(raw.season.id)) {
-        seasonMap.set(raw.season.id, normalizeSeason(raw.season));
-      }
-
-      if (raw.homeTeam && !teamMap.has(raw.homeTeam.id)) {
-        teamMap.set(raw.homeTeam.id, normalizeTeam(raw.homeTeam));
-      }
-
-      if (raw.awayTeam && !teamMap.has(raw.awayTeam.id)) {
-        teamMap.set(raw.awayTeam.id, normalizeTeam(raw.awayTeam));
-      }
-
-      fixtureList.push(normalizeFixture(raw));
-
-      if (raw.events && raw.events.length > 0) {
-        for (const ev of raw.events) {
-          eventList.push(normalizeEvent(ev));
-        }
-      }
+    const key = filter ? JSON.stringify(filter) : 'all';
+    const existing = this.inFlight.get(key);
+    if (existing) {
+      return existing;
     }
 
-    return {
-      competitions: Array.from(compMap.values()),
-      seasons: Array.from(seasonMap.values()),
-      teams: Array.from(teamMap.values()),
-      fixtures: fixtureList,
-      events: eventList,
-    };
+    const promise = (async () => {
+      try {
+        const rawFixtures: ProviderFixture[] = await this.provider.getFixtures(filter);
+
+        const compMap = new Map<string, CanonicalCompetition>();
+        const seasonMap = new Map<string, CanonicalSeason>();
+        const teamMap = new Map<string, CanonicalTeam>();
+        const fixtureList: CanonicalFixture[] = [];
+        const eventList: CanonicalEvent[] = [];
+
+        for (const raw of rawFixtures) {
+          if (raw.competition && !compMap.has(raw.competition.id)) {
+            compMap.set(raw.competition.id, normalizeCompetition(raw.competition));
+          }
+
+          if (raw.season && !seasonMap.has(raw.season.id)) {
+            seasonMap.set(raw.season.id, normalizeSeason(raw.season));
+          }
+
+          if (raw.homeTeam && !teamMap.has(raw.homeTeam.id)) {
+            teamMap.set(raw.homeTeam.id, normalizeTeam(raw.homeTeam));
+          }
+
+          if (raw.awayTeam && !teamMap.has(raw.awayTeam.id)) {
+            teamMap.set(raw.awayTeam.id, normalizeTeam(raw.awayTeam));
+          }
+
+          fixtureList.push(normalizeFixture(raw));
+
+          if (raw.events && raw.events.length > 0) {
+            for (const ev of raw.events) {
+              eventList.push(normalizeEvent(ev));
+            }
+          }
+        }
+
+        return {
+          competitions: Array.from(compMap.values()),
+          seasons: Array.from(seasonMap.values()),
+          teams: Array.from(teamMap.values()),
+          fixtures: fixtureList,
+          events: eventList,
+        };
+      } finally {
+        this.inFlight.delete(key);
+      }
+    })();
+
+    this.inFlight.set(key, promise);
+    return promise;
   }
 
   /**

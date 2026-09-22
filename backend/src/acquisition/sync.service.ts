@@ -1,7 +1,7 @@
 import { inArray, eq, and, gte, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { FootballProvider, FixtureFilter } from '../providers/football-provider.js';
-import { AcquisitionService } from './acquisition.service.js';
+import { AcquisitionService, NormalizedAcquisitionBatch } from './acquisition.service.js';
 import { normalizeEvent } from '../normalization/event.js';
 import { AcquisitionPolicyEngine } from './acquisition-policy.js';
 import { generateCanonicalId } from '../db/canonical-id.js';
@@ -33,8 +33,17 @@ export class SyncService {
    * Executes a full deterministic synchronization cycle against PostgreSQL
    */
   async sync(filter?: FixtureFilter): Promise<SyncSummary> {
+    if (filter?.date && !filter?.liveOnly) {
+      return this.syncSchedule(filter.date, filter.competitionIds, filter.cycleId);
+    }
     const batch = await this.acquisitionService.acquireAll(filter);
+    return this.processBatch(batch, filter?.liveOnly);
+  }
 
+  /**
+   * Processes and persists a normalized acquisition batch into PostgreSQL.
+   */
+  async processBatch(batch: NormalizedAcquisitionBatch, liveOnly = false): Promise<SyncSummary> {
     const summary: SyncSummary = {
       provider: this.provider.providerName,
       fixturesDiscovered: batch.fixtures.length,
@@ -364,7 +373,7 @@ export class SyncService {
     // 3. If details are unavailable and elapsed time >= MAX_LIVE_MATCH_AGE_MS (3.5h), transition to FINISHED.
     // 4. If details are unavailable and elapsed time < MAX_LIVE_MATCH_AGE_MS, touch lastPolledAt but remain LIVE
     //    to safely protect delayed, suspended, or temporarily omitted matches from premature finalization.
-    if (filter?.liveOnly) {
+    if (liveOnly) {
       const incomingLiveIds = new Set(batch.fixtures.map((f) => f.id));
       const now = new Date();
       const nowMs = now.getTime();
@@ -479,9 +488,79 @@ export class SyncService {
 
   /**
    * Synchronizes daily match schedule for a specific date across target competitions.
+   * Performs a single date-wide discovery query and filters in-memory using competition_provider_aliases.
    */
   async syncSchedule(date: string, competitionIds?: number[], cycleId?: string): Promise<SyncSummary> {
-    return this.sync({ date, competitionIds, cycleId });
+    // 1. Single date-wide fetch across all competitions for the target date
+    const batch = await this.acquisitionService.acquireScheduled(date, competitionIds, cycleId);
+
+    // 2. Discover active monitored competitions via competition_provider_aliases
+    const activeAliases = await db
+      .select({
+        providerId: schema.competitionProviderAliases.providerId,
+        canonicalCompetitionId: schema.competitionProviderAliases.canonicalCompetitionId,
+      })
+      .from(schema.competitionProviderAliases)
+      .where(eq(schema.competitionProviderAliases.provider, this.provider.providerName));
+
+    const activeProviderIds = new Set(activeAliases.map((a) => a.providerId));
+
+    let effectiveProviderIds = activeProviderIds;
+    if (activeProviderIds.size === 0 && competitionIds && competitionIds.length > 0) {
+      effectiveProviderIds = new Set(competitionIds.map(String));
+    } else if (activeProviderIds.size > 0 && competitionIds && competitionIds.length > 0) {
+      const requested = new Set(competitionIds.map(String));
+      const intersected = new Set([...activeProviderIds].filter((id) => requested.has(id)));
+      if (intersected.size > 0) {
+        effectiveProviderIds = intersected;
+      }
+    }
+
+    // 3. Filter the batch in-memory against active competitions
+    if (effectiveProviderIds.size > 0) {
+      const allowedCompIds = new Set<string>();
+      for (const pId of effectiveProviderIds) {
+        allowedCompIds.add(pId);
+        allowedCompIds.add(`comp_${pId}`);
+      }
+
+      const compProviderMap = new Map<string, string>();
+      for (const c of batch.competitions) {
+        if (c.providerId) compProviderMap.set(c.id, c.providerId);
+      }
+
+      const isCompAllowed = (compId: string): boolean => {
+        if (allowedCompIds.has(compId)) return true;
+        const pId = compProviderMap.get(compId);
+        return !!pId && (effectiveProviderIds.has(pId) || allowedCompIds.has(pId));
+      };
+
+      const filteredFixtures = batch.fixtures.filter((f) => isCompAllowed(f.competitionId));
+      const filteredCompetitions = batch.competitions.filter((c) => isCompAllowed(c.id));
+      const filteredSeasons = batch.seasons.filter((s) => isCompAllowed(s.competitionId));
+
+      const retainedTeamIds = new Set<string>();
+      for (const f of filteredFixtures) {
+        retainedTeamIds.add(f.homeTeamId);
+        retainedTeamIds.add(f.awayTeamId);
+      }
+      const filteredTeams = batch.teams.filter((t) => retainedTeamIds.has(t.id));
+
+      const retainedFixtureIds = new Set(filteredFixtures.map((f) => f.id));
+      const filteredEvents = batch.events.filter((e) => retainedFixtureIds.has(e.fixtureId));
+
+      const filteredBatch: NormalizedAcquisitionBatch = {
+        competitions: filteredCompetitions,
+        seasons: filteredSeasons,
+        teams: filteredTeams,
+        fixtures: filteredFixtures,
+        events: filteredEvents,
+      };
+
+      return this.processBatch(filteredBatch, false);
+    }
+
+    return this.processBatch(batch, false);
   }
 
   /**
@@ -589,8 +668,8 @@ export class SyncService {
           hasChanges: false,
         };
       }
-      const todayStr = new Date().toISOString().slice(0, 10);
-      return this.sync({ date: todayStr, competitionIds: options, cycleId });
+      const batch = await this.acquisitionService.acquireStaleRecovery(options, cycleId);
+      return this.processBatch(batch, false);
     }
 
     if (options?.competitionIds && options.competitionIds.length === 0) {
@@ -605,8 +684,11 @@ export class SyncService {
       };
     }
 
-    const todayStr = options?.date ?? new Date().toISOString().slice(0, 10);
-    return this.sync({ date: todayStr, competitionIds: options?.competitionIds, cycleId: options?.cycleId ?? cycleId });
+    const batch = await this.acquisitionService.acquireStaleRecovery(
+      options?.competitionIds,
+      options?.cycleId ?? cycleId
+    );
+    return this.processBatch(batch, false);
   }
 
   /**
