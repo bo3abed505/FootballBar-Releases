@@ -132,6 +132,76 @@ export interface ApiFootballFixtureItem {
     };
   };
   events?: ApiFootballEventItem[];
+  lineups?: ApiFootballLineupItem[];
+  statistics?: ApiFootballFixtureStatisticItem[];
+  players?: ApiFootballFixturePlayerItem[];
+}
+
+export interface ApiFootballLineupPlayerItem {
+  player: {
+    id: number;
+    name: string;
+    number?: number | null;
+    pos?: string | null;
+    grid?: string | null;
+  };
+}
+
+export interface ApiFootballLineupItem {
+  team: {
+    id: number;
+    name: string;
+    logo?: string;
+  };
+  coach?: {
+    id?: number | null;
+    name?: string | null;
+    photo?: string | null;
+  };
+  formation?: string | null;
+  startXI?: ApiFootballLineupPlayerItem[];
+  substitutes?: ApiFootballLineupPlayerItem[];
+}
+
+export interface ApiFootballStatisticValue {
+  type: string;
+  value: string | number | null;
+}
+
+export interface ApiFootballFixtureStatisticItem {
+  team: {
+    id: number;
+    name: string;
+    logo?: string;
+  };
+  statistics: ApiFootballStatisticValue[];
+}
+
+export interface ApiFootballPlayerStatDetail {
+  player: {
+    id: number;
+    name: string;
+    photo?: string;
+  };
+  statistics?: Array<{
+    games?: {
+      minutes?: number | null;
+      number?: number | null;
+      position?: string | null;
+      rating?: string | number | null;
+      captain?: boolean | null;
+      substitute?: boolean | null;
+    };
+  }>;
+}
+
+export interface ApiFootballFixturePlayerItem {
+  team: {
+    id: number;
+    name: string;
+    logo?: string;
+  };
+  players: ApiFootballPlayerStatDetail[];
 }
 
 export interface ApiFootballEventItem {

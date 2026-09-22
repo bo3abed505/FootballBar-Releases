@@ -81,8 +81,53 @@ export interface ProviderFixture {
   providerId?: string;
 }
 
+export interface ProviderLineupPlayer {
+  id: string;
+  name: string;
+  number?: number;
+  position?: string;
+  grid?: string;
+  isStarter: boolean;
+  rating?: string | number | null;
+}
+
+export interface ProviderLineup {
+  teamId: string;
+  formation?: string;
+  coachName?: string;
+  coachId?: string;
+  startXi: ProviderLineupPlayer[];
+  substitutes: ProviderLineupPlayer[];
+}
+
+export interface ProviderTeamStatistics {
+  teamId: string;
+  shotsOnGoal?: number;
+  shotsOffGoal?: number;
+  totalShots?: number;
+  possessionPercent?: number;
+  fouls?: number;
+  cornerKicks?: number;
+  offsides?: number;
+  yellowCards?: number;
+  redCards?: number;
+  goalkeeperSaves?: number;
+  totalPasses?: number;
+  passesAccurate?: number;
+}
+
+export interface ProviderPlayerRating {
+  playerId: string;
+  teamId: string;
+  name: string;
+  rating?: string | number | null;
+}
+
 export interface ProviderFixtureDetail extends ProviderFixture {
   events: ProviderEvent[];
+  lineups?: ProviderLineup[];
+  statistics?: ProviderTeamStatistics[];
+  playerRatings?: ProviderPlayerRating[];
 }
 
 export interface ProviderStandingRow {
@@ -127,6 +172,7 @@ export interface FootballProvider {
   getFixtures(filter?: FixtureFilter): Promise<ProviderFixture[]>;
   getFixturesByDate?(date: string, cycleId?: string): Promise<ProviderFixture[]>;
   getFixtureDetails(fixtureId: string, cycleId?: string): Promise<ProviderFixtureDetail | null>;
+  getFixtureDetailsBatch?(fixtureIds: string[], cycleId?: string): Promise<ProviderFixtureDetail[]>;
   getFixtureEvents(fixtureId: string): Promise<ProviderEvent[]>;
   getStandings(competitionId: string, seasonYear: number): Promise<ProviderStanding[]>;
 }

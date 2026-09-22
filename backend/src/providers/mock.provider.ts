@@ -426,6 +426,17 @@ export class MockFootballProvider implements FootballProvider {
     return this.fixtures.get(fixtureId) ?? null;
   }
 
+  async getFixtureDetailsBatch(fixtureIds: string[]): Promise<ProviderFixtureDetail[]> {
+    const results: ProviderFixtureDetail[] = [];
+    for (const id of fixtureIds) {
+      const f = this.fixtures.get(id);
+      if (f) {
+        results.push(f);
+      }
+    }
+    return results;
+  }
+
   async getFixtureEvents(fixtureId: string): Promise<ProviderEvent[]> {
     const fixture = this.fixtures.get(fixtureId);
     return fixture ? [...fixture.events] : [];

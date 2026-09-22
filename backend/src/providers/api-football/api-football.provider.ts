@@ -9,6 +9,7 @@ import {
 } from '../football-provider.js';
 import { ApiFootballClient, ApiFootballClientConfig } from './api-football.client.js';
 import { ApiFootballMapper } from './api-football.mapper.js';
+import { Logger } from '../../diagnostics/logger.js';
 
 export class ApiFootballProvider implements FootballProvider {
   readonly providerName = 'api_football';
@@ -146,6 +147,52 @@ export class ApiFootballProvider implements FootballProvider {
     }
 
     return ApiFootballMapper.mapFixtureDetail(response.data.response[0]);
+  }
+
+  /**
+   * Fetches deep match details for multiple fixtures in batches of up to 20 IDs.
+   * Implements partial failure isolation: invalid or malformed fixtures are skipped and logged,
+   * while all valid fixtures in the batch are mapped and returned.
+   */
+  async getFixtureDetailsBatch(fixtureIds: string[], cycleId?: string): Promise<ProviderFixtureDetail[]> {
+    if (!fixtureIds || fixtureIds.length === 0) {
+      return [];
+    }
+
+    const results: ProviderFixtureDetail[] = [];
+
+    // Process in batches of up to 20 fixture IDs
+    for (let i = 0; i < fixtureIds.length; i += 20) {
+      const chunk = fixtureIds.slice(i, i + 20);
+      const numericIds = chunk
+        .map((id) => parseInt(id.replace(/^fix_/, ''), 10))
+        .filter((n) => !isNaN(n));
+
+      if (numericIds.length === 0) continue;
+
+      const response = await this.client.getFixturesByIds(numericIds, 'NORMAL', cycleId);
+      if (!response.success || !response.data?.response) {
+        continue;
+      }
+
+      // Partial failure isolation: parse each fixture individually
+      for (const item of response.data.response) {
+        try {
+          if (!item || !item.fixture?.id) {
+            Logger.warn('ApiFootballProvider', 'MalformedBatchFixture', 'Encountered malformed fixture item in batch details response', cycleId);
+            continue;
+          }
+          results.push(ApiFootballMapper.mapFixtureDetail(item));
+        } catch (err) {
+          Logger.warn('ApiFootballProvider', 'BatchParseError', `Failed to parse fixture detail for fixture ${item?.fixture?.id}: ${err}`, cycleId, {
+            error: err instanceof Error ? err.message : String(err),
+            fixtureId: item?.fixture?.id,
+          });
+        }
+      }
+    }
+
+    return results;
   }
 
   async getFixtureEvents(fixtureId: string): Promise<ProviderEvent[]> {

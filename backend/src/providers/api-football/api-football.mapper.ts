@@ -6,12 +6,20 @@ import {
   ProviderFixtureDetail,
   ProviderEvent,
   ProviderStanding,
+  ProviderLineup,
+  ProviderLineupPlayer,
+  ProviderTeamStatistics,
+  ProviderPlayerRating,
 } from '../football-provider.js';
 import {
   ApiFootballLeagueItem,
   ApiFootballFixtureItem,
   ApiFootballEventItem,
   ApiFootballStandingItem,
+  ApiFootballLineupItem,
+  ApiFootballLineupPlayerItem,
+  ApiFootballFixtureStatisticItem,
+  ApiFootballFixturePlayerItem,
 } from './api-football.dto.js';
 
 export class ApiFootballMapper {
@@ -157,11 +165,96 @@ export class ApiFootballMapper {
   static mapFixtureDetail(item: ApiFootballFixtureItem): ProviderFixtureDetail {
     const base = this.mapFixture(item);
     const events = item.events ? this.mapEvents(base.id, item.events) : (base.events ?? []);
+    const lineups = item.lineups && item.lineups.length > 0 ? this.mapLineups(item.lineups) : undefined;
+    const statistics = item.statistics && item.statistics.length > 0 ? this.mapStatistics(item.statistics) : undefined;
+    const playerRatings = item.players && item.players.length > 0 ? this.mapPlayerRatings(item.players) : undefined;
 
     return {
       ...base,
       events,
+      lineups,
+      statistics,
+      playerRatings,
     };
+  }
+
+  static mapLineupPlayer(p: ApiFootballLineupPlayerItem, isStarter: boolean): ProviderLineupPlayer {
+    return {
+      id: `ply_${p.player.id}`,
+      name: p.player.name,
+      number: p.player.number ?? undefined,
+      position: p.player.pos ?? undefined,
+      grid: p.player.grid ?? undefined,
+      isStarter,
+    };
+  }
+
+  static mapLineups(lineups: ApiFootballLineupItem[]): ProviderLineup[] {
+    return lineups.map((l) => ({
+      teamId: `team_${l.team.id}`,
+      formation: l.formation ?? undefined,
+      coachName: l.coach?.name ?? undefined,
+      coachId: l.coach?.id ? `coach_${l.coach.id}` : undefined,
+      startXi: (l.startXI || []).map((p) => this.mapLineupPlayer(p, true)),
+      substitutes: (l.substitutes || []).map((p) => this.mapLineupPlayer(p, false)),
+    }));
+  }
+
+  static mapStatistics(statsList: ApiFootballFixtureStatisticItem[]): ProviderTeamStatistics[] {
+    return statsList.map((item) => {
+      const statsMap = new Map<string, any>();
+      for (const s of item.statistics || []) {
+        statsMap.set((s.type || '').trim().toLowerCase(), s.value);
+      }
+
+      const getInt = (type: string): number | undefined => {
+        const val = statsMap.get(type.toLowerCase());
+        if (val === null || val === undefined) return undefined;
+        if (typeof val === 'number') return Math.round(val);
+        const parsed = parseInt(String(val).replace(/[^0-9-]/g, ''), 10);
+        return isNaN(parsed) ? undefined : parsed;
+      };
+
+      return {
+        teamId: `team_${item.team.id}`,
+        shotsOnGoal: getInt('shots on goal'),
+        shotsOffGoal: getInt('shots off goal'),
+        totalShots: getInt('total shots'),
+        possessionPercent: getInt('ball possession'),
+        fouls: getInt('fouls'),
+        cornerKicks: getInt('corner kicks'),
+        offsides: getInt('offsides'),
+        yellowCards: getInt('yellow cards'),
+        redCards: getInt('red cards'),
+        goalkeeperSaves: getInt('goalkeeper saves'),
+        totalPasses: getInt('total passes'),
+        passesAccurate: getInt('passes accurate'),
+      };
+    });
+  }
+
+  static mapPlayerRatings(playersList: ApiFootballFixturePlayerItem[]): ProviderPlayerRating[] {
+    const ratings: ProviderPlayerRating[] = [];
+    for (const teamItem of playersList || []) {
+      const teamId = `team_${teamItem.team.id}`;
+      for (const p of teamItem.players || []) {
+        const rawRating = p.statistics?.[0]?.games?.rating;
+        let rating: number | string | null = null;
+        if (typeof rawRating === 'number') {
+          rating = rawRating;
+        } else if (typeof rawRating === 'string') {
+          const parsed = parseFloat(rawRating);
+          rating = isNaN(parsed) ? rawRating : parsed;
+        }
+        ratings.push({
+          playerId: `ply_${p.player.id}`,
+          teamId,
+          name: p.player.name,
+          rating,
+        });
+      }
+    }
+    return ratings;
   }
 
   static mapEvents(fixtureId: string, events: ApiFootballEventItem[]): ProviderEvent[] {

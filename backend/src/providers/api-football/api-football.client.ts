@@ -117,18 +117,60 @@ export class ApiFootballClient {
     return this.executeRequest<ApiFootballFixtureItem[]>(endpoint, 'get_fixtures', priority, cycleId);
   }
 
+  /**
+   * Fetches multiple fixtures in a single batch request via GET /fixtures?ids={id1}-{id2}-...-{idN}
+   * Supports up to 20 fixture IDs per request.
+   */
+  async getFixturesByIds(
+    fixtureIds: (number | string)[],
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string
+  ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
+    const cleanIds = fixtureIds
+      .map((id) => (typeof id === 'string' ? id.replace(/^fix_/, '') : id.toString()))
+      .filter((id) => id.trim().length > 0 && !isNaN(Number(id)))
+      .slice(0, 20);
+
+    if (cleanIds.length === 0) {
+      return {
+        success: true,
+        httpStatus: 200,
+        responseTimeMs: 0,
+        ledgerId: '',
+        data: {
+          get: 'fixtures',
+          parameters: { ids: '' },
+          errors: [],
+          results: 0,
+          paging: { current: 1, total: 1 },
+          response: [],
+        },
+      };
+    }
+
+    const idsParam = cleanIds.join('-');
+    const endpoint = `/fixtures?ids=${idsParam}`;
+    return this.executeRequest<ApiFootballFixtureItem[]>(endpoint, 'get_fixtures_batch', priority, cycleId);
+  }
+
   async getFixtures(
-    params: { id?: number; date?: string; league?: number; season?: number; live?: string },
+    params: { id?: number; ids?: string | (number | string)[]; date?: string; league?: number; season?: number; live?: string },
     priority: RequestPriority = 'NORMAL',
     cycleId?: string,
     competitionId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
-    if (params.date && !params.league && !params.id && !params.season && !params.live) {
+    if (params.date && !params.league && !params.id && !params.ids && !params.season && !params.live) {
       return this.getFixturesByDate(params.date, priority, cycleId);
     }
 
     const query = new URLSearchParams();
     if (params.id) query.set('id', params.id.toString());
+    if (params.ids) {
+      const idsStr = Array.isArray(params.ids)
+        ? params.ids.map((id) => (typeof id === 'string' ? id.replace(/^fix_/, '') : id.toString())).join('-')
+        : params.ids;
+      query.set('ids', idsStr);
+    }
     if (params.date) query.set('date', params.date);
     if (params.league) query.set('league', params.league.toString());
     if (params.season) query.set('season', params.season.toString());

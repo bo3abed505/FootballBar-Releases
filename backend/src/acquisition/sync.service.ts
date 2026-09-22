@@ -1,11 +1,12 @@
 import { inArray, eq, and, gte, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import { FootballProvider, FixtureFilter } from '../providers/football-provider.js';
+import { FootballProvider, FixtureFilter, ProviderFixtureDetail } from '../providers/football-provider.js';
 import { AcquisitionService, NormalizedAcquisitionBatch } from './acquisition.service.js';
 import { normalizeEvent } from '../normalization/event.js';
 import { AcquisitionPolicyEngine } from './acquisition-policy.js';
 import { generateCanonicalId } from '../db/canonical-id.js';
 import { ensureProviderAlias } from '../db/provider-alias.js';
+import { Logger } from '../diagnostics/logger.js';
 
 export interface SyncSummary {
   provider: string;
@@ -565,9 +566,18 @@ export class SyncService {
 
   /**
    * Finalizes recently finished matches to capture final score and events.
-   * Directly fetches fixture details for recently finished matches (bounded).
+   * Delegates to acquireFinalization.
    */
   async finalizeRecentlyFinished(competitionIds?: (string | number)[], cycleId?: string): Promise<SyncSummary> {
+    return this.acquireFinalization(competitionIds, cycleId);
+  }
+
+  /**
+   * Acquires finalization details in batches of up to 20 fixtures.
+   * Employs partial failure isolation so anomalies or missing fixtures in the batch
+   * do not abort the reconciliation of remaining valid fixtures.
+   */
+  async acquireFinalization(competitionIds?: (string | number)[], cycleId?: string): Promise<SyncSummary> {
     const summary: SyncSummary = {
       provider: this.provider.providerName,
       fixturesDiscovered: 0,
@@ -590,62 +600,103 @@ export class SyncService {
       );
     }
 
-    // Bounded: fetch at most 5 recently finished fixtures per cycle, prioritizing unpolled fixtures
+    // Bounded: fetch up to 20 recently finished fixtures per cycle, prioritizing unpolled fixtures
     const candidates = await db.query.fixtures.findMany({
       where: and(...whereConditions),
       orderBy: (fixtures, { asc, desc }) => [asc(fixtures.lastPolledAt), desc(fixtures.updatedAt)],
-      limit: 5,
+      limit: 20,
     });
 
-    for (const fix of candidates) {
+    if (candidates.length === 0) {
+      return summary;
+    }
+
+    // Process candidate fixtures in batches of up to 20 IDs
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+      const batchCandidates = candidates.slice(i, i + BATCH_SIZE);
+      const batchIds = batchCandidates.map((c) => c.id);
+
+      let detailsList: ProviderFixtureDetail[] = [];
       try {
-        const details = await this.provider.getFixtureDetails(fix.id, cycleId);
-        if (details) {
+        if (typeof this.provider.getFixtureDetailsBatch === 'function') {
+          detailsList = await this.provider.getFixtureDetailsBatch(batchIds, cycleId);
+        } else {
+          // Fallback if provider doesn't implement batching
+          const fetched = await Promise.all(
+            batchIds.map((id) => this.provider.getFixtureDetails(id, cycleId))
+          );
+          detailsList = fetched.filter((d): d is ProviderFixtureDetail => d !== null);
+        }
+      } catch (err) {
+        Logger.warn('SyncService', 'BatchAcquisitionError', `Batch fixture details acquisition failed for batch of ${batchIds.length} fixtures: ${err}`, cycleId);
+        // Touch lastPolledAt on all candidates so they don't loop endlessly on persistent errors
+        for (const candidate of batchCandidates) {
           await db
             .update(schema.fixtures)
-            .set({
-              homeScore: details.score.home,
-              awayScore: details.score.away,
-              homeScoreHt: details.score.homeHt ?? fix.homeScoreHt,
-              awayScoreHt: details.score.awayHt ?? fix.awayScoreHt,
-              lastPolledAt: now,
-              updatedAt: now,
-            })
-            .where(eq(schema.fixtures.id, fix.id));
+            .set({ lastPolledAt: now })
+            .where(eq(schema.fixtures.id, candidate.id));
+        }
+        continue;
+      }
 
-          summary.fixturesUpdated++;
-          summary.hasChanges = true;
+      const detailsMap = new Map<string, ProviderFixtureDetail>();
+      for (const d of detailsList) {
+        detailsMap.set(d.id, d);
+      }
 
-          if (details.events && details.events.length > 0) {
-            const incomingUids = details.events.map((e) => e.eventUid);
-            const existingEvents = await db
-              .select({ eventUid: schema.events.eventUid })
-              .from(schema.events)
-              .where(inArray(schema.events.eventUid, incomingUids));
+      // Reconcile each candidate with partial failure isolation
+      for (const fix of batchCandidates) {
+        try {
+          const details = detailsMap.get(fix.id);
+          if (details) {
+            await db
+              .update(schema.fixtures)
+              .set({
+                homeScore: details.score.home,
+                awayScore: details.score.away,
+                homeScoreHt: details.score.homeHt ?? fix.homeScoreHt,
+                awayScoreHt: details.score.awayHt ?? fix.awayScoreHt,
+                lastPolledAt: now,
+                updatedAt: now,
+              })
+              .where(eq(schema.fixtures.id, fix.id));
 
-            const existingUidSet = new Set(existingEvents.map((e) => e.eventUid));
-            const newEvents = details.events
-              .filter((e) => !existingUidSet.has(e.eventUid))
-              .map(normalizeEvent);
-            if (newEvents.length > 0) {
-              await db.insert(schema.events).values(newEvents).onConflictDoNothing();
-              summary.eventsInserted += newEvents.length;
-              summary.hasChanges = true;
+            summary.fixturesUpdated++;
+            summary.hasChanges = true;
+
+            if (details.events && details.events.length > 0) {
+              const incomingUids = details.events.map((e) => e.eventUid);
+              const existingEvents = await db
+                .select({ eventUid: schema.events.eventUid })
+                .from(schema.events)
+                .where(inArray(schema.events.eventUid, incomingUids));
+
+              const existingUidSet = new Set(existingEvents.map((e) => e.eventUid));
+              const newEvents = details.events
+                .filter((e) => !existingUidSet.has(e.eventUid))
+                .map(normalizeEvent);
+              if (newEvents.length > 0) {
+                await db.insert(schema.events).values(newEvents).onConflictDoNothing();
+                summary.eventsInserted += newEvents.length;
+                summary.hasChanges = true;
+              }
             }
+          } else {
+            // Missing from batch response: touch lastPolledAt and log warning so it doesn't loop forever
+            Logger.warn('SyncService', 'MissingBatchFixture', `Fixture ${fix.id} candidate for finalization was not returned in provider batch details response`, cycleId);
+            await db
+              .update(schema.fixtures)
+              .set({ lastPolledAt: now })
+              .where(eq(schema.fixtures.id, fix.id));
           }
-        } else {
-          // If provider cannot find fixture or returns null, touch lastPolledAt so it ages out to FINAL
+        } catch (itemErr) {
+          Logger.warn('SyncService', 'ReconciliationError', `Failed reconciling fixture ${fix.id} during batch finalization: ${itemErr}`, cycleId);
           await db
             .update(schema.fixtures)
             .set({ lastPolledAt: now })
             .where(eq(schema.fixtures.id, fix.id));
         }
-      } catch {
-        // Safe error handling: touch lastPolledAt so failed finalization doesn't spin forever
-        await db
-          .update(schema.fixtures)
-          .set({ lastPolledAt: now })
-          .where(eq(schema.fixtures.id, fix.id));
       }
     }
 
