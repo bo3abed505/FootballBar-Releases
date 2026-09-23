@@ -420,4 +420,234 @@ public class TaskbarTickerCoordinatorTests
             content.Contains("coordinator.ApplySnapshot"),
             "App.xaml.cs must invoke ApplySnapshot on the captured coordinator reference.");
     }
+
+    [TestMethod]
+    public void Test18_PinMatch_PausesCarousel_AndStaysOnPinnedMatchAcrossTicks()
+    {
+        var timer = new TestTickerTimer();
+        var emittedStates = new List<(string? Id, string Text, bool IsPinned)>();
+
+        using var coordinator = new TaskbarTickerCoordinator(
+            timer,
+            (id, text) => { },
+            null,
+            (id, text, home, away, match, isPinned) => emittedStates.Add((id, text, isPinned)));
+
+        var trayData = new TrayDataDto
+        {
+            Matches = new List<TrayMatchDto>
+            {
+                CreateMatch("m1", "ARS", "CHE"),
+                CreateMatch("m2", "LIV", "MCI"),
+                CreateMatch("m3", "MUN", "NEW")
+            }
+        };
+
+        coordinator.ApplySnapshot(trayData, TickerConnectionState.OnlineFresh);
+        Assert.AreEqual("m1", coordinator.State.CurrentCandidate?.Id);
+        Assert.IsFalse(coordinator.IsPinned);
+
+        // Pin m2
+        bool pinned = coordinator.PinMatch("m2");
+        Assert.IsTrue(pinned);
+        Assert.IsTrue(coordinator.IsPinned);
+        Assert.AreEqual("m2", coordinator.PinnedMatchId);
+        Assert.AreEqual("m2", coordinator.State.CurrentCandidate?.Id);
+
+        int emissionsCountBeforeTicks = emittedStates.Count;
+
+        // Fire multiple ticks - should NOT advance because match is pinned
+        timer.FireTick();
+        Assert.AreEqual("m2", coordinator.State.CurrentCandidate?.Id);
+
+        timer.FireTick();
+        Assert.AreEqual("m2", coordinator.State.CurrentCandidate?.Id);
+
+        // Emission count should NOT increase from ticks while pinned
+        Assert.AreEqual(emissionsCountBeforeTicks, emittedStates.Count);
+    }
+
+    [TestMethod]
+    public void Test19_UnpinMatch_ResumesCarouselRotation()
+    {
+        var timer = new TestTickerTimer();
+        var emittedStates = new List<(string? Id, string Text, bool IsPinned)>();
+
+        using var coordinator = new TaskbarTickerCoordinator(
+            timer,
+            (id, text) => { },
+            null,
+            (id, text, home, away, match, isPinned) => emittedStates.Add((id, text, isPinned)));
+
+        var trayData = new TrayDataDto
+        {
+            Matches = new List<TrayMatchDto>
+            {
+                CreateMatch("m1", "ARS", "CHE"),
+                CreateMatch("m2", "LIV", "MCI")
+            }
+        };
+
+        coordinator.ApplySnapshot(trayData, TickerConnectionState.OnlineFresh);
+        coordinator.PinMatch("m1");
+        Assert.IsTrue(coordinator.IsPinned);
+
+        // Timer tick does not advance while pinned
+        timer.FireTick();
+        Assert.AreEqual("m1", coordinator.State.CurrentCandidate?.Id);
+
+        // Unpin
+        coordinator.UnpinMatch();
+        Assert.IsFalse(coordinator.IsPinned);
+        Assert.IsNull(coordinator.PinnedMatchId);
+
+        // Next timer tick should advance to m2
+        timer.FireTick();
+        Assert.AreEqual("m2", coordinator.State.CurrentCandidate?.Id);
+
+        // Next timer tick should rotate back to m1
+        timer.FireTick();
+        Assert.AreEqual("m1", coordinator.State.CurrentCandidate?.Id);
+    }
+
+    [TestMethod]
+    public void Test20_TogglePin_TogglesStateCorrectly()
+    {
+        var timer = new TestTickerTimer();
+        using var coordinator = new TaskbarTickerCoordinator(
+            timer,
+            (id, text) => { });
+
+        var trayData = new TrayDataDto
+        {
+            Matches = new List<TrayMatchDto>
+            {
+                CreateMatch("m1", "ARS", "CHE"),
+                CreateMatch("m2", "LIV", "MCI")
+            }
+        };
+
+        coordinator.ApplySnapshot(trayData, TickerConnectionState.OnlineFresh);
+
+        // Toggle on current candidate (m1)
+        bool pinResult = coordinator.TogglePin();
+        Assert.IsTrue(pinResult);
+        Assert.IsTrue(coordinator.IsPinned);
+        Assert.AreEqual("m1", coordinator.PinnedMatchId);
+
+        // Toggle again without arguments should unpin
+        bool unpinResult = coordinator.TogglePin();
+        Assert.IsFalse(unpinResult);
+        Assert.IsFalse(coordinator.IsPinned);
+        Assert.IsNull(coordinator.PinnedMatchId);
+
+        // Toggle specifying m2
+        bool pinM2Result = coordinator.TogglePin("m2");
+        Assert.IsTrue(pinM2Result);
+        Assert.IsTrue(coordinator.IsPinned);
+        Assert.AreEqual("m2", coordinator.PinnedMatchId);
+
+        // Toggle switching to m1
+        bool pinM1Result = coordinator.TogglePin("m1");
+        Assert.IsTrue(pinM1Result);
+        Assert.IsTrue(coordinator.IsPinned);
+        Assert.AreEqual("m1", coordinator.PinnedMatchId);
+    }
+
+    [TestMethod]
+    public void Test21_ApplySnapshot_WhenPinnedMatchRemoved_ClearsPinnedStateGracefully()
+    {
+        var timer = new TestTickerTimer();
+        using var coordinator = new TaskbarTickerCoordinator(
+            timer,
+            (id, text) => { });
+
+        var initialData = new TrayDataDto
+        {
+            Matches = new List<TrayMatchDto>
+            {
+                CreateMatch("m1", "ARS", "CHE"),
+                CreateMatch("m2", "LIV", "MCI")
+            }
+        };
+
+        coordinator.ApplySnapshot(initialData, TickerConnectionState.OnlineFresh);
+        coordinator.PinMatch("m2");
+        Assert.IsTrue(coordinator.IsPinned);
+        Assert.AreEqual("m2", coordinator.PinnedMatchId);
+
+        // Next snapshot without m2 (e.g. match concluded or expired)
+        var updatedData = new TrayDataDto
+        {
+            Matches = new List<TrayMatchDto>
+            {
+                CreateMatch("m1", "ARS", "CHE"),
+                CreateMatch("m3", "TOT", "AVL")
+            }
+        };
+
+        coordinator.ApplySnapshot(updatedData, TickerConnectionState.OnlineFresh);
+
+        // Pin must be dropped gracefully
+        Assert.IsFalse(coordinator.IsPinned);
+        Assert.IsNull(coordinator.PinnedMatchId);
+        Assert.AreEqual("m1", coordinator.State.CurrentCandidate?.Id);
+
+        // Ticker rotation resumes
+        timer.FireTick();
+        Assert.AreEqual("m3", coordinator.State.CurrentCandidate?.Id);
+    }
+
+    [TestMethod]
+    public void Test22_GoalscorerDtoVerification_TrayMatchSurfacesFormattedGoalscorers()
+    {
+        var match = CreateMatch("m1", "ARS", "CHE", "LIVE", 55, 2, 1);
+        match.RecentEvents = new List<TrayEventDto>
+        {
+            new TrayEventDto { Id = "e1", Type = "Goal", Minute = 14, PlayerName = "B. Saka" },
+            new TrayEventDto { Id = "e2", Type = "Card", Minute = 22, PlayerName = "E. Fernandez" },
+            new TrayEventDto { Id = "e3", Type = "Goal", Minute = 45, ExtraMinute = 2, PlayerName = "G. Martinelli" },
+            new TrayEventDto { Id = "e4", Type = "Goal", Minute = 53, PlayerName = "C. Palmer" }
+        };
+
+        var goalscorers = match.FormattedGoalscorers;
+        Assert.IsNotNull(goalscorers);
+        Assert.AreEqual(3, goalscorers.Count);
+        Assert.IsTrue(goalscorers[0].Contains("B. Saka 14'"));
+        Assert.IsTrue(goalscorers[1].Contains("G. Martinelli 45+2'"));
+        Assert.IsTrue(goalscorers[2].Contains("C. Palmer 53'"));
+    }
+
+    [TestMethod]
+    public void Test23_TaskbarTickerPinButtonEventInterception_StructuralContractGuards()
+    {
+        string root = FindRepoRoot();
+        string xamlPath = Path.Combine(root, "src", "client", "FootballTray.Client", "Taskbar", "TaskbarTicker.xaml");
+        string csPath = Path.Combine(root, "src", "client", "FootballTray.Client", "Taskbar", "TaskbarTicker.xaml.cs");
+
+        Assert.IsTrue(File.Exists(xamlPath), "TaskbarTicker.xaml must exist.");
+        Assert.IsTrue(File.Exists(csPath), "TaskbarTicker.xaml.cs must exist.");
+
+        string xaml = File.ReadAllText(xamlPath);
+        string cs = File.ReadAllText(csPath);
+
+        // 1. ToolTip must have ShowDuration="30000"
+        Assert.IsTrue(xaml.Contains("ShowDuration=\"30000\""), "TaskbarTicker.xaml must specify ShowDuration=\"30000\" on ToolTip.");
+
+        // 2. PinButton must be declared with click and tap handlers
+        Assert.IsTrue(xaml.Contains("x:Name=\"PinButton\""), "TaskbarTicker.xaml must declare PinButton.");
+        Assert.IsTrue(xaml.Contains("Click=\"PinButton_Click\""), "PinButton must wire Click to PinButton_Click.");
+        Assert.IsTrue(xaml.Contains("Tapped=\"PinButton_Tapped\""), "PinButton must wire Tapped to PinButton_Tapped.");
+
+        // 3. PinButton_Click and PinButton_Tapped must mark e.Handled = true
+        Assert.IsTrue(cs.Contains("PinButton_Click"), "TaskbarTicker.xaml.cs must implement PinButton_Click.");
+        Assert.IsTrue(cs.Contains("PinButton_Tapped"), "TaskbarTicker.xaml.cs must implement PinButton_Tapped.");
+        Assert.IsTrue(cs.Contains("e.Handled = true;"), "Event handlers must set e.Handled = true to stop event bubbling.");
+
+        // 4. PinToggled event must be declared
+        Assert.IsTrue(cs.Contains("public event EventHandler<string?>? PinToggled;"), "TaskbarTicker must declare PinToggled event.");
+
+        // 5. RootBorder_Tapped must verify not handled and guard against PinButton descendants
+        Assert.IsTrue(cs.Contains("IsDescendantOf(orig, PinButton)"), "RootBorder_Tapped must intercept events originating from PinButton.");
+    }
 }

@@ -24,6 +24,8 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(ApiErrorDto))]
 [JsonSerializable(typeof(TrayDataDto))]
 [JsonSerializable(typeof(TrayMatchDto))]
+[JsonSerializable(typeof(TrayEventDto))]
+[JsonSerializable(typeof(List<TrayEventDto>))]
 [JsonSerializable(typeof(MatchDetailDto))]
 [JsonSerializable(typeof(CachedTrayPayload))]
 [JsonSerializable(typeof(UserPreferences))]

@@ -87,6 +87,28 @@ public class TrayMatchDto
     [JsonPropertyName("recentEvents")]
     public List<TrayEventDto> RecentEvents { get; set; } = new();
 
+    [JsonIgnore]
+    public IReadOnlyList<string> FormattedGoalscorers
+    {
+        get
+        {
+            if (RecentEvents == null || RecentEvents.Count == 0)
+                return Array.Empty<string>();
+
+            var list = new List<string>();
+            foreach (var e in RecentEvents)
+            {
+                if (string.Equals(e.Type, "Goal", StringComparison.OrdinalIgnoreCase))
+                {
+                    var min = e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'";
+                    var scorer = !string.IsNullOrWhiteSpace(e.PlayerName) ? e.PlayerName : (!string.IsNullOrWhiteSpace(e.Description) ? e.Description : "Goal");
+                    list.Add($"⚽ {scorer} {min}");
+                }
+            }
+            return list;
+        }
+    }
+
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }
 }

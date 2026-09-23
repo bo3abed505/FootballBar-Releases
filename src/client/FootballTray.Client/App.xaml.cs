@@ -206,12 +206,19 @@ public partial class App : Application
             };
 
             _tickerControl = new TaskbarTicker();
+            _tickerControl.PinToggled += (sender, matchId) =>
+            {
+                _tickerCoordinator?.TogglePin(matchId);
+            };
+
             if (activationDispatcher != null)
             {
                 _tickerCoordinator = new TaskbarTickerCoordinator(
                     activationDispatcher,
                     (fixtureId, formattedText) => _tickerControl?.UpdateDisplay(fixtureId, formattedText),
-                    (fixtureId, formattedText, homeLogo, awayLogo) => _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo));
+                    (fixtureId, formattedText, homeLogo, awayLogo) => _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo),
+                    (fixtureId, formattedText, homeLogo, awayLogo, match, isPinned) =>
+                        _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo, match, isPinned));
             }
 
             bool initialized = await _taskbarHost.InitializeAsync(_tickerControl);

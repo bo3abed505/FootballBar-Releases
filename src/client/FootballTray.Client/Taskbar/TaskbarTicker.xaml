@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:local="using:FootballTray.Client.Taskbar"
     mc:Ignorable="d">
 
     <Border
@@ -12,18 +13,130 @@
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="6"
-        Padding="8,2,8,2"
+        Padding="6,2,8,2"
         HorizontalAlignment="Stretch"
         VerticalAlignment="Stretch"
         PointerEntered="RootBorder_PointerEntered"
         PointerExited="RootBorder_PointerExited"
         Tapped="RootBorder_Tapped">
 
+        <ToolTipService.ToolTip>
+            <ToolTip
+                x:Name="TickerHoverToolTip"
+                Placement="Top"
+                local:TaskbarTicker.ShowDuration="30000"
+                Background="Transparent"
+                BorderThickness="0"
+                Padding="0">
+                <Border
+                    Background="#F01E1E1E"
+                    BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="12,10"
+                    MaxWidth="320">
+                    <StackPanel Spacing="6">
+                        <!-- Header: Competition & Status -->
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock
+                                x:Name="FlyoutCompetitionText"
+                                Text="FootballTray"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                Grid.Column="1"
+                                x:Name="FlyoutStatusText"
+                                Text=""
+                                FontSize="11"
+                                FontWeight="Bold"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Grid>
+
+                        <!-- Teams & Score -->
+                        <Grid ColumnDefinitions="*,Auto,*" VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="FlyoutHomeTeamText"
+                                Text="Home"
+                                FontSize="13"
+                                FontWeight="SemiBold"
+                                TextAlignment="Right"
+                                TextTrimming="CharacterEllipsis"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                x:Name="FlyoutScoreText"
+                                Text="vs"
+                                FontSize="13"
+                                FontWeight="Bold"
+                                Margin="8,0"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock
+                                Grid.Column="2"
+                                x:Name="FlyoutAwayTeamText"
+                                Text="Away"
+                                FontSize="13"
+                                FontWeight="SemiBold"
+                                TextAlignment="Left"
+                                TextTrimming="CharacterEllipsis"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </Grid>
+
+                        <!-- Recent Goalscorers / Events -->
+                        <StackPanel x:Name="FlyoutEventsPanel" Spacing="2" Visibility="Collapsed">
+                            <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,2,0,4" />
+                            <TextBlock
+                                Text="Recent Goals:"
+                                FontSize="10"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <TextBlock
+                                x:Name="FlyoutGoalscorersText"
+                                Text=""
+                                FontSize="11"
+                                TextWrapping="Wrap"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+
+                        <!-- Pin Hint -->
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,2,0,2" />
+                        <TextBlock
+                            x:Name="FlyoutPinHintText"
+                            Text="Click 📌 to pause ticker carousel"
+                            FontSize="10"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </Border>
+            </ToolTip>
+        </ToolTipService.ToolTip>
+
         <StackPanel
             Orientation="Horizontal"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
-            Spacing="6">
+            Spacing="5">
+
+            <Button
+                x:Name="PinButton"
+                Padding="0"
+                Width="18"
+                Height="18"
+                MinWidth="18"
+                MinHeight="18"
+                CornerRadius="4"
+                Background="Transparent"
+                BorderThickness="0"
+                VerticalAlignment="Center"
+                Click="PinButton_Click"
+                Tapped="PinButton_Tapped"
+                ToolTipService.ToolTip="Pin match to pause ticker rotation">
+                <FontIcon
+                    x:Name="PinIcon"
+                    Glyph="&#xE718;"
+                    FontSize="10"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            </Button>
             
             <FontIcon
                 x:Name="TickerIcon"

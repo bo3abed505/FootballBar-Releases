@@ -12,7 +12,13 @@ namespace FootballTray.Client.Taskbar;
 /// Structured display state emitted to the taskbar ticker UI.
 /// Atomic pairing of current match ID (for click routing) and formatted text.
 /// </summary>
-public sealed record TickerDisplayState(string? FixtureId, string FormattedText, string? HomeTeamLogoUrl = null, string? AwayTeamLogoUrl = null);
+public sealed record TickerDisplayState(
+    string? FixtureId,
+    string FormattedText,
+    string? HomeTeamLogoUrl = null,
+    string? AwayTeamLogoUrl = null,
+    TrayMatchDto? Match = null,
+    bool IsPinned = false);
 
 /// <summary>
 /// Abstraction over ticker interval timer for deterministic testing without UI thread or sleep.
@@ -102,6 +108,24 @@ public sealed class TickerRotationState
         CurrentIndex = 0;
     }
 
+    public bool SetCurrentMatch(string matchId)
+    {
+        if (string.IsNullOrEmpty(matchId) || _candidates.Count == 0)
+        {
+            return false;
+        }
+
+        int foundIndex = _candidates.FindIndex(m => string.Equals(m.Id, matchId, StringComparison.Ordinal));
+        if (foundIndex >= 0)
+        {
+            CurrentIndex = foundIndex;
+            CurrentCandidate = _candidates[foundIndex];
+            return true;
+        }
+
+        return false;
+    }
+
     public TrayMatchDto? Advance()
     {
         if (_candidates.Count == 0)
@@ -123,14 +147,16 @@ public sealed class TickerRotationState
         return CurrentCandidate;
     }
 
-    public TickerDisplayState GetDisplayState(TickerConnectionState connectionState)
+    public TickerDisplayState GetDisplayState(TickerConnectionState connectionState, bool isPinned = false)
     {
         var text = TrayTickerFormatter.FormatMatchTicker(CurrentCandidate, connectionState);
         return new TickerDisplayState(
             CurrentCandidate?.Id,
             text,
             CurrentCandidate?.HomeTeam?.LogoUrl,
-            CurrentCandidate?.AwayTeam?.LogoUrl);
+            CurrentCandidate?.AwayTeam?.LogoUrl,
+            CurrentCandidate,
+            isPinned);
     }
 }
 
@@ -142,34 +168,81 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     private readonly ITickerTimer _timer;
     private readonly Action<string?, string> _displayCallback;
     private readonly Action<string?, string, string?, string?>? _extendedDisplayCallback;
+    private readonly Action<string?, string, string?, string?, TrayMatchDto?, bool>? _fullDisplayCallback;
     private readonly TickerRotationState _state = new();
     private TickerConnectionState _currentConnectionState = TickerConnectionState.OnlineFresh;
+    private string? _pinnedMatchId;
     private bool _isDisposed;
 
     public static readonly TimeSpan RotationInterval = TimeSpan.FromSeconds(7);
 
     public TickerRotationState State => _state;
     public bool IsCycling => _timer.IsRunning;
+    public string? PinnedMatchId => _pinnedMatchId;
+    public bool IsPinned => !string.IsNullOrEmpty(_pinnedMatchId);
 
     public TaskbarTickerCoordinator(
         DispatcherQueue dispatcherQueue,
         Action<string?, string> displayCallback,
-        Action<string?, string, string?, string?>? extendedDisplayCallback = null)
-        : this(new DispatcherQueueTickerTimer(dispatcherQueue), displayCallback, extendedDisplayCallback)
+        Action<string?, string, string?, string?>? extendedDisplayCallback = null,
+        Action<string?, string, string?, string?, TrayMatchDto?, bool>? fullDisplayCallback = null)
+        : this(new DispatcherQueueTickerTimer(dispatcherQueue), displayCallback, extendedDisplayCallback, fullDisplayCallback)
     {
     }
 
     internal TaskbarTickerCoordinator(
         ITickerTimer timer,
         Action<string?, string> displayCallback,
-        Action<string?, string, string?, string?>? extendedDisplayCallback = null)
+        Action<string?, string, string?, string?>? extendedDisplayCallback = null,
+        Action<string?, string, string?, string?, TrayMatchDto?, bool>? fullDisplayCallback = null)
     {
         _timer = timer ?? throw new ArgumentNullException(nameof(timer));
         _displayCallback = displayCallback ?? throw new ArgumentNullException(nameof(displayCallback));
         _extendedDisplayCallback = extendedDisplayCallback;
+        _fullDisplayCallback = fullDisplayCallback;
 
         _timer.Interval = RotationInterval;
         _timer.Tick += OnTimerTick;
+    }
+
+    public bool PinMatch(string? matchId = null)
+    {
+        if (_isDisposed) return false;
+
+        var targetId = matchId ?? _state.CurrentCandidate?.Id;
+        if (string.IsNullOrEmpty(targetId)) return false;
+
+        bool exists = _state.Candidates.Any(m => string.Equals(m.Id, targetId, StringComparison.Ordinal));
+        if (exists)
+        {
+            _pinnedMatchId = targetId;
+            _state.SetCurrentMatch(targetId);
+            EmitCurrentDisplay();
+            return true;
+        }
+
+        return false;
+    }
+
+    public void UnpinMatch()
+    {
+        if (_isDisposed) return;
+        _pinnedMatchId = null;
+        EmitCurrentDisplay();
+    }
+
+    public bool TogglePin(string? matchId = null)
+    {
+        if (_isDisposed) return false;
+
+        var targetId = matchId ?? _state.CurrentCandidate?.Id;
+        if (IsPinned && (string.IsNullOrEmpty(targetId) || string.Equals(_pinnedMatchId, targetId, StringComparison.Ordinal)))
+        {
+            UnpinMatch();
+            return false;
+        }
+
+        return PinMatch(targetId);
     }
 
     public void ApplySnapshot(TrayUpdateEventArgs updateArgs, UserPreferences? preferences = null)
@@ -206,6 +279,20 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
         _state.ApplyCandidates(candidates);
 
+        // If a match was pinned, retain it if still in candidates, otherwise drop the pin
+        if (!string.IsNullOrEmpty(_pinnedMatchId))
+        {
+            bool matchStillPresent = _state.Candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
+            if (matchStillPresent)
+            {
+                _state.SetCurrentMatch(_pinnedMatchId);
+            }
+            else
+            {
+                _pinnedMatchId = null;
+            }
+        }
+
         // Timer lifecycle management
         if (_state.CanCycle)
         {
@@ -235,15 +322,22 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             return;
         }
 
+        if (!string.IsNullOrEmpty(_pinnedMatchId))
+        {
+            // Carousel rotation is paused while a match is pinned
+            return;
+        }
+
         _state.Advance();
         EmitCurrentDisplay();
     }
 
     private void EmitCurrentDisplay()
     {
-        var displayState = _state.GetDisplayState(_currentConnectionState);
+        var displayState = _state.GetDisplayState(_currentConnectionState, IsPinned);
         _displayCallback(displayState.FixtureId, displayState.FormattedText);
         _extendedDisplayCallback?.Invoke(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl);
+        _fullDisplayCallback?.Invoke(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl, displayState.Match, displayState.IsPinned);
     }
 
     public void Dispose()
