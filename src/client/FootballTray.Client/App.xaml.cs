@@ -210,7 +210,8 @@ public partial class App : Application
             {
                 _tickerCoordinator = new TaskbarTickerCoordinator(
                     activationDispatcher,
-                    (fixtureId, formattedText) => _tickerControl?.UpdateDisplay(fixtureId, formattedText));
+                    (fixtureId, formattedText) => _tickerControl?.UpdateDisplay(fixtureId, formattedText),
+                    (fixtureId, formattedText, homeLogo, awayLogo) => _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo));
             }
 
             bool initialized = await _taskbarHost.InitializeAsync(_tickerControl);

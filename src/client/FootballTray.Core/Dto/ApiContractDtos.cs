@@ -137,6 +137,17 @@ public class CompetitionSummaryDto
 
     [JsonPropertyName("code")]
     public string? Code { get; set; }
+
+    [JsonPropertyName("logoUrl")]
+    public string? LogoUrl { get; set; }
+}
+
+public class TeamDto : TeamSummaryDto
+{
+}
+
+public class CompetitionDto : CompetitionSummaryDto
+{
 }
 
 public class ScoreDto

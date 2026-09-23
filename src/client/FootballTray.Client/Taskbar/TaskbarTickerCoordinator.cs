@@ -12,7 +12,7 @@ namespace FootballTray.Client.Taskbar;
 /// Structured display state emitted to the taskbar ticker UI.
 /// Atomic pairing of current match ID (for click routing) and formatted text.
 /// </summary>
-public sealed record TickerDisplayState(string? FixtureId, string FormattedText);
+public sealed record TickerDisplayState(string? FixtureId, string FormattedText, string? HomeTeamLogoUrl = null, string? AwayTeamLogoUrl = null);
 
 /// <summary>
 /// Abstraction over ticker interval timer for deterministic testing without UI thread or sleep.
@@ -126,7 +126,11 @@ public sealed class TickerRotationState
     public TickerDisplayState GetDisplayState(TickerConnectionState connectionState)
     {
         var text = TrayTickerFormatter.FormatMatchTicker(CurrentCandidate, connectionState);
-        return new TickerDisplayState(CurrentCandidate?.Id, text);
+        return new TickerDisplayState(
+            CurrentCandidate?.Id,
+            text,
+            CurrentCandidate?.HomeTeam?.LogoUrl,
+            CurrentCandidate?.AwayTeam?.LogoUrl);
     }
 }
 
@@ -137,6 +141,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 {
     private readonly ITickerTimer _timer;
     private readonly Action<string?, string> _displayCallback;
+    private readonly Action<string?, string, string?, string?>? _extendedDisplayCallback;
     private readonly TickerRotationState _state = new();
     private TickerConnectionState _currentConnectionState = TickerConnectionState.OnlineFresh;
     private bool _isDisposed;
@@ -148,17 +153,20 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
     public TaskbarTickerCoordinator(
         DispatcherQueue dispatcherQueue,
-        Action<string?, string> displayCallback)
-        : this(new DispatcherQueueTickerTimer(dispatcherQueue), displayCallback)
+        Action<string?, string> displayCallback,
+        Action<string?, string, string?, string?>? extendedDisplayCallback = null)
+        : this(new DispatcherQueueTickerTimer(dispatcherQueue), displayCallback, extendedDisplayCallback)
     {
     }
 
     internal TaskbarTickerCoordinator(
         ITickerTimer timer,
-        Action<string?, string> displayCallback)
+        Action<string?, string> displayCallback,
+        Action<string?, string, string?, string?>? extendedDisplayCallback = null)
     {
         _timer = timer ?? throw new ArgumentNullException(nameof(timer));
         _displayCallback = displayCallback ?? throw new ArgumentNullException(nameof(displayCallback));
+        _extendedDisplayCallback = extendedDisplayCallback;
 
         _timer.Interval = RotationInterval;
         _timer.Tick += OnTimerTick;
@@ -235,6 +243,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     {
         var displayState = _state.GetDisplayState(_currentConnectionState);
         _displayCallback(displayState.FixtureId, displayState.FormattedText);
+        _extendedDisplayCallback?.Invoke(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl);
     }
 
     public void Dispose()

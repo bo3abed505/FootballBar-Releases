@@ -1,7 +1,9 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
+using FootballTray.Client.Services;
 using FootballTray.Client.ViewModels;
 using FootballTray.Core.Dto;
 
@@ -63,6 +65,61 @@ public sealed partial class MatchCenterWindow : Window
         NoLineupsBorder.Visibility = ViewModel.HasLineups ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateLineupContainerVisibility();
+
+        // Asynchronously load team crests on background thread without blocking UI
+        _ = LoadLogosAsync(match);
+    }
+
+    private async Task LoadLogosAsync(MatchDetailDto match)
+    {
+        string? homeLogoUrl = match.HomeTeam?.LogoUrl;
+        string? awayLogoUrl = match.AwayTeam?.LogoUrl;
+        string matchId = match.Id;
+
+        Uri? homeUri = null;
+        Uri? awayUri = null;
+
+        try
+        {
+            if (!string.IsNullOrEmpty(homeLogoUrl))
+            {
+                homeUri = await ImageCacheService.Instance.GetCachedImageUriAsync(homeLogoUrl, returnFallbackOnFailure: false).ConfigureAwait(false);
+            }
+            if (!string.IsNullOrEmpty(awayLogoUrl))
+            {
+                awayUri = await ImageCacheService.Instance.GetCachedImageUriAsync(awayLogoUrl, returnFallbackOnFailure: false).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // Best effort
+        }
+
+        // WinUI 3 BitmapImage MUST strictly be instantiated on the UI thread inside DispatcherQueue
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (ViewModel.MatchId != matchId) return;
+
+            if (homeUri != null && HomeTeamLogo != null)
+            {
+                HomeTeamLogo.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(homeUri);
+                HomeTeamLogo.Visibility = Visibility.Visible;
+            }
+            else if (HomeTeamLogo != null)
+            {
+                HomeTeamLogo.Visibility = Visibility.Collapsed;
+            }
+
+            if (awayUri != null && AwayTeamLogo != null)
+            {
+                AwayTeamLogo.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(awayUri);
+                AwayTeamLogo.Visibility = Visibility.Visible;
+            }
+            else if (AwayTeamLogo != null)
+            {
+                AwayTeamLogo.Visibility = Visibility.Collapsed;
+            }
+        });
     }
 
     private void OnTabChecked(object sender, RoutedEventArgs e)

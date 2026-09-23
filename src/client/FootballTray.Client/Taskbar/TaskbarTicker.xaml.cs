@@ -26,19 +26,93 @@ public sealed partial class TaskbarTicker : UserControl
     /// </summary>
     public void UpdateDisplay(string? fixtureId, string formattedText)
     {
-        if (DispatcherQueue == null || DispatcherQueue.HasThreadAccess)
+        UpdateDisplay(fixtureId, formattedText, null, null);
+    }
+
+    /// <summary>
+    /// Updates the ticker text, click identity, and home/away team logos asynchronously without blocking the UI thread.
+    /// </summary>
+    public void UpdateDisplay(string? fixtureId, string formattedText, string? homeLogoUrl, string? awayLogoUrl)
+    {
+        void ApplyText()
         {
             _currentDisplayedMatchId = fixtureId;
             TickerText.Text = formattedText;
         }
+
+        if (DispatcherQueue == null || DispatcherQueue.HasThreadAccess)
+        {
+            ApplyText();
+        }
         else
         {
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                _currentDisplayedMatchId = fixtureId;
-                TickerText.Text = formattedText;
-            });
+            DispatcherQueue.TryEnqueue(ApplyText);
         }
+
+        // Asynchronously retrieve logos on a background thread without blocking the UI
+        _ = LoadLogosAsync(fixtureId, homeLogoUrl, awayLogoUrl);
+    }
+
+    private async Task LoadLogosAsync(string? fixtureId, string? homeLogoUrl, string? awayLogoUrl)
+    {
+        if (string.IsNullOrEmpty(homeLogoUrl) && string.IsNullOrEmpty(awayLogoUrl))
+        {
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                if (HomeTeamLogo != null) HomeTeamLogo.Visibility = Visibility.Collapsed;
+                if (AwayTeamLogo != null) AwayTeamLogo.Visibility = Visibility.Collapsed;
+            });
+            return;
+        }
+
+        Uri? homeUri = null;
+        Uri? awayUri = null;
+
+        try
+        {
+            if (!string.IsNullOrEmpty(homeLogoUrl))
+            {
+                homeUri = await ImageCacheService.Instance.GetCachedImageUriAsync(homeLogoUrl).ConfigureAwait(false);
+            }
+            if (!string.IsNullOrEmpty(awayLogoUrl))
+            {
+                awayUri = await ImageCacheService.Instance.GetCachedImageUriAsync(awayLogoUrl).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // Best effort
+        }
+
+        // WinUI 3 BitmapImage MUST strictly be instantiated on the UI thread inside DispatcherQueue
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_currentDisplayedMatchId != fixtureId)
+            {
+                // Discard stale logos if ticker rotated to another match during download
+                return;
+            }
+
+            if (homeUri != null && HomeTeamLogo != null)
+            {
+                HomeTeamLogo.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(homeUri);
+                HomeTeamLogo.Visibility = Visibility.Visible;
+            }
+            else if (HomeTeamLogo != null)
+            {
+                HomeTeamLogo.Visibility = Visibility.Collapsed;
+            }
+
+            if (awayUri != null && AwayTeamLogo != null)
+            {
+                AwayTeamLogo.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(awayUri);
+                AwayTeamLogo.Visibility = Visibility.Visible;
+            }
+            else if (AwayTeamLogo != null)
+            {
+                AwayTeamLogo.Visibility = Visibility.Collapsed;
+            }
+        });
     }
 
     /// <summary>

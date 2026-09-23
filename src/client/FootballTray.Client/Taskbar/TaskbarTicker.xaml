@@ -31,6 +31,14 @@
                 FontSize="12"
                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
 
+            <Image
+                x:Name="HomeTeamLogo"
+                Width="14"
+                Height="14"
+                VerticalAlignment="Center"
+                Stretch="Uniform"
+                Visibility="Collapsed" />
+
             <TextBlock
                 x:Name="TickerText"
                 Text="FootballTray"
@@ -38,6 +46,14 @@
                 FontWeight="SemiBold"
                 VerticalAlignment="Center"
                 Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+
+            <Image
+                x:Name="AwayTeamLogo"
+                Width="14"
+                Height="14"
+                VerticalAlignment="Center"
+                Stretch="Uniform"
+                Visibility="Collapsed" />
         </StackPanel>
     </Border>
 </UserControl>
