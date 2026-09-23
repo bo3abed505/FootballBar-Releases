@@ -10,6 +10,7 @@ using FootballTray.Client.Serialization;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.ViewModels;
 using FootballTray.Core.Dto;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -237,6 +238,346 @@ public class SerializationRegressionTests
         Assert.IsTrue(apiResult.IsSuccess, $"GetMatchDetailsAsync should succeed: {apiResult.ErrorMessage}");
         Assert.IsNotNull(apiResult.Envelope?.Data);
         Assert.AreEqual("fix_1570392", apiResult.Envelope.Data.Id);
+    }
+
+    [TestMethod]
+    public void Test02B_MatchDetail_WithLineupsAndStatistics_DeserializesSuccessfully()
+    {
+        const string v2MatchWithLineupsAndStatsJson = """
+        {
+          "schemaVersion": "2.0",
+          "requestId": "req_1788911613468_000003",
+          "version": 2,
+          "generatedAt": "2026-09-23T01:00:00.000Z",
+          "serverTime": "2026-09-23T01:00:00.000Z",
+          "stale": false,
+          "dataAgeSeconds": 10,
+          "data": {
+            "id": "ft_fix_elclasico",
+            "legacyId": "fix_99901",
+            "competition": {
+              "id": "ft_comp_laliga",
+              "legacyId": "comp_140",
+              "name": "La Liga",
+              "code": "PD"
+            },
+            "homeTeam": {
+              "id": "ft_team_barcelona",
+              "legacyId": "team_529",
+              "name": "FC Barcelona",
+              "shortName": "BAR",
+              "logoUrl": "https://media.api-sports.io/football/teams/529.png"
+            },
+            "awayTeam": {
+              "id": "ft_team_realmadrid",
+              "legacyId": "team_541",
+              "name": "Real Madrid",
+              "shortName": "RMA",
+              "logoUrl": "https://media.api-sports.io/football/teams/541.png"
+            },
+            "state": "LIVE",
+            "elapsedMinute": 65,
+            "extraMinute": 0,
+            "score": {
+              "home": 2,
+              "away": 1,
+              "halfTime": {
+                "home": 1,
+                "away": 0
+              },
+              "display": "2 - 1"
+            },
+            "venue": "Camp Nou",
+            "referee": "Gil Manzano",
+            "kickoffTime": "2026-09-23T19:00:00.000Z",
+            "events": [
+              {
+                "id": "evt_1",
+                "type": "Goal",
+                "minute": 23,
+                "extraMinute": 0,
+                "teamId": "ft_team_barcelona",
+                "playerName": "R. Lewandowski",
+                "description": "Goal"
+              }
+            ],
+            "lineups": [
+              {
+                "teamId": "ft_team_barcelona",
+                "formation": "4-3-3",
+                "coachName": "Hansi Flick",
+                "coach": {
+                  "id": "coach_1",
+                  "name": "Hansi Flick"
+                },
+                "startingXI": [
+                  { "name": "M. ter Stegen", "number": 1, "position": "G", "grid": "1:1", "isStarter": true },
+                  { "name": "J. Kounde", "number": 23, "position": "D", "grid": "2:1", "isStarter": true },
+                  { "name": "P. Cubarsi", "number": 2, "position": "D", "grid": "2:2", "isStarter": true },
+                  { "name": "I. Martinez", "number": 5, "position": "D", "grid": "2:3", "isStarter": true },
+                  { "name": "A. Balde", "number": 3, "position": "D", "grid": "2:4", "isStarter": true },
+                  { "name": "M. Casado", "number": 17, "position": "M", "grid": "3:1", "isStarter": true },
+                  { "name": "Pedri", "number": 8, "position": "M", "grid": "3:2", "isStarter": true },
+                  { "name": "D. Olmo", "number": 20, "position": "M", "grid": "3:3", "isStarter": true },
+                  { "name": "L. Yamal", "number": 19, "position": "F", "grid": "4:1", "isStarter": true },
+                  { "name": "R. Lewandowski", "number": 9, "position": "F", "grid": "4:2", "isStarter": true },
+                  { "name": "Raphinha", "number": 11, "position": "F", "grid": "4:3", "isStarter": true }
+                ],
+                "substitutes": [
+                  { "name": "Inaki Pena", "number": 13, "position": "G", "isStarter": false },
+                  { "name": "F. de Jong", "number": 21, "position": "M", "isStarter": false },
+                  { "name": "Gavi", "number": 6, "position": "M", "isStarter": false },
+                  { "name": "Ferran Torres", "number": 7, "position": "F", "isStarter": false },
+                  { "name": "Ansu Fati", "number": 10, "position": "F", "isStarter": false }
+                ]
+              },
+              {
+                "teamId": "ft_team_realmadrid",
+                "formation": "4-2-3-1",
+                "coachName": "Carlo Ancelotti",
+                "coach": {
+                  "id": "coach_2",
+                  "name": "Carlo Ancelotti"
+                },
+                "startingXI": [
+                  { "name": "T. Courtois", "number": 1, "position": "G", "grid": "1:1", "isStarter": true },
+                  { "name": "D. Carvajal", "number": 2, "position": "D", "grid": "2:1", "isStarter": true },
+                  { "name": "E. Militao", "number": 3, "position": "D", "grid": "2:2", "isStarter": true },
+                  { "name": "A. Rudiger", "number": 22, "position": "D", "grid": "2:3", "isStarter": true },
+                  { "name": "F. Mendy", "number": 23, "position": "D", "grid": "2:4", "isStarter": true },
+                  { "name": "F. Valverde", "number": 8, "position": "M", "grid": "3:1", "isStarter": true },
+                  { "name": "A. Tchouameni", "number": 14, "position": "M", "grid": "3:2", "isStarter": true },
+                  { "name": "Rodrygo", "number": 11, "position": "F", "grid": "4:1", "isStarter": true },
+                  { "name": "J. Bellingham", "number": 5, "position": "M", "grid": "4:2", "isStarter": true },
+                  { "name": "Vinicius Jr", "number": 7, "position": "F", "grid": "4:3", "isStarter": true },
+                  { "name": "K. Mbappe", "number": 9, "position": "F", "grid": "5:1", "isStarter": true }
+                ],
+                "substitutes": [
+                  { "name": "A. Lunin", "number": 13, "position": "G", "isStarter": false },
+                  { "name": "L. Modric", "number": 10, "position": "M", "isStarter": false },
+                  { "name": "E. Camavinga", "number": 6, "position": "M", "isStarter": false },
+                  { "name": "B. Diaz", "number": 21, "position": "F", "isStarter": false },
+                  { "name": "Endrick", "number": 16, "position": "F", "isStarter": false }
+                ]
+              }
+            ],
+            "statistics": [
+              {
+                "teamId": "ft_team_barcelona",
+                "possessionPercent": 58,
+                "totalShots": 14,
+                "shotsOnGoal": 6,
+                "shotsOffGoal": 8,
+                "totalPasses": 520,
+                "passesAccurate": 465,
+                "fouls": 10,
+                "cornerKicks": 7,
+                "yellowCards": 2,
+                "redCards": 0,
+                "goalkeeperSaves": 3
+              },
+              {
+                "teamId": "ft_team_realmadrid",
+                "possessionPercent": 42,
+                "totalShots": 8,
+                "shotsOnGoal": 3,
+                "shotsOffGoal": 5,
+                "totalPasses": 380,
+                "passesAccurate": 320,
+                "fouls": 12,
+                "cornerKicks": 4,
+                "yellowCards": 1,
+                "redCards": 0,
+                "goalkeeperSaves": 5
+              }
+            ],
+            "trust": {
+              "freshnessState": "FRESH",
+              "sourceObservedAt": "2026-09-23T01:00:00.000Z",
+              "dataAgeSeconds": 5,
+              "provider": "api-football"
+            }
+          }
+        }
+        """;
+
+        var envelope = JsonSerializer.Deserialize(v2MatchWithLineupsAndStatsJson, FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto);
+
+        Assert.IsNotNull(envelope);
+        Assert.IsNotNull(envelope.Data);
+        var match = envelope.Data;
+
+        // Lineup verification
+        Assert.AreEqual(2, match.Lineups.Count, "Should deserialize 2 lineups.");
+        var barcaLineup = match.Lineups[0];
+        Assert.AreEqual("ft_team_barcelona", barcaLineup.TeamId);
+        Assert.AreEqual("4-3-3", barcaLineup.Formation);
+        Assert.AreEqual("Hansi Flick", barcaLineup.EffectiveCoachName);
+        Assert.AreEqual(11, barcaLineup.StartingXI.Count);
+        Assert.AreEqual(5, barcaLineup.Substitutes.Count);
+        Assert.AreEqual("R. Lewandowski", barcaLineup.StartingXI[9].Name);
+        Assert.AreEqual(9, barcaLineup.StartingXI[9].Number);
+        Assert.AreEqual("F", barcaLineup.StartingXI[9].Position);
+
+        var realLineup = match.Lineups[1];
+        Assert.AreEqual("ft_team_realmadrid", realLineup.TeamId);
+        Assert.AreEqual("4-2-3-1", realLineup.Formation);
+        Assert.AreEqual("Carlo Ancelotti", realLineup.EffectiveCoachName);
+        Assert.AreEqual(11, realLineup.StartingXI.Count);
+        Assert.AreEqual("K. Mbappe", realLineup.StartingXI[10].Name);
+
+        // Statistics verification
+        Assert.AreEqual(2, match.Statistics.Count, "Should deserialize 2 team statistics.");
+        var barcaStats = match.Statistics[0];
+        Assert.AreEqual("ft_team_barcelona", barcaStats.TeamId);
+        Assert.AreEqual(58, barcaStats.PossessionPercent);
+        Assert.AreEqual(14, barcaStats.TotalShots);
+        Assert.AreEqual(6, barcaStats.ShotsOnGoal);
+        Assert.AreEqual(520, barcaStats.TotalPasses);
+        Assert.AreEqual(465, barcaStats.PassesAccurate);
+        Assert.AreEqual(10, barcaStats.Fouls);
+        Assert.AreEqual(7, barcaStats.CornerKicks);
+        Assert.AreEqual(2, barcaStats.YellowCards);
+        Assert.AreEqual(0, barcaStats.RedCards);
+        Assert.AreEqual(3, barcaStats.GoalkeeperSaves);
+
+        var realStats = match.Statistics[1];
+        Assert.AreEqual("ft_team_realmadrid", realStats.TeamId);
+        Assert.AreEqual(42, realStats.PossessionPercent);
+        Assert.AreEqual(8, realStats.TotalShots);
+        Assert.AreEqual(3, realStats.ShotsOnGoal);
+    }
+
+    [TestMethod]
+    public void Test02C_MatchCenterViewModel_HydratesLineupsAndStatistics_Correctly()
+    {
+        var match = new MatchDetailDto
+        {
+            Id = "ft_fix_1001",
+            State = "LIVE",
+            ElapsedMinute = 74,
+            HomeTeam = new TeamSummaryDto { Id = "ft_team_home", Name = "Arsenal" },
+            AwayTeam = new TeamSummaryDto { Id = "ft_team_away", Name = "Chelsea" },
+            Score = new ScoreDto { Home = 3, Away = 1 },
+            Lineups = new List<LineupDto>
+            {
+                new LineupDto
+                {
+                    TeamId = "ft_team_home",
+                    Formation = "4-3-3",
+                    CoachName = "Mikel Arteta",
+                    StartingXI = new List<LineupPlayerDto>
+                    {
+                        new LineupPlayerDto { Name = "D. Raya", Number = 22, Position = "G", IsStarter = true },
+                        new LineupPlayerDto { Name = "B. Saka", Number = 7, Position = "F", IsStarter = true }
+                    },
+                    Substitutes = new List<LineupPlayerDto>
+                    {
+                        new LineupPlayerDto { Name = "L. Trossard", Number = 19, Position = "F", IsStarter = false }
+                    }
+                },
+                new LineupDto
+                {
+                    TeamId = "ft_team_away",
+                    Formation = "4-2-3-1",
+                    CoachName = "Enzo Maresca",
+                    StartingXI = new List<LineupPlayerDto>
+                    {
+                        new LineupPlayerDto { Name = "R. Sanchez", Number = 1, Position = "G", IsStarter = true },
+                        new LineupPlayerDto { Name = "C. Palmer", Number = 20, Position = "M", IsStarter = true }
+                    },
+                    Substitutes = new List<LineupPlayerDto>
+                    {
+                        new LineupPlayerDto { Name = "J. Felix", Number = 14, Position = "F", IsStarter = false }
+                    }
+                }
+            },
+            Statistics = new List<TeamStatisticsDto>
+            {
+                new TeamStatisticsDto
+                {
+                    TeamId = "ft_team_home",
+                    PossessionPercent = 55,
+                    TotalShots = 12,
+                    ShotsOnGoal = 5,
+                    CornerKicks = 6,
+                    Fouls = 9,
+                    YellowCards = 1
+                },
+                new TeamStatisticsDto
+                {
+                    TeamId = "ft_team_away",
+                    PossessionPercent = 45,
+                    TotalShots = 8,
+                    ShotsOnGoal = 3,
+                    CornerKicks = 4,
+                    Fouls = 11,
+                    YellowCards = 2
+                }
+            }
+        };
+
+        var vm = new MatchCenterViewModel();
+        vm.Load(match);
+
+        Assert.AreEqual("Arsenal vs Chelsea - Match Center", vm.Title);
+        Assert.AreEqual("LIVE 74'", vm.StatusText);
+        Assert.AreEqual("3 - 1", vm.ScoreText);
+
+        // Verify Lineup Hydration
+        Assert.IsTrue(vm.HasLineups, "ViewModel should report HasLineups = true");
+        Assert.AreEqual("4-3-3", vm.HomeLineup.Formation);
+        Assert.AreEqual("Mikel Arteta", vm.HomeLineup.CoachName);
+        Assert.AreEqual(2, vm.HomeLineup.StartingXI.Count);
+        Assert.AreEqual(1, vm.HomeLineup.Substitutes.Count);
+        Assert.AreEqual("D. Raya", vm.HomeLineup.StartingXI[0].Name);
+        Assert.AreEqual("GK", vm.HomeLineup.StartingXI[0].PositionBadge);
+
+        Assert.AreEqual("4-2-3-1", vm.AwayLineup.Formation);
+        Assert.AreEqual("Enzo Maresca", vm.AwayLineup.CoachName);
+        Assert.AreEqual(2, vm.AwayLineup.StartingXI.Count);
+
+        // Verify Statistics Hydration
+        Assert.IsTrue(vm.HasStatistics, "ViewModel should report HasStatistics = true");
+        Assert.IsTrue(vm.MatchStats.Count > 0, "MatchStats should contain parsed metrics");
+
+        var possessionStat = vm.MatchStats.FirstOrDefault(s => s.Name == "Ball Possession");
+        Assert.IsNotNull(possessionStat);
+        Assert.AreEqual("55%", possessionStat.HomeValue);
+        Assert.AreEqual("45%", possessionStat.AwayValue);
+        Assert.AreEqual(55.0, possessionStat.HomeRatio);
+        Assert.AreEqual(45.0, possessionStat.AwayRatio);
+
+        var shotsStat = vm.MatchStats.FirstOrDefault(s => s.Name == "Total Shots");
+        Assert.IsNotNull(shotsStat);
+        Assert.AreEqual("12", shotsStat.HomeValue);
+        Assert.AreEqual("8", shotsStat.AwayValue);
+        Assert.AreEqual(60.0, shotsStat.HomeRatio);
+        Assert.AreEqual(40.0, shotsStat.AwayRatio);
+    }
+
+    [TestMethod]
+    public void Test02D_LineupDto_FlatPlayersFallback_SplitsStartingXIAndSubstitutes()
+    {
+        var flatLineup = new LineupDto
+        {
+            TeamId = "team_1",
+            Formation = "3-5-2",
+            Players = new List<LineupPlayerDto>
+            {
+                new LineupPlayerDto { Name = "P1", Number = 1, IsStarter = true },
+                new LineupPlayerDto { Name = "P2", Number = 2, IsStarter = true },
+                new LineupPlayerDto { Name = "P3", Number = 12, IsStarter = false }
+            }
+        };
+
+        var starters = flatLineup.GetStartingXI();
+        var subs = flatLineup.GetSubstitutes();
+
+        Assert.AreEqual(2, starters.Count);
+        Assert.AreEqual(1, subs.Count);
+        Assert.AreEqual("P1", starters[0].Name);
+        Assert.AreEqual("P3", subs[0].Name);
     }
 
     [TestMethod]

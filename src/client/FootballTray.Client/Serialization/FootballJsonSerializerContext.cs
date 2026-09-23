@@ -33,6 +33,13 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(NotificationHistoryModel))]
 [JsonSerializable(typeof(Dictionary<string, DateTimeOffset>))]
 [JsonSerializable(typeof(V2TrustMetadataDto))]
+[JsonSerializable(typeof(CoachDto))]
+[JsonSerializable(typeof(LineupPlayerDto))]
+[JsonSerializable(typeof(List<LineupPlayerDto>))]
+[JsonSerializable(typeof(LineupDto))]
+[JsonSerializable(typeof(List<LineupDto>))]
+[JsonSerializable(typeof(TeamStatisticsDto))]
+[JsonSerializable(typeof(List<TeamStatisticsDto>))]
 public partial class FootballJsonSerializerContext : JsonSerializerContext
 {
 }

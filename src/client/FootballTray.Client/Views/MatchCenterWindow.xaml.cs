@@ -1,48 +1,50 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using Microsoft.UI.Xaml;
+using FootballTray.Client.ViewModels;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.Views;
 
-public class MatchTimelineItem
-{
-    public string MinuteDisplay { get; set; } = string.Empty;
-    public string IconGlyph { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string? PlayerInfo { get; set; }
-    public Visibility PlayerInfoVisibility => string.IsNullOrWhiteSpace(PlayerInfo) ? Visibility.Collapsed : Visibility.Visible;
-}
-
 public sealed partial class MatchCenterWindow : Window
 {
-    public ObservableCollection<MatchTimelineItem> TimelineItems { get; } = new();
+    public MatchCenterViewModel ViewModel { get; } = new();
+
+    public ObservableCollection<MatchTimelineItem> TimelineItems => ViewModel.TimelineItems;
 
     public MatchCenterWindow()
     {
         InitializeComponent();
-        EventsList.ItemsSource = TimelineItems;
+        RootGrid.DataContext = ViewModel;
+        EventsList.ItemsSource = ViewModel.TimelineItems;
+
+        try
+        {
+            AppWindow?.Resize(new Windows.Graphics.SizeInt32(960, 720));
+        }
+        catch
+        {
+            // Ignore resize failure on unsupported platforms/runtimes
+        }
     }
 
     public void Populate(MatchDetailDto match)
     {
-        Title = $"{match.HomeTeam.Name} vs {match.AwayTeam.Name} - Match Center";
-        CompetitionText.Text = match.Competition?.Name ?? "Football";
+        ViewModel.Load(match);
 
-        // Status badge
-        StatusText.Text = match.State == "LIVE"
-            ? $"LIVE {match.ElapsedMinute}'"
-            : match.State;
+        Title = ViewModel.Title;
 
-        HomeTeamName.Text = match.HomeTeam.Name;
-        AwayTeamName.Text = match.AwayTeam.Name;
-        ScoreText.Text = $"{match.Score.Home} - {match.Score.Away}";
+        // Sync header text
+        CompetitionText.Text = ViewModel.CompetitionName;
+        StatusText.Text = ViewModel.StatusText;
+        HomeTeamName.Text = ViewModel.HomeTeamName;
+        AwayTeamName.Text = ViewModel.AwayTeamName;
+        ScoreText.Text = ViewModel.ScoreText;
 
-        if (match.Score.HalfTime != null && match.Score.HalfTime.Home.HasValue && match.Score.HalfTime.Away.HasValue)
+        if (ViewModel.HasHalfTime)
         {
-            HalfTimeText.Text = $"(HT {match.Score.HalfTime.Home}-{match.Score.HalfTime.Away})";
+            HalfTimeText.Text = ViewModel.HalfTimeText;
             HalfTimeText.Visibility = Visibility.Visible;
         }
         else
@@ -50,34 +52,61 @@ public sealed partial class MatchCenterWindow : Window
             HalfTimeText.Visibility = Visibility.Collapsed;
         }
 
-        // Timeline events
-        TimelineItems.Clear();
-        foreach (var ev in match.Events.OrderBy(e => e.Minute))
+        // Sync team labels on lineups tab
+        HomeLineupRadio.Content = ViewModel.HomeTeamName;
+        AwayLineupRadio.Content = ViewModel.AwayTeamName;
+
+        // Empty states toggles
+        NoEventsText.Visibility = ViewModel.TimelineItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NoStatsBorder.Visibility = ViewModel.HasStatistics ? Visibility.Collapsed : Visibility.Visible;
+        StatsItemsControl.Visibility = ViewModel.HasStatistics ? Visibility.Visible : Visibility.Collapsed;
+        NoLineupsBorder.Visibility = ViewModel.HasLineups ? Visibility.Collapsed : Visibility.Visible;
+
+        UpdateLineupContainerVisibility();
+    }
+
+    private void OnTabChecked(object sender, RoutedEventArgs e)
+    {
+        if (StatisticsPanel == null || LineupsPanel == null) return;
+
+        if (StatsTabRadio?.IsChecked == true)
         {
-            string icon = ev.Type switch
-            {
-                "Goal" => "⚽",
-                "YellowCard" => "🟨",
-                "RedCard" => "🟥",
-                "Substitution" => "🔄",
-                "PeriodStart" => "⏱️",
-                "PeriodEnd" => "🏁",
-                _ => "📌",
-            };
+            StatisticsPanel.Visibility = Visibility.Visible;
+            LineupsPanel.Visibility = Visibility.Collapsed;
+        }
+        else if (LineupsTabRadio?.IsChecked == true)
+        {
+            StatisticsPanel.Visibility = Visibility.Collapsed;
+            LineupsPanel.Visibility = Visibility.Visible;
+            UpdateLineupContainerVisibility();
+        }
+    }
 
-            string? playerInfo = null;
-            if (!string.IsNullOrWhiteSpace(ev.PlayerName))
-            {
-                playerInfo = ev.PlayerName;
-            }
+    private void OnLineupTeamChecked(object sender, RoutedEventArgs e)
+    {
+        UpdateLineupContainerVisibility();
+    }
 
-            TimelineItems.Add(new MatchTimelineItem
-            {
-                MinuteDisplay = $"{ev.Minute}'",
-                IconGlyph = icon,
-                Description = ev.Description ?? ev.Type,
-                PlayerInfo = playerInfo,
-            });
+    private void UpdateLineupContainerVisibility()
+    {
+        if (HomeLineupContainer == null || AwayLineupContainer == null) return;
+
+        if (!ViewModel.HasLineups)
+        {
+            HomeLineupContainer.Visibility = Visibility.Collapsed;
+            AwayLineupContainer.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (HomeLineupRadio?.IsChecked == true)
+        {
+            HomeLineupContainer.Visibility = Visibility.Visible;
+            AwayLineupContainer.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            HomeLineupContainer.Visibility = Visibility.Collapsed;
+            AwayLineupContainer.Visibility = Visibility.Visible;
         }
     }
 }

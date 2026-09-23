@@ -228,6 +228,168 @@ public class MatchDetailDto
     [JsonPropertyName("events")]
     public List<TrayEventDto> Events { get; set; } = new();
 
+    [JsonPropertyName("lineups")]
+    public List<LineupDto> Lineups { get; set; } = new();
+
+    [JsonPropertyName("statistics")]
+    public List<TeamStatisticsDto> Statistics { get; set; } = new();
+
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }
 }
+
+public class CoachDto
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("photoUrl")]
+    public string? PhotoUrl { get; set; }
+}
+
+public class LineupPlayerDto
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("playerId")]
+    public string? PlayerId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("number")]
+    public int? Number { get; set; }
+
+    [JsonPropertyName("position")]
+    public string? Position { get; set; }
+
+    [JsonPropertyName("grid")]
+    public string? Grid { get; set; }
+
+    [JsonPropertyName("isStarter")]
+    public bool IsStarter { get; set; }
+}
+
+public class LineupDto
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("fixtureId")]
+    public string? FixtureId { get; set; }
+
+    [JsonPropertyName("teamId")]
+    public string TeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("formation")]
+    public string? Formation { get; set; }
+
+    [JsonPropertyName("coach")]
+    public CoachDto? Coach { get; set; }
+
+    [JsonPropertyName("coachName")]
+    public string? CoachName { get; set; }
+
+    [JsonPropertyName("coachId")]
+    public string? CoachId { get; set; }
+
+    [JsonPropertyName("startingXI")]
+    public List<LineupPlayerDto> StartingXI { get; set; } = new();
+
+    [JsonPropertyName("substitutes")]
+    public List<LineupPlayerDto> Substitutes { get; set; } = new();
+
+    [JsonPropertyName("players")]
+    public List<LineupPlayerDto>? Players { get; set; }
+
+    public string EffectiveCoachName => Coach?.Name ?? CoachName ?? string.Empty;
+
+    public IReadOnlyList<LineupPlayerDto> GetStartingXI()
+    {
+        if (StartingXI.Count > 0)
+        {
+            return StartingXI;
+        }
+
+        if (Players != null && Players.Count > 0)
+        {
+            return Players.FindAll(p => p.IsStarter);
+        }
+
+        return Array.Empty<LineupPlayerDto>();
+    }
+
+    public IReadOnlyList<LineupPlayerDto> GetSubstitutes()
+    {
+        if (Substitutes.Count > 0)
+        {
+            return Substitutes;
+        }
+
+        if (Players != null && Players.Count > 0)
+        {
+            return Players.FindAll(p => !p.IsStarter);
+        }
+
+        return Array.Empty<LineupPlayerDto>();
+    }
+}
+
+public class TeamStatisticsDto
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("fixtureId")]
+    public string? FixtureId { get; set; }
+
+    [JsonPropertyName("teamId")]
+    public string TeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("shotsOnGoal")]
+    public int? ShotsOnGoal { get; set; }
+
+    [JsonPropertyName("shotsOffGoal")]
+    public int? ShotsOffGoal { get; set; }
+
+    [JsonPropertyName("totalShots")]
+    public int? TotalShots { get; set; }
+
+    [JsonPropertyName("possessionPercent")]
+    public int? PossessionPercent { get; set; }
+
+    [JsonPropertyName("possession")]
+    public int? Possession { get; set; }
+
+    [JsonPropertyName("fouls")]
+    public int? Fouls { get; set; }
+
+    [JsonPropertyName("cornerKicks")]
+    public int? CornerKicks { get; set; }
+
+    [JsonPropertyName("corners")]
+    public int? Corners { get; set; }
+
+    [JsonPropertyName("offsides")]
+    public int? Offsides { get; set; }
+
+    [JsonPropertyName("yellowCards")]
+    public int? YellowCards { get; set; }
+
+    [JsonPropertyName("redCards")]
+    public int? RedCards { get; set; }
+
+    [JsonPropertyName("goalkeeperSaves")]
+    public int? GoalkeeperSaves { get; set; }
+
+    [JsonPropertyName("totalPasses")]
+    public int? TotalPasses { get; set; }
+
+    [JsonPropertyName("passesAccurate")]
+    public int? PassesAccurate { get; set; }
+}
+
