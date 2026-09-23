@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using Microsoft.UI.Xaml;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.ViewModels;
@@ -74,6 +75,167 @@ public class LineupPresentationViewModel : INotifyPropertyChanged
     }
 }
 
+public class PitchPlayerNodeViewModel : INotifyPropertyChanged
+{
+    private string _name = string.Empty;
+    private string _shortDisplayName = string.Empty;
+    private string _number = "-";
+    private string _position = string.Empty;
+    private string _positionBadge = string.Empty;
+    private bool _isGoalkeeper;
+    private bool _isHomeTeam;
+    private int _row = 1;
+    private int _col = 1;
+    private double _xPercent = 0.5;
+    private double _yPercent = 0.5;
+
+    public string Name
+    {
+        get => _name;
+        set => SetProperty(ref _name, value);
+    }
+
+    public string ShortDisplayName
+    {
+        get => _shortDisplayName;
+        set => SetProperty(ref _shortDisplayName, value);
+    }
+
+    public string Number
+    {
+        get => _number;
+        set => SetProperty(ref _number, value);
+    }
+
+    public string Position
+    {
+        get => _position;
+        set => SetProperty(ref _position, value);
+    }
+
+    public string PositionBadge
+    {
+        get => _positionBadge;
+        set => SetProperty(ref _positionBadge, value);
+    }
+
+    public bool IsGoalkeeper
+    {
+        get => _isGoalkeeper;
+        set
+        {
+            if (SetProperty(ref _isGoalkeeper, value))
+            {
+                OnPropertyChanged(nameof(GoalkeeperVisibility));
+                OnPropertyChanged(nameof(HomeOutfieldVisibility));
+                OnPropertyChanged(nameof(AwayOutfieldVisibility));
+                OnPropertyChanged(nameof(IsHomeOutfield));
+                OnPropertyChanged(nameof(IsAwayOutfield));
+            }
+        }
+    }
+
+    public bool IsHomeTeam
+    {
+        get => _isHomeTeam;
+        set
+        {
+            if (SetProperty(ref _isHomeTeam, value))
+            {
+                OnPropertyChanged(nameof(HomeOutfieldVisibility));
+                OnPropertyChanged(nameof(AwayOutfieldVisibility));
+                OnPropertyChanged(nameof(IsHomeOutfield));
+                OnPropertyChanged(nameof(IsAwayOutfield));
+            }
+        }
+    }
+
+    public int Row
+    {
+        get => _row;
+        set => SetProperty(ref _row, value);
+    }
+
+    public int Col
+    {
+        get => _col;
+        set => SetProperty(ref _col, value);
+    }
+
+    public double XPercent
+    {
+        get => _xPercent;
+        set
+        {
+            if (SetProperty(ref _xPercent, value))
+            {
+                OnPropertyChanged(nameof(CanvasLeft));
+            }
+        }
+    }
+
+    public double YPercent
+    {
+        get => _yPercent;
+        set
+        {
+            if (SetProperty(ref _yPercent, value))
+            {
+                OnPropertyChanged(nameof(CanvasTop));
+            }
+        }
+    }
+
+    public double CanvasLeft => Math.Round((XPercent * 340.0) - 35.0, 1);
+    public double CanvasTop => Math.Round((YPercent * 500.0) - 20.0, 1);
+
+    public bool IsHomeOutfield => !IsGoalkeeper && IsHomeTeam;
+    public bool IsAwayOutfield => !IsGoalkeeper && !IsHomeTeam;
+
+    public Visibility GoalkeeperVisibility =>
+        IsGoalkeeper ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility HomeOutfieldVisibility =>
+        (!IsGoalkeeper && IsHomeTeam) ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility AwayOutfieldVisibility =>
+        (!IsGoalkeeper && !IsHomeTeam) ? Visibility.Visible : Visibility.Collapsed;
+
+    public static string ExtractShortDisplayName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        var trimmed = name.Trim();
+        var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1) return parts[0];
+        if (parts.Length >= 2 && (parts[^1].Equals("Jr", StringComparison.OrdinalIgnoreCase) ||
+                                  parts[^1].Equals("Jr.", StringComparison.OrdinalIgnoreCase) ||
+                                  parts[^1].Equals("III", StringComparison.OrdinalIgnoreCase) ||
+                                  parts[^1].Equals("II", StringComparison.OrdinalIgnoreCase)))
+        {
+            return $"{parts[^2]} {parts[^1]}";
+        }
+        return parts[^1];
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (!EqualityComparer<T>.Default.Equals(storage, value))
+        {
+            storage = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            return true;
+        }
+        return false;
+    }
+
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+}
+
 public class StatComparisonViewModel
 {
     public string Name { get; set; } = string.Empty;
@@ -103,6 +265,10 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private bool _isStatisticsViewSelected = true;
     private bool _isLineupsViewSelected;
     private string _activeLineupTeam = "Home";
+    private string? _aggregateScore;
+    private string? _historicalLeg;
+    private string _aggregateText = string.Empty;
+    private bool _hasAggregateScore;
 
     public string MatchId
     {
@@ -245,6 +411,31 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
     public LineupPresentationViewModel HomeLineup { get; } = new();
     public LineupPresentationViewModel AwayLineup { get; } = new();
+    public ObservableCollection<PitchPlayerNodeViewModel> PitchPlayers { get; } = new();
+
+    public string? AggregateScore
+    {
+        get => _aggregateScore;
+        set => SetProperty(ref _aggregateScore, value);
+    }
+
+    public string? HistoricalLeg
+    {
+        get => _historicalLeg;
+        set => SetProperty(ref _historicalLeg, value);
+    }
+
+    public string AggregateText
+    {
+        get => _aggregateText;
+        set => SetProperty(ref _aggregateText, value);
+    }
+
+    public bool HasAggregateScore
+    {
+        get => _hasAggregateScore;
+        set => SetProperty(ref _hasAggregateScore, value);
+    }
 
     public void Load(MatchDetailDto match)
     {
@@ -283,6 +474,46 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         Venue = match.Venue;
         Referee = match.Referee;
+
+        // Aggregate Score
+        AggregateScore = match.AggregateScore;
+        HistoricalLeg = match.HistoricalLeg;
+
+        string? agg = null;
+        if (!string.IsNullOrWhiteSpace(match.AggregateScore))
+        {
+            agg = match.AggregateScore;
+        }
+        else if (!string.IsNullOrWhiteSpace(match.Score?.AggregateDisplay))
+        {
+            agg = match.Score.AggregateDisplay;
+        }
+        else if (match.Score?.Aggregate?.Home != null && match.Score?.Aggregate?.Away != null)
+        {
+            agg = $"{match.Score.Aggregate.Home} - {match.Score.Aggregate.Away}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(agg))
+        {
+            string aggFormatted = agg.Trim();
+            if (!aggFormatted.StartsWith("Agg", StringComparison.OrdinalIgnoreCase))
+            {
+                aggFormatted = $"Agg {aggFormatted}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(match.HistoricalLeg))
+            {
+                aggFormatted = $"{aggFormatted} ({match.HistoricalLeg.Trim()})";
+            }
+
+            AggregateText = aggFormatted;
+            HasAggregateScore = true;
+        }
+        else
+        {
+            AggregateText = string.Empty;
+            HasAggregateScore = false;
+        }
 
         // 1. Populate Timeline
         TimelineItems.Clear();
@@ -324,6 +555,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         HomeLineup.Substitutes.Clear();
         AwayLineup.StartingXI.Clear();
         AwayLineup.Substitutes.Clear();
+        PitchPlayers.Clear();
 
         HomeLineup.TeamName = HomeTeamName;
         AwayLineup.TeamName = AwayTeamName;
@@ -403,8 +635,137 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             AwayLineup.HasLineup = false;
         }
 
-        HasLineups = HomeLineup.HasLineup || AwayLineup.HasLineup;
+        BuildPitchPlayers(homeDto, awayDto);
+
+        HasLineups = PitchPlayers.Count > 0 || HomeLineup.HasLineup || AwayLineup.HasLineup;
         OnPropertyChanged(nameof(CurrentLineup));
+    }
+
+    private void BuildPitchPlayers(LineupDto? homeDto, LineupDto? awayDto)
+    {
+        PitchPlayers.Clear();
+
+        var awayStarters = awayDto?.GetStartingXI() ?? (IReadOnlyList<LineupPlayerDto>)Array.Empty<LineupPlayerDto>();
+        var homeStarters = homeDto?.GetStartingXI() ?? (IReadOnlyList<LineupPlayerDto>)Array.Empty<LineupPlayerDto>();
+
+        if (awayStarters.Count == 0 && homeStarters.Count == 0)
+        {
+            return;
+        }
+
+        // Build Away Players (Top Half, Y ranges 0.06 -> 0.44)
+        if (awayStarters.Count > 0)
+        {
+            var awayNodes = CreateTeamPitchNodes(awayStarters, isHomeTeam: false);
+            foreach (var node in awayNodes)
+            {
+                PitchPlayers.Add(node);
+            }
+        }
+
+        // Build Home Players (Bottom Half, Y ranges 0.94 -> 0.56)
+        if (homeStarters.Count > 0)
+        {
+            var homeNodes = CreateTeamPitchNodes(homeStarters, isHomeTeam: true);
+            foreach (var node in homeNodes)
+            {
+                PitchPlayers.Add(node);
+            }
+        }
+    }
+
+    public static (int row, int col) ParseGridCoordinates(string? grid, string? position, int defaultCol)
+    {
+        if (!string.IsNullOrWhiteSpace(grid))
+        {
+            var parts = grid.Split(':', StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && int.TryParse(parts[0], out int r) && int.TryParse(parts[1], out int c) && r > 0 && c > 0)
+            {
+                return (r, c);
+            }
+        }
+
+        string pos = position?.Trim().ToUpperInvariant() ?? string.Empty;
+        int fallbackRow = pos switch
+        {
+            "G" or "GK" => 1,
+            "D" or "DEF" or "DF" => 2,
+            "M" or "MID" or "MF" => 3,
+            "F" or "FWD" or "FW" or "ATT" => 4,
+            _ => 2
+        };
+
+        return (fallbackRow, defaultCol);
+    }
+
+    public static List<PitchPlayerNodeViewModel> CreateTeamPitchNodes(IReadOnlyList<LineupPlayerDto> starters, bool isHomeTeam)
+    {
+        var result = new List<PitchPlayerNodeViewModel>();
+        if (starters == null || starters.Count == 0) return result;
+
+        var parsed = new List<(LineupPlayerDto Player, int Row, int Col, int Index)>();
+        for (int i = 0; i < starters.Count; i++)
+        {
+            var p = starters[i];
+            var (row, col) = ParseGridCoordinates(p.Grid, p.Position, i + 1);
+            parsed.Add((p, row, col, i));
+        }
+
+        var rowGroups = parsed.GroupBy(p => p.Row).OrderBy(g => g.Key).ToList();
+        int minRow = rowGroups.Min(g => g.Key);
+        int maxRow = rowGroups.Max(g => g.Key);
+
+        foreach (var g in rowGroups)
+        {
+            int rowKey = g.Key;
+            double t = (maxRow > minRow) ? (double)(rowKey - minRow) / (maxRow - minRow) : 0.0;
+
+            // Away (Top half): GK at 0.06, Attackers at 0.44
+            // Home (Bottom half): GK at 0.94, Attackers at 0.56
+            double y = isHomeTeam
+                ? Math.Round(0.94 - (t * 0.38), 3)
+                : Math.Round(0.06 + (t * 0.38), 3);
+
+            var playersInRow = g.OrderBy(p => p.Col).ThenBy(p => p.Index).ToList();
+            int countInRow = playersInRow.Count;
+
+            for (int i = 0; i < countInRow; i++)
+            {
+                var item = playersInRow[i];
+                double x = Math.Round((i + 1.0) / (countInRow + 1.0), 3);
+
+                string pos = item.Player.Position?.Trim().ToUpperInvariant() ?? string.Empty;
+                string badge = pos switch
+                {
+                    "G" or "GK" => "GK",
+                    "D" or "DEF" or "DF" => "DEF",
+                    "M" or "MID" or "MF" => "MID",
+                    "F" or "FWD" or "FW" or "ATT" => "ATT",
+                    _ => string.IsNullOrEmpty(pos) ? "-" : pos
+                };
+
+                bool isGk = (rowKey == minRow) || (badge == "GK");
+
+                var node = new PitchPlayerNodeViewModel
+                {
+                    Name = item.Player.Name,
+                    ShortDisplayName = PitchPlayerNodeViewModel.ExtractShortDisplayName(item.Player.Name),
+                    Number = item.Player.Number.HasValue ? item.Player.Number.Value.ToString() : "-",
+                    Position = pos,
+                    PositionBadge = badge,
+                    IsGoalkeeper = isGk,
+                    IsHomeTeam = isHomeTeam,
+                    Row = rowKey,
+                    Col = item.Col,
+                    XPercent = x,
+                    YPercent = y
+                };
+
+                result.Add(node);
+            }
+        }
+
+        return result;
     }
 
     private static LineupPlayerItemViewModel CreatePlayerItem(LineupPlayerDto p)

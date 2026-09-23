@@ -777,4 +777,197 @@ public class SerializationRegressionTests
         Assert.IsTrue(root.TryGetProperty("followedTeams", out var teamsProp));
         Assert.AreEqual(2, teamsProp.GetArrayLength());
     }
+
+    [TestMethod]
+    public void Test02E_LineupPlayerDto_GridCoordinates_ParseCorrectly()
+    {
+        // Standard coordinates
+        var (r1, c1) = MatchCenterViewModel.ParseGridCoordinates("1:1", "G", 1);
+        Assert.AreEqual(1, r1);
+        Assert.AreEqual(1, c1);
+
+        var (r2, c2) = MatchCenterViewModel.ParseGridCoordinates("4:2", "F", 2);
+        Assert.AreEqual(4, r2);
+        Assert.AreEqual(2, c2);
+
+        var (r3, c3) = MatchCenterViewModel.ParseGridCoordinates("2:4", "D", 4);
+        Assert.AreEqual(2, r3);
+        Assert.AreEqual(4, c3);
+
+        // Fallbacks when grid is missing/invalid
+        var (fgkR, _) = MatchCenterViewModel.ParseGridCoordinates(null, "GK", 1);
+        Assert.AreEqual(1, fgkR);
+
+        var (fdefR, _) = MatchCenterViewModel.ParseGridCoordinates("", "DEF", 2);
+        Assert.AreEqual(2, fdefR);
+
+        var (fmidR, _) = MatchCenterViewModel.ParseGridCoordinates("invalid", "MID", 3);
+        Assert.AreEqual(3, fmidR);
+
+        var (fattR, _) = MatchCenterViewModel.ParseGridCoordinates(":", "ATT", 1);
+        Assert.AreEqual(4, fattR);
+    }
+
+    [TestMethod]
+    public void Test02F_MatchCenterViewModel_BuildsPitchNodes_FacingEachOther()
+    {
+        var match = new MatchDetailDto
+        {
+            Id = "ft_test_clasico",
+            HomeTeam = new TeamSummaryDto { Id = "team_barca", Name = "FC Barcelona" },
+            AwayTeam = new TeamSummaryDto { Id = "team_madrid", Name = "Real Madrid" },
+            Lineups = new List<LineupDto>
+            {
+                new()
+                {
+                    TeamId = "team_barca",
+                    Formation = "4-3-3",
+                    StartingXI = new List<LineupPlayerDto>
+                    {
+                        new() { Name = "M. ter Stegen", Number = 1, Position = "G", Grid = "1:1", IsStarter = true },
+                        new() { Name = "J. Kounde", Number = 23, Position = "D", Grid = "2:1", IsStarter = true },
+                        new() { Name = "P. Cubarsi", Number = 2, Position = "D", Grid = "2:2", IsStarter = true },
+                        new() { Name = "I. Martinez", Number = 5, Position = "D", Grid = "2:3", IsStarter = true },
+                        new() { Name = "A. Balde", Number = 3, Position = "D", Grid = "2:4", IsStarter = true },
+                        new() { Name = "M. Casado", Number = 17, Position = "M", Grid = "3:1", IsStarter = true },
+                        new() { Name = "Pedri", Number = 8, Position = "M", Grid = "3:2", IsStarter = true },
+                        new() { Name = "D. Olmo", Number = 20, Position = "M", Grid = "3:3", IsStarter = true },
+                        new() { Name = "L. Yamal", Number = 19, Position = "F", Grid = "4:1", IsStarter = true },
+                        new() { Name = "R. Lewandowski", Number = 9, Position = "F", Grid = "4:2", IsStarter = true },
+                        new() { Name = "Raphinha", Number = 11, Position = "F", Grid = "4:3", IsStarter = true }
+                    }
+                },
+                new()
+                {
+                    TeamId = "team_madrid",
+                    Formation = "4-2-3-1",
+                    StartingXI = new List<LineupPlayerDto>
+                    {
+                        new() { Name = "T. Courtois", Number = 1, Position = "G", Grid = "1:1", IsStarter = true },
+                        new() { Name = "D. Carvajal", Number = 2, Position = "D", Grid = "2:1", IsStarter = true },
+                        new() { Name = "E. Militao", Number = 3, Position = "D", Grid = "2:2", IsStarter = true },
+                        new() { Name = "A. Rudiger", Number = 22, Position = "D", Grid = "2:3", IsStarter = true },
+                        new() { Name = "F. Mendy", Number = 23, Position = "D", Grid = "2:4", IsStarter = true },
+                        new() { Name = "F. Valverde", Number = 8, Position = "M", Grid = "3:1", IsStarter = true },
+                        new() { Name = "A. Tchouameni", Number = 14, Position = "M", Grid = "3:2", IsStarter = true },
+                        new() { Name = "Rodrygo", Number = 11, Position = "F", Grid = "4:1", IsStarter = true },
+                        new() { Name = "J. Bellingham", Number = 5, Position = "M", Grid = "4:2", IsStarter = true },
+                        new() { Name = "Vinicius Jr", Number = 7, Position = "F", Grid = "4:3", IsStarter = true },
+                        new() { Name = "K. Mbappe", Number = 9, Position = "F", Grid = "5:1", IsStarter = true }
+                    }
+                }
+            }
+        };
+
+        var vm = new MatchCenterViewModel();
+        vm.Load(match);
+
+        Assert.IsTrue(vm.HasLineups);
+        Assert.AreEqual(22, vm.PitchPlayers.Count, "Pitch must contain exactly 22 starting player nodes.");
+
+        // Away team verification (Top Half: 0.06 -> 0.44)
+        var awayNodes = vm.PitchPlayers.Where(p => !p.IsHomeTeam).ToList();
+        Assert.AreEqual(11, awayNodes.Count);
+
+        var awayGk = awayNodes.First(p => p.Name == "T. Courtois");
+        Assert.IsTrue(awayGk.IsGoalkeeper);
+        Assert.AreEqual(0.06, awayGk.YPercent, 0.001, "Away GK must be placed at Y = 0.06");
+        Assert.AreEqual(0.50, awayGk.XPercent, 0.001, "Solo GK must be centered horizontally at X = 0.50");
+        Assert.AreEqual(10.0, awayGk.CanvasTop, 0.5);
+        Assert.AreEqual(135.0, awayGk.CanvasLeft, 0.5);
+
+        var awayStriker = awayNodes.First(p => p.Name == "K. Mbappe");
+        Assert.IsFalse(awayStriker.IsGoalkeeper);
+        Assert.AreEqual(0.44, awayStriker.YPercent, 0.001, "Away highest row striker must be placed at Y = 0.44");
+        Assert.AreEqual(200.0, awayStriker.CanvasTop, 0.5);
+
+        foreach (var node in awayNodes)
+        {
+            Assert.IsTrue(node.YPercent >= 0.06 && node.YPercent <= 0.44,
+                $"Away node {node.Name} Y={node.YPercent} must be in top half [0.06, 0.44]");
+        }
+
+        // Home team verification (Bottom Half: 0.94 -> 0.56)
+        var homeNodes = vm.PitchPlayers.Where(p => p.IsHomeTeam).ToList();
+        Assert.AreEqual(11, homeNodes.Count);
+
+        var homeGk = homeNodes.First(p => p.Name == "M. ter Stegen");
+        Assert.IsTrue(homeGk.IsGoalkeeper);
+        Assert.AreEqual(0.94, homeGk.YPercent, 0.001, "Home GK must be placed at Y = 0.94");
+        Assert.AreEqual(0.50, homeGk.XPercent, 0.001, "Solo GK must be centered horizontally at X = 0.50");
+        Assert.AreEqual(450.0, homeGk.CanvasTop, 0.5);
+        Assert.AreEqual(135.0, homeGk.CanvasLeft, 0.5);
+
+        var homeStriker = homeNodes.First(p => p.Name == "R. Lewandowski");
+        Assert.IsFalse(homeStriker.IsGoalkeeper);
+        Assert.AreEqual(0.56, homeStriker.YPercent, 0.001, "Home highest row striker must be placed at Y = 0.56");
+        Assert.AreEqual(260.0, homeStriker.CanvasTop, 0.5);
+
+        foreach (var node in homeNodes)
+        {
+            Assert.IsTrue(node.YPercent >= 0.56 && node.YPercent <= 0.94,
+                $"Home node {node.Name} Y={node.YPercent} must be in bottom half [0.56, 0.94]");
+        }
+
+        // Name short display
+        Assert.AreEqual("Lewandowski", homeStriker.ShortDisplayName);
+        Assert.AreEqual("Vinicius Jr", awayNodes.First(p => p.Name == "Vinicius Jr").ShortDisplayName);
+        Assert.AreEqual("Pedri", homeNodes.First(p => p.Name == "Pedri").ShortDisplayName);
+
+        // Visibility properties
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Visible, homeGk.GoalkeeperVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, homeGk.HomeOutfieldVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Visible, homeStriker.HomeOutfieldVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Visible, awayStriker.AwayOutfieldVisibility);
+    }
+
+    [TestMethod]
+    public void Test02G_MatchDetailDto_AggregateScoreAndHistoricalLeg_DeserializesAndHydrates()
+    {
+        const string json = """
+        {
+          "schemaVersion": "2.0",
+          "requestId": "req_agg_test",
+          "version": 2,
+          "generatedAt": "2026-09-24T00:00:00.000Z",
+          "serverTime": "2026-09-24T00:00:00.000Z",
+          "stale": false,
+          "dataAgeSeconds": 0,
+          "data": {
+            "id": "ft_fix_ucl_leg2",
+            "homeTeam": { "id": "team_1", "name": "Arsenal" },
+            "awayTeam": { "id": "team_2", "name": "Bayern Munich" },
+            "state": "LIVE",
+            "elapsedMinute": 75,
+            "score": {
+              "home": 2,
+              "away": 1,
+              "aggregate": { "home": 4, "away": 3 },
+              "aggregateDisplay": "4 - 3"
+            },
+            "aggregateScore": "4 - 3",
+            "historicalLeg": "1st leg 2-2"
+          }
+        }
+        """;
+
+        var envelope = JsonSerializer.Deserialize(json, FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto);
+        Assert.IsNotNull(envelope?.Data);
+        var match = envelope.Data;
+
+        Assert.AreEqual("4 - 3", match.AggregateScore);
+        Assert.AreEqual("1st leg 2-2", match.HistoricalLeg);
+        Assert.IsNotNull(match.Score.Aggregate);
+        Assert.AreEqual(4, match.Score.Aggregate.Home);
+        Assert.AreEqual(3, match.Score.Aggregate.Away);
+        Assert.AreEqual("4 - 3", match.Score.AggregateDisplay);
+
+        var vm = new MatchCenterViewModel();
+        vm.Load(match);
+
+        Assert.IsTrue(vm.HasAggregateScore);
+        Assert.AreEqual("4 - 3", vm.AggregateScore);
+        Assert.AreEqual("1st leg 2-2", vm.HistoricalLeg);
+        Assert.AreEqual("Agg 4 - 3 (1st leg 2-2)", vm.AggregateText);
+    }
 }

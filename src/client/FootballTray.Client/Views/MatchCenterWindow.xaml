@@ -105,6 +105,23 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         HorizontalAlignment="Center"
                         Margin="0,2,0,0" />
+                    <Border
+                        x:Name="AggregateBadge"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="8,2,8,2"
+                        Margin="0,4,0,0"
+                        HorizontalAlignment="Center"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="AggregateText"
+                            Text="{Binding AggregateText}"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Border>
                 </StackPanel>
 
                 <!-- Away Team -->
@@ -397,41 +414,20 @@
                     <!-- TAB B: LINEUPS PANEL -->
                     <Grid Grid.Row="1" x:Name="LineupsPanel" Visibility="Collapsed">
                         <Grid.RowDefinitions>
-                            <!-- Team Lineup Selection Row -->
-                            <RowDefinition Height="Auto" />
-                            <!-- Lineup Details ScrollViewer -->
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <!-- Team Selection Radio Buttons -->
-                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="4,0,4,8">
-                            <RadioButton
-                                x:Name="HomeLineupRadio"
-                                Content="Home Team"
-                                GroupName="LineupTeamTabs"
-                                IsChecked="True"
-                                FontWeight="SemiBold"
-                                Checked="OnLineupTeamChecked" />
-                            <RadioButton
-                                x:Name="AwayLineupRadio"
-                                Content="Away Team"
-                                GroupName="LineupTeamTabs"
-                                FontWeight="SemiBold"
-                                Checked="OnLineupTeamChecked" />
-                        </StackPanel>
-
                         <!-- Lineup Content Area -->
-                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Spacing="12">
-                                <!-- Home Team Lineup Container -->
-                                <StackPanel x:Name="HomeLineupContainer" Spacing="10" DataContext="{Binding HomeLineup}">
-                                    <!-- Formation & Coach Header Card -->
+                                <StackPanel x:Name="LineupsContentContainer" Spacing="12" Visibility="Visible">
+                                    <!-- Away Team Header Card -->
                                     <Border
                                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                         BorderThickness="1"
                                         CornerRadius="6"
-                                        Padding="12,8,12,8">
+                                        Padding="12,8">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -439,128 +435,129 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0" Spacing="2">
                                                 <TextBlock
-                                                    Text="{Binding Formation, FallbackValue='Formation: Standard'}"
+                                                    Text="{Binding AwayTeamName}"
                                                     FontSize="13"
                                                     FontWeight="Bold" />
                                                 <TextBlock
-                                                    Text="{Binding CoachName, FallbackValue='Coach: N/A'}"
+                                                    Text="{Binding AwayLineup.CoachName, FallbackValue='Coach: N/A'}"
                                                     FontSize="11"
                                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                             </StackPanel>
                                             <Border
                                                 Grid.Column="1"
-                                                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                                BorderThickness="1"
+                                                Background="#D13438"
                                                 CornerRadius="4"
-                                                Padding="6,2,6,2"
+                                                Padding="8,2"
                                                 VerticalAlignment="Center">
                                                 <TextBlock
-                                                    Text="Home"
+                                                    Text="{Binding AwayLineup.Formation, FallbackValue='Away'}"
                                                     FontSize="11"
-                                                    FontWeight="SemiBold" />
+                                                    FontWeight="Bold"
+                                                    Foreground="#FFFFFF" />
                                             </Border>
                                         </Grid>
                                     </Border>
 
-                                    <!-- Starting XI -->
-                                    <TextBlock
-                                        Text="Starting XI"
-                                        FontSize="13"
-                                        FontWeight="SemiBold"
-                                        Margin="4,4,0,0" />
+                                    <!-- Visual Football Pitch (Viewbox + Canvas) -->
+                                    <Border
+                                        Background="#164E24"
+                                        BorderBrush="#257A38"
+                                        BorderThickness="2"
+                                        CornerRadius="8"
+                                        Padding="8"
+                                        HorizontalAlignment="Center">
+                                        <Viewbox MaxWidth="380" MaxHeight="520" Stretch="Uniform">
+                                            <Grid Width="340" Height="500">
+                                                <!-- Pitch Grass Surface -->
+                                                <Border Background="#1A5627" CornerRadius="4" />
 
-                                    <ItemsControl ItemsSource="{Binding StartingXI}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:LineupPlayerItemViewModel">
-                                                <Grid Padding="4,4,4,4">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="28" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock
-                                                        Grid.Column="0"
-                                                        Text="{x:Bind Number}"
-                                                        FontWeight="Bold"
-                                                        FontSize="12"
-                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                        VerticalAlignment="Center" />
-                                                    <TextBlock
-                                                        Grid.Column="1"
-                                                        Text="{x:Bind Name}"
-                                                        FontSize="12"
-                                                        VerticalAlignment="Center" />
-                                                    <Border
-                                                        Grid.Column="2"
-                                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                        CornerRadius="4"
-                                                        Padding="6,1,6,1"
-                                                        VerticalAlignment="Center">
-                                                        <TextBlock
-                                                            Text="{x:Bind PositionBadge}"
-                                                            FontSize="10"
-                                                            FontWeight="SemiBold"
-                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                    </Border>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                                <!-- Pitch Markings (White lines with semi-opacity) -->
+                                                <!-- Touchline border -->
+                                                <Border Margin="14" BorderBrush="#85FFFFFF" BorderThickness="1.5" CornerRadius="2" />
+                                                <!-- Halfway Line -->
+                                                <Rectangle Margin="14,0,14,0" Height="1.5" Fill="#85FFFFFF" VerticalAlignment="Center" />
+                                                <!-- Center Circle -->
+                                                <Ellipse Width="70" Height="70" Stroke="#85FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <!-- Center Spot -->
+                                                <Ellipse Width="4" Height="4" Fill="#85FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-                                    <!-- Substitutes -->
-                                    <TextBlock
-                                        Text="Substitutes"
-                                        FontSize="13"
-                                        FontWeight="SemiBold"
-                                        Margin="4,8,0,0" />
+                                                <!-- Top Penalty Box (Away Defending) -->
+                                                <Border Margin="0,14,0,0" Width="130" Height="62" BorderBrush="#85FFFFFF" BorderThickness="1.5,0,1.5,1.5" HorizontalAlignment="Center" VerticalAlignment="Top" />
+                                                <!-- Top Goal Box -->
+                                                <Border Margin="0,14,0,0" Width="66" Height="24" BorderBrush="#85FFFFFF" BorderThickness="1.5,0,1.5,1.5" HorizontalAlignment="Center" VerticalAlignment="Top" />
+                                                <!-- Top Penalty Spot -->
+                                                <Ellipse Margin="0,52,0,0" Width="4" Height="4" Fill="#85FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Top" />
 
-                                    <ItemsControl ItemsSource="{Binding Substitutes}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:LineupPlayerItemViewModel">
-                                                <Grid Padding="4,4,4,4">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="28" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock
-                                                        Grid.Column="0"
-                                                        Text="{x:Bind Number}"
-                                                        FontSize="12"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                        VerticalAlignment="Center" />
-                                                    <TextBlock
-                                                        Grid.Column="1"
-                                                        Text="{x:Bind Name}"
-                                                        FontSize="12"
-                                                        VerticalAlignment="Center" />
-                                                    <Border
-                                                        Grid.Column="2"
-                                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                        CornerRadius="4"
-                                                        Padding="6,1,6,1"
-                                                        VerticalAlignment="Center">
-                                                        <TextBlock
-                                                            Text="{x:Bind PositionBadge}"
-                                                            FontSize="10"
-                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                                    </Border>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
+                                                <!-- Bottom Penalty Box (Home Defending) -->
+                                                <Border Margin="0,0,0,14" Width="130" Height="62" BorderBrush="#85FFFFFF" BorderThickness="1.5,1.5,1.5,0" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
+                                                <!-- Bottom Goal Box -->
+                                                <Border Margin="0,0,0,14" Width="66" Height="24" BorderBrush="#85FFFFFF" BorderThickness="1.5,1.5,1.5,0" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
+                                                <!-- Bottom Penalty Spot -->
+                                                <Ellipse Margin="0,0,0,52" Width="4" Height="4" Fill="#85FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
 
-                                <!-- Away Team Lineup Container -->
-                                <StackPanel x:Name="AwayLineupContainer" Spacing="10" DataContext="{Binding AwayLineup}" Visibility="Collapsed">
-                                    <!-- Formation & Coach Header Card -->
+                                                <!-- 22 Starting Players via ItemsControl with ItemContainerStyle -->
+                                                <ItemsControl ItemsSource="{Binding PitchPlayers}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <Canvas Width="340" Height="500" />
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemContainerStyle>
+                                                        <Style TargetType="ContentPresenter">
+                                                            <Setter Property="Canvas.Left" Value="{Binding CanvasLeft}" />
+                                                            <Setter Property="Canvas.Top" Value="{Binding CanvasTop}" />
+                                                        </Style>
+                                                    </ItemsControl.ItemContainerStyle>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="vm:PitchPlayerNodeViewModel">
+                                                            <Grid Width="70" HorizontalAlignment="Center">
+                                                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                                                    <!-- Circular Badge with Jersey Number -->
+                                                                    <Grid HorizontalAlignment="Center" Width="26" Height="26">
+                                                                        <!-- Goalkeeper Circle (Gold/Amber) -->
+                                                                        <Ellipse Width="26" Height="26" Fill="#D97706" Stroke="#FFFFFF" StrokeThickness="1.5"
+                                                                                 Visibility="{x:Bind GoalkeeperVisibility, Mode=OneWay}" />
+                                                                        <!-- Home Outfield Circle (Accent / Royal Blue) -->
+                                                                        <Ellipse Width="26" Height="26" Fill="#0078D4" Stroke="#FFFFFF" StrokeThickness="1.5"
+                                                                                 Visibility="{x:Bind HomeOutfieldVisibility, Mode=OneWay}" />
+                                                                        <!-- Away Outfield Circle (Coral / Crimson Red) -->
+                                                                        <Ellipse Width="26" Height="26" Fill="#D13438" Stroke="#FFFFFF" StrokeThickness="1.5"
+                                                                                 Visibility="{x:Bind AwayOutfieldVisibility, Mode=OneWay}" />
+
+                                                                        <TextBlock Text="{x:Bind Number}"
+                                                                                   FontSize="11"
+                                                                                   FontWeight="Bold"
+                                                                                   Foreground="#FFFFFF"
+                                                                                   HorizontalAlignment="Center"
+                                                                                   VerticalAlignment="Center" />
+                                                                    </Grid>
+
+                                                                    <!-- Player Surname Pill -->
+                                                                    <Border Background="#CC0F172A" CornerRadius="4" Padding="4,1,4,1" HorizontalAlignment="Center">
+                                                                        <TextBlock Text="{x:Bind ShortDisplayName}"
+                                                                                   FontSize="10"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#F8FAFC"
+                                                                                   TextTrimming="CharacterEllipsis"
+                                                                                   MaxLines="1"
+                                                                                   HorizontalAlignment="Center" />
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Grid>
+                                        </Viewbox>
+                                    </Border>
+
+                                    <!-- Home Team Header Card -->
                                     <Border
                                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                         BorderThickness="1"
                                         CornerRadius="6"
-                                        Padding="12,8,12,8">
+                                        Padding="12,8">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -568,117 +565,93 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0" Spacing="2">
                                                 <TextBlock
-                                                    Text="{Binding Formation, FallbackValue='Formation: Standard'}"
+                                                    Text="{Binding HomeTeamName}"
                                                     FontSize="13"
                                                     FontWeight="Bold" />
                                                 <TextBlock
-                                                    Text="{Binding CoachName, FallbackValue='Coach: N/A'}"
+                                                    Text="{Binding HomeLineup.CoachName, FallbackValue='Coach: N/A'}"
                                                     FontSize="11"
                                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                             </StackPanel>
                                             <Border
                                                 Grid.Column="1"
-                                                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                                BorderThickness="1"
+                                                Background="#0078D4"
                                                 CornerRadius="4"
-                                                Padding="6,2,6,2"
+                                                Padding="8,2"
                                                 VerticalAlignment="Center">
                                                 <TextBlock
-                                                    Text="Away"
+                                                    Text="{Binding HomeLineup.Formation, FallbackValue='Home'}"
                                                     FontSize="11"
-                                                    FontWeight="SemiBold" />
+                                                    FontWeight="Bold"
+                                                    Foreground="#FFFFFF" />
                                             </Border>
                                         </Grid>
                                     </Border>
 
-                                    <!-- Starting XI -->
-                                    <TextBlock
-                                        Text="Starting XI"
-                                        FontSize="13"
-                                        FontWeight="SemiBold"
-                                        Margin="4,4,0,0" />
+                                    <!-- Bench / Substitutes Section -->
+                                    <Border
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="14">
+                                        <StackPanel Spacing="10">
+                                            <TextBlock Text="🔄 Substitutes Bench" FontSize="13" FontWeight="Bold" />
 
-                                    <ItemsControl ItemsSource="{Binding StartingXI}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:LineupPlayerItemViewModel">
-                                                <Grid Padding="4,4,4,4">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="28" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock
-                                                        Grid.Column="0"
-                                                        Text="{x:Bind Number}"
-                                                        FontWeight="Bold"
-                                                        FontSize="12"
-                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                        VerticalAlignment="Center" />
-                                                    <TextBlock
-                                                        Grid.Column="1"
-                                                        Text="{x:Bind Name}"
-                                                        FontSize="12"
-                                                        VerticalAlignment="Center" />
-                                                    <Border
-                                                        Grid.Column="2"
-                                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                        CornerRadius="4"
-                                                        Padding="6,1,6,1"
-                                                        VerticalAlignment="Center">
-                                                        <TextBlock
-                                                            Text="{x:Bind PositionBadge}"
-                                                            FontSize="10"
-                                                            FontWeight="SemiBold"
-                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                    </Border>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                            <Grid ColumnSpacing="16">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
 
-                                    <!-- Substitutes -->
-                                    <TextBlock
-                                        Text="Substitutes"
-                                        FontSize="13"
-                                        FontWeight="SemiBold"
-                                        Margin="4,8,0,0" />
+                                                <!-- Left: Home Substitutes -->
+                                                <StackPanel Grid.Column="0" Spacing="6">
+                                                    <TextBlock Text="{Binding HomeTeamName}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                    <ItemsControl ItemsSource="{Binding HomeLineup.Substitutes}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:LineupPlayerItemViewModel">
+                                                                <Grid Padding="2,3,2,3">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="24" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Grid.Column="0" Text="{x:Bind Number}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                                                    <TextBlock Grid.Column="1" Text="{x:Bind Name}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                    <Border Grid.Column="2" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="3" Padding="4,1,4,1" VerticalAlignment="Center">
+                                                                        <TextBlock Text="{x:Bind PositionBadge}" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                                    </Border>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
 
-                                    <ItemsControl ItemsSource="{Binding Substitutes}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:LineupPlayerItemViewModel">
-                                                <Grid Padding="4,4,4,4">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="28" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock
-                                                        Grid.Column="0"
-                                                        Text="{x:Bind Number}"
-                                                        FontSize="12"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                        VerticalAlignment="Center" />
-                                                    <TextBlock
-                                                        Grid.Column="1"
-                                                        Text="{x:Bind Name}"
-                                                        FontSize="12"
-                                                        VerticalAlignment="Center" />
-                                                    <Border
-                                                        Grid.Column="2"
-                                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                        CornerRadius="4"
-                                                        Padding="6,1,6,1"
-                                                        VerticalAlignment="Center">
-                                                        <TextBlock
-                                                            Text="{x:Bind PositionBadge}"
-                                                            FontSize="10"
-                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                                    </Border>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                                <!-- Right: Away Substitutes -->
+                                                <StackPanel Grid.Column="1" Spacing="6">
+                                                    <TextBlock Text="{Binding AwayTeamName}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <ItemsControl ItemsSource="{Binding AwayLineup.Substitutes}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:LineupPlayerItemViewModel">
+                                                                <Grid Padding="2,3,2,3">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="24" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Grid.Column="0" Text="{x:Bind Number}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                                    <TextBlock Grid.Column="1" Text="{x:Bind Name}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                    <Border Grid.Column="2" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="3" Padding="4,1,4,1" VerticalAlignment="Center">
+                                                                        <TextBlock Text="{x:Bind PositionBadge}" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                                    </Border>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
 
                                 <!-- Empty Lineups Fallback -->

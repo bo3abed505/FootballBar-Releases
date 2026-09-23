@@ -161,6 +161,18 @@ public class ScoreDto
     [JsonPropertyName("halfTime")]
     public ScorePeriodDto? HalfTime { get; set; }
 
+    [JsonPropertyName("extraTime")]
+    public ScorePeriodDto? ExtraTime { get; set; }
+
+    [JsonPropertyName("penalty")]
+    public ScorePeriodDto? Penalty { get; set; }
+
+    [JsonPropertyName("aggregate")]
+    public ScorePeriodDto? Aggregate { get; set; }
+
+    [JsonPropertyName("aggregateDisplay")]
+    public string? AggregateDisplay { get; set; }
+
     [JsonPropertyName("display")]
     public string Display { get; set; } = "0 - 0";
 }
@@ -244,6 +256,12 @@ public class MatchDetailDto
 
     [JsonPropertyName("statistics")]
     public List<TeamStatisticsDto> Statistics { get; set; } = new();
+
+    [JsonPropertyName("aggregateScore")]
+    public string? AggregateScore { get; set; }
+
+    [JsonPropertyName("historicalLeg")]
+    public string? HistoricalLeg { get; set; }
 
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }

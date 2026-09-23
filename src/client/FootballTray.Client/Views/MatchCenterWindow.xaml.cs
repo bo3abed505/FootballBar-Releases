@@ -54,17 +54,23 @@ public sealed partial class MatchCenterWindow : Window
             HalfTimeText.Visibility = Visibility.Collapsed;
         }
 
-        // Sync team labels on lineups tab
-        HomeLineupRadio.Content = ViewModel.HomeTeamName;
-        AwayLineupRadio.Content = ViewModel.AwayTeamName;
+        // Sync aggregate score badge
+        if (ViewModel.HasAggregateScore)
+        {
+            AggregateText.Text = ViewModel.AggregateText;
+            AggregateBadge.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            AggregateBadge.Visibility = Visibility.Collapsed;
+        }
 
         // Empty states toggles
         NoEventsText.Visibility = ViewModel.TimelineItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         NoStatsBorder.Visibility = ViewModel.HasStatistics ? Visibility.Collapsed : Visibility.Visible;
         StatsItemsControl.Visibility = ViewModel.HasStatistics ? Visibility.Visible : Visibility.Collapsed;
         NoLineupsBorder.Visibility = ViewModel.HasLineups ? Visibility.Collapsed : Visibility.Visible;
-
-        UpdateLineupContainerVisibility();
+        LineupsContentContainer.Visibility = ViewModel.HasLineups ? Visibility.Visible : Visibility.Collapsed;
 
         // Asynchronously load team crests on background thread without blocking UI
         _ = LoadLogosAsync(match);
@@ -135,35 +141,8 @@ public sealed partial class MatchCenterWindow : Window
         {
             StatisticsPanel.Visibility = Visibility.Collapsed;
             LineupsPanel.Visibility = Visibility.Visible;
-            UpdateLineupContainerVisibility();
-        }
-    }
-
-    private void OnLineupTeamChecked(object sender, RoutedEventArgs e)
-    {
-        UpdateLineupContainerVisibility();
-    }
-
-    private void UpdateLineupContainerVisibility()
-    {
-        if (HomeLineupContainer == null || AwayLineupContainer == null) return;
-
-        if (!ViewModel.HasLineups)
-        {
-            HomeLineupContainer.Visibility = Visibility.Collapsed;
-            AwayLineupContainer.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        if (HomeLineupRadio?.IsChecked == true)
-        {
-            HomeLineupContainer.Visibility = Visibility.Visible;
-            AwayLineupContainer.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            HomeLineupContainer.Visibility = Visibility.Collapsed;
-            AwayLineupContainer.Visibility = Visibility.Visible;
+            NoLineupsBorder.Visibility = ViewModel.HasLineups ? Visibility.Collapsed : Visibility.Visible;
+            LineupsContentContainer.Visibility = ViewModel.HasLineups ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 }
