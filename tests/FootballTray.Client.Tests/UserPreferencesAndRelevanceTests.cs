@@ -216,11 +216,11 @@ public class UserPreferencesAndRelevanceTests
     public async Task Test14_UnknownAdditiveProperties_AreTolerated()
     {
         string filePath = Path.Combine(_tempDir, "preferences.json");
-        string jsonWithFutureProps = """
+        string jsonWithFutureProps = $$"""
         {
-          "preferencesVersion": 1,
+          "preferencesVersion": 2,
           "followedTeams": [
-            { "id": "team_529", "name": "FC Barcelona", "futureCustomProp": 12345 }
+            { "id": "{{CanonicalEntityIds.Barcelona}}", "name": "FC Barcelona", "futureCustomProp": 12345 }
           ],
           "followedCompetitions": [],
           "notifications": { "globalEnabled": true, "enabledTypes": [0, 1] },
@@ -233,7 +233,7 @@ public class UserPreferencesAndRelevanceTests
 
         Assert.IsNotNull(loaded);
         Assert.AreEqual(1, loaded.FollowedTeams.Count);
-        Assert.AreEqual("team_529", loaded.FollowedTeams[0].Id);
+        Assert.AreEqual(CanonicalEntityIds.Barcelona, loaded.FollowedTeams[0].Id);
     }
 
     [TestMethod]
@@ -286,7 +286,7 @@ public class UserPreferencesAndRelevanceTests
 
         string filePath = Path.Combine(_tempDir, "preferences.json");
         string content = await File.ReadAllTextAsync(filePath);
-        Assert.IsTrue(content.Contains("\"preferencesVersion\": 1"));
+        Assert.IsTrue(content.Contains($"\"preferencesVersion\": {UserPreferences.CurrentSchemaVersion}"));
     }
 
     [TestMethod]
@@ -982,23 +982,23 @@ public class UserPreferencesAndRelevanceTests
 
         // Competitions match TARGET_COMPETITION_IDS (39, 140, 233, 2, 6, 1)
         var compMap = defaults.FollowedCompetitions.ToDictionary(c => c.Id, c => c.Name);
-        Assert.IsTrue(compMap.ContainsKey("comp_39"));
-        Assert.AreEqual("Premier League", compMap["comp_39"]);
+        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.PremierLeague));
+        Assert.AreEqual("Premier League", compMap[CanonicalEntityIds.PremierLeague]);
 
-        Assert.IsTrue(compMap.ContainsKey("comp_140"));
-        Assert.AreEqual("La Liga", compMap["comp_140"]);
+        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.LaLiga));
+        Assert.AreEqual("La Liga", compMap[CanonicalEntityIds.LaLiga]);
 
-        Assert.IsTrue(compMap.ContainsKey("comp_233"));
-        Assert.AreEqual("Egyptian Premier League", compMap["comp_233"]);
+        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.EgyptianPremierLeague));
+        Assert.AreEqual("Egyptian Premier League", compMap[CanonicalEntityIds.EgyptianPremierLeague]);
 
-        Assert.IsTrue(compMap.ContainsKey("comp_2"));
-        Assert.AreEqual("UEFA Champions League", compMap["comp_2"]);
+        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.ChampionsLeague));
+        Assert.AreEqual("UEFA Champions League", compMap[CanonicalEntityIds.ChampionsLeague]);
 
-        Assert.IsTrue(compMap.ContainsKey("comp_6"));
-        Assert.AreEqual("CAF Africa Cup of Nations", compMap["comp_6"]);
+        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.AfricaCupOfNations));
+        Assert.AreEqual("CAF Africa Cup of Nations", compMap[CanonicalEntityIds.AfricaCupOfNations]);
 
-        Assert.IsTrue(compMap.ContainsKey("comp_1"));
-        Assert.AreEqual("FIFA World Cup", compMap["comp_1"]);
+        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.WorldCup));
+        Assert.AreEqual("FIFA World Cup", compMap[CanonicalEntityIds.WorldCup]);
     }
 
     [TestMethod]

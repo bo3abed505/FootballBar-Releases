@@ -87,13 +87,13 @@ public class FootballApiClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches the tray match collection from /api/tray with optional ETag 304 validation.
+    /// Fetches the tray match collection from /api/v2/tray with optional ETag 304 validation.
     /// </summary>
     public async Task<TrayApiResponse> GetTrayAsync(string? ifNoneMatch = null, CancellationToken cancellationToken = default)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/tray");
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v2/tray");
 
             if (!string.IsNullOrWhiteSpace(ifNoneMatch))
             {
@@ -146,7 +146,7 @@ public class FootballApiClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches full match details and timeline from /api/match/:id.
+    /// Fetches full match details and timeline from /api/v2/match/:id.
     /// </summary>
     public async Task<MatchDetailApiResponse> GetMatchDetailsAsync(string matchId, CancellationToken cancellationToken = default)
     {
@@ -157,7 +157,7 @@ public class FootballApiClient : IDisposable
 
         try
         {
-            using var response = await _httpClient.GetAsync($"/api/match/{Uri.EscapeDataString(matchId.Trim())}", cancellationToken);
+            using var response = await _httpClient.GetAsync($"/api/v2/match/{Uri.EscapeDataString(matchId.Trim())}", cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {

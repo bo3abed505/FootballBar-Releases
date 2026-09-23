@@ -21,8 +21,11 @@ public sealed record NotificationCandidate
     public int ElapsedMinute { get; init; }
     public int ExtraMinute { get; init; }
     public string? CompetitionId { get; init; }
+    public string? CompetitionLegacyId { get; init; }
     public string? HomeTeamId { get; init; }
+    public string? HomeTeamLegacyId { get; init; }
     public string? AwayTeamId { get; init; }
+    public string? AwayTeamLegacyId { get; init; }
     public string? EventPlayerName { get; init; }
     public string? EventDescription { get; init; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;

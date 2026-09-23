@@ -61,9 +61,12 @@ public static class FixtureRelevanceEngine
             return new FixtureRelevanceResult();
         }
 
-        bool homeFollowed = !string.IsNullOrWhiteSpace(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id);
-        bool awayFollowed = !string.IsNullOrWhiteSpace(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id);
-        bool compFollowed = !string.IsNullOrWhiteSpace(match.Competition?.Id) && followedCompetitionIds.Contains(match.Competition.Id);
+        bool homeFollowed = (!string.IsNullOrWhiteSpace(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
+            || (!string.IsNullOrWhiteSpace(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId));
+        bool awayFollowed = (!string.IsNullOrWhiteSpace(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id))
+            || (!string.IsNullOrWhiteSpace(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId));
+        bool compFollowed = (!string.IsNullOrWhiteSpace(match.Competition?.Id) && followedCompetitionIds.Contains(match.Competition.Id))
+            || (!string.IsNullOrWhiteSpace(match.Competition?.LegacyId) && followedCompetitionIds.Contains(match.Competition.LegacyId));
 
         bool followedByTeam = homeFollowed || awayFollowed;
         var reasons = new List<string>();

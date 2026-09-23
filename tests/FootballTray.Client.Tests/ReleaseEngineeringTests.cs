@@ -768,7 +768,7 @@ public class ReleaseEngineeringTests
         int exitedPid = helperProcess.Id;
 
         // Passing an exited PID with -WhatIf should wait 0s, detect process exited, and proceed to WhatIf
-        var result = RunScriptDirect(installerScript, $"-WaitForProcessId {exitedPid} -WhatIf", root);
+        var result = RunScriptDirect(installerScript, $"-WaitForProcessId {exitedPid} -WhatIf -AllowDowngrade", root);
         Assert.AreEqual(0, result.ExitCode, $"install-client with exited PID failed: {result.Stdout} {result.Stderr}");
         Assert.IsTrue(result.Stdout.Contains("Calling process exited gracefully.") || result.Stdout.Contains("WHATIF:"),
             $"Expected successful wait output. Stdout: {result.Stdout}");
@@ -790,7 +790,7 @@ public class ReleaseEngineeringTests
         {
             int livingPid = livingProcess.Id;
 
-            var result = RunScriptDirect(installerScript, $"-WaitForProcessId {livingPid} -WhatIf", root, timeoutMs: 35000);
+            var result = RunScriptDirect(installerScript, $"-WaitForProcessId {livingPid} -WhatIf -AllowDowngrade", root, timeoutMs: 35000);
             Assert.AreNotEqual(0, result.ExitCode, "Installer must fail closed when caller does not exit.");
             Assert.IsTrue(result.Stdout.Contains("did not exit within 15 seconds") || result.Stderr.Contains("did not exit within 15 seconds"),
                 $"Expected 15s timeout error message. Stdout: {result.Stdout} Stderr: {result.Stderr}");

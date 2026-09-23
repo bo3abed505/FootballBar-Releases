@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace FootballTray.Client.Services.Preferences;
 
@@ -9,50 +10,125 @@ namespace FootballTray.Client.Services.Preferences;
 public static class CanonicalEntityIds
 {
     // ==========================================
-    // Teams (API-Football team IDs)
+    // Teams (Canonical ft_team_ IDs from Gate C backfill)
     // ==========================================
 
-    /// <summary>FC Barcelona (API-Football ID: 529)</summary>
-    public const string Barcelona = "team_529";
+    /// <summary>FC Barcelona canonical ID</summary>
+    public const string Barcelona = "ft_team_01M33DKNCTXK0YKJNJDDC15GS8";
+    public const string LegacyBarcelona = "team_529";
     public const int BarcelonaNumericId = 529;
     public const string BarcelonaMockAlias = "team_barcelona";
 
-    /// <summary>Al Ahly SC (API-Football ID: 1029)</summary>
-    public const string AlAhly = "team_1029";
+    /// <summary>Al Ahly SC canonical ID</summary>
+    public const string AlAhly = "ft_team_01M33DKNCP7HVGD8FVFYW5YNAK";
+    public const string LegacyAlAhly = "team_1029";
     public const int AlAhlyNumericId = 1029;
     public const string AlAhlyMockAlias = "team_alahly";
 
     // ==========================================
-    // Competitions (API-Football league IDs matching TARGET_COMPETITION_IDS)
+    // Competitions (Canonical ft_comp_ IDs from Gate C backfill)
     // ==========================================
 
-    /// <summary>Premier League (API-Football ID: 39)</summary>
-    public const string PremierLeague = "comp_39";
+    /// <summary>Premier League canonical ID</summary>
+    public const string PremierLeague = "ft_comp_01M33DKNCCNEJAG93CDAGJSR4A";
+    public const string LegacyPremierLeague = "comp_39";
     public const int PremierLeagueNumericId = 39;
     public const string PremierLeagueMockAlias = "comp_pl";
 
-    /// <summary>La Liga (API-Football ID: 140)</summary>
-    public const string LaLiga = "comp_140";
+    /// <summary>La Liga canonical ID</summary>
+    public const string LaLiga = "ft_comp_01M33DKNC8CKGMJ9Z7898AH8HA";
+    public const string LegacyLaLiga = "comp_140";
     public const int LaLigaNumericId = 140;
     public const string LaLigaMockAlias = "comp_laliga";
 
-    /// <summary>Egyptian Premier League (API-Football ID: 233)</summary>
-    public const string EgyptianPremierLeague = "comp_233";
+    /// <summary>Egyptian Premier League canonical ID</summary>
+    public const string EgyptianPremierLeague = "ft_comp_01M33DKNCABRRYR4K6D9DKTP40";
+    public const string LegacyEgyptianPremierLeague = "comp_233";
     public const int EgyptianPremierLeagueNumericId = 233;
     public const string EgyptianPremierLeagueMockAlias = "comp_egypt_pl";
 
-    /// <summary>UEFA Champions League (API-Football ID: 2)</summary>
-    public const string ChampionsLeague = "comp_2";
+    /// <summary>UEFA Champions League canonical ID</summary>
+    public const string ChampionsLeague = "ft_comp_01M33DKNC97EMTT3FNZR1YTC9E";
+    public const string LegacyChampionsLeague = "comp_2";
     public const int ChampionsLeagueNumericId = 2;
     public const string ChampionsLeagueMockAlias = "comp_ucl";
 
-    /// <summary>CAF Africa Cup of Nations (API-Football ID: 6)</summary>
-    public const string AfricaCupOfNations = "comp_6";
+    /// <summary>CAF Africa Cup of Nations canonical ID</summary>
+    public const string AfricaCupOfNations = "ft_comp_01M33DKNCDV0T7DEEHHZ20DMN7";
+    public const string LegacyAfricaCupOfNations = "comp_6";
     public const int AfricaCupOfNationsNumericId = 6;
     public const string AfricaCupOfNationsMockAlias = "comp_afcon";
 
-    /// <summary>FIFA World Cup (API-Football ID: 1)</summary>
-    public const string WorldCup = "comp_1";
+    /// <summary>FIFA World Cup canonical ID</summary>
+    public const string WorldCup = "ft_comp_01M33DKNBZRHDX2EN9YQJPSV5Q";
+    public const string LegacyWorldCup = "comp_1";
     public const int WorldCupNumericId = 1;
     public const string WorldCupMockAlias = "comp_wc";
+
+    // ==========================================
+    // Legacy to Canonical Migration Dictionary
+    // ==========================================
+
+    public static readonly IReadOnlyDictionary<string, string> LegacyToCanonicalMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        // Teams
+        { "team_529", Barcelona },
+        { "529", Barcelona },
+        { "team_barcelona", Barcelona },
+        { "team_1029", AlAhly },
+        { "1029", AlAhly },
+        { "team_1577", AlAhly },
+        { "1577", AlAhly },
+        { "team_alahly", AlAhly },
+
+        // Competitions
+        { "comp_39", PremierLeague },
+        { "39", PremierLeague },
+        { "comp_pl", PremierLeague },
+        { "comp_140", LaLiga },
+        { "140", LaLiga },
+        { "comp_laliga", LaLiga },
+        { "comp_233", EgyptianPremierLeague },
+        { "233", EgyptianPremierLeague },
+        { "comp_egypt_pl", EgyptianPremierLeague },
+        { "comp_2", ChampionsLeague },
+        { "2", ChampionsLeague },
+        { "comp_ucl", ChampionsLeague },
+        { "comp_6", AfricaCupOfNations },
+        { "6", AfricaCupOfNations },
+        { "comp_afcon", AfricaCupOfNations },
+        { "comp_1", WorldCup },
+        { "1", WorldCup },
+        { "comp_wc", WorldCup },
+    };
+
+    /// <summary>
+    /// Translates a legacy ID (numeric, prefixed, or mock alias) to its canonical ft_ form.
+    /// Handles provisional prefixed IDs and already-canonical IDs.
+    /// </summary>
+    public static bool TryTranslateLegacyId(string? legacyId, out string canonicalId)
+    {
+        canonicalId = string.Empty;
+        if (string.IsNullOrWhiteSpace(legacyId)) return false;
+
+        var clean = legacyId.Trim();
+        if (clean.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
+        {
+            clean = clean["provisional:".Length..].Trim();
+        }
+
+        if (LegacyToCanonicalMap.TryGetValue(clean, out var found))
+        {
+            canonicalId = found;
+            return true;
+        }
+
+        if (clean.StartsWith("ft_", StringComparison.OrdinalIgnoreCase))
+        {
+            canonicalId = clean;
+            return true;
+        }
+
+        return false;
+    }
 }

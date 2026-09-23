@@ -17,9 +17,11 @@ namespace FootballTray.Client.Services.Preferences;
 public sealed class PreferencesService : IPreferencesService
 {
     private const string FileName = "preferences.json";
+    private const string BackupFileName = "preferences.json.bak";
     private const long MaxAllowedFileSizeBytes = 1024 * 1024; // 1 MB sanity bound
 
     private readonly string _filePath;
+    private readonly string _backupFilePath;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private UserPreferences _currentPreferences;
     private bool _isLoaded;
@@ -34,6 +36,7 @@ public sealed class PreferencesService : IPreferencesService
 
         Directory.CreateDirectory(baseDir);
         _filePath = Path.Combine(baseDir, FileName);
+        _backupFilePath = Path.Combine(baseDir, BackupFileName);
         _currentPreferences = DefaultPreferences.CreateDefault();
     }
 
@@ -104,7 +107,14 @@ public sealed class PreferencesService : IPreferencesService
         try
         {
             var teams = _currentPreferences.FollowedTeams?.ToList() ?? new List<FollowedTeam>();
-            if (!teams.Any(t => string.Equals(t.Id, team.Id, StringComparison.OrdinalIgnoreCase)))
+            string canonicalTargetId = CanonicalEntityIds.TryTranslateLegacyId(team.Id, out var canon) ? canon : team.Id;
+
+            bool alreadyFollowed = teams.Any(t =>
+                string.Equals(t.Id, team.Id, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+
+            if (!alreadyFollowed)
             {
                 teams.Add(team);
                 var updated = _currentPreferences with { FollowedTeams = teams };
@@ -130,7 +140,13 @@ public sealed class PreferencesService : IPreferencesService
         try
         {
             var teams = _currentPreferences.FollowedTeams?.ToList() ?? new List<FollowedTeam>();
-            int removed = teams.RemoveAll(t => string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase));
+            string canonicalTargetId = CanonicalEntityIds.TryTranslateLegacyId(teamId, out var canon) ? canon : teamId;
+
+            int removed = teams.RemoveAll(t =>
+                string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+
             if (removed > 0)
             {
                 var updated = _currentPreferences with { FollowedTeams = teams };
@@ -157,7 +173,14 @@ public sealed class PreferencesService : IPreferencesService
         try
         {
             var comps = _currentPreferences.FollowedCompetitions?.ToList() ?? new List<FollowedCompetition>();
-            if (!comps.Any(c => string.Equals(c.Id, competition.Id, StringComparison.OrdinalIgnoreCase)))
+            string canonicalTargetId = CanonicalEntityIds.TryTranslateLegacyId(competition.Id, out var canon) ? canon : competition.Id;
+
+            bool alreadyFollowed = comps.Any(c =>
+                string.Equals(c.Id, competition.Id, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+
+            if (!alreadyFollowed)
             {
                 comps.Add(competition);
                 var updated = _currentPreferences with { FollowedCompetitions = comps };
@@ -183,7 +206,13 @@ public sealed class PreferencesService : IPreferencesService
         try
         {
             var comps = _currentPreferences.FollowedCompetitions?.ToList() ?? new List<FollowedCompetition>();
-            int removed = comps.RemoveAll(c => string.Equals(c.Id, competitionId, StringComparison.OrdinalIgnoreCase));
+            string canonicalTargetId = CanonicalEntityIds.TryTranslateLegacyId(competitionId, out var canon) ? canon : competitionId;
+
+            int removed = comps.RemoveAll(c =>
+                string.Equals(c.Id, competitionId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+
             if (removed > 0)
             {
                 var updated = _currentPreferences with { FollowedCompetitions = comps };
@@ -265,71 +294,181 @@ public sealed class PreferencesService : IPreferencesService
 
     private async Task<UserPreferences> LoadFromDiskAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(_filePath))
+        UserPreferences? primary = null;
+        bool primaryExists = File.Exists(_filePath);
+
+        if (primaryExists)
         {
-            var defaults = DefaultPreferences.CreateDefault();
-            await SaveToDiskAsync(defaults, cancellationToken);
-            return defaults;
+            primary = await TryReadPreferencesFileAsync(_filePath, cancellationToken);
         }
 
+        if (primary != null)
+        {
+            // 1. Unsupported future version check (e.g. 999) - immediately revert to defaults!
+            if (primary.PreferencesVersion > UserPreferences.CurrentSchemaVersion)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PREFERENCES] Unsupported preferences version ({primary.PreferencesVersion}). Safely reverting to defaults.");
+                var futureDefaults = DefaultPreferences.CreateDefault();
+                await SaveToDiskAsync(futureDefaults, cancellationToken);
+                return futureDefaults;
+            }
+
+            // 2. Migration check: if version < 2 or legacy IDs present from v1
+            if (NeedsMigration(primary))
+            {
+                // Create backup before persisting migration
+                try
+                {
+                    File.Copy(_filePath, _backupFilePath, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[PREFERENCES] Failed to create backup before migration: {ex.Message}");
+                }
+
+                var migrated = MigrateToV2(primary);
+                var normalized = NormalizePreferences(migrated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                return normalized;
+            }
+
+            return NormalizePreferences(primary);
+        }
+
+        // Primary is missing, corrupted, or unreadable — attempt recovery from backup
+        if (File.Exists(_backupFilePath))
+        {
+            System.Diagnostics.Debug.WriteLine("[PREFERENCES] Primary file invalid or missing. Attempting recovery from backup.");
+            var backup = await TryReadPreferencesFileAsync(_backupFilePath, cancellationToken);
+            if (backup != null)
+            {
+                if (NeedsMigration(backup))
+                {
+                    backup = MigrateToV2(backup);
+                }
+                var normalized = NormalizePreferences(backup);
+                try
+                {
+                    await SaveToDiskAsync(normalized, cancellationToken);
+                }
+                catch { }
+                return normalized;
+            }
+        }
+
+        // Neither primary nor backup available or valid — safely initialize defaults
+        var defaults = DefaultPreferences.CreateDefault();
         try
         {
-            var fileInfo = new FileInfo(_filePath);
+            await SaveToDiskAsync(defaults, cancellationToken);
+        }
+        catch { }
+        return defaults;
+    }
+
+    private static async Task<UserPreferences?> TryReadPreferencesFileAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+
+            var fileInfo = new FileInfo(path);
             if (fileInfo.Length == 0 || fileInfo.Length > MaxAllowedFileSizeBytes)
             {
-                System.Diagnostics.Debug.WriteLine($"[PREFERENCES] Invalid preference file size ({fileInfo.Length} bytes). Resetting to defaults.");
-                var defaults = DefaultPreferences.CreateDefault();
-                await SaveToDiskAsync(defaults, cancellationToken);
-                return defaults;
+                return null;
             }
 
             string json;
-            using (var stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var reader = new StreamReader(stream, Encoding.UTF8))
             {
                 json = await reader.ReadToEndAsync(cancellationToken);
             }
 
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                var defaults = DefaultPreferences.CreateDefault();
-                await SaveToDiskAsync(defaults, cancellationToken);
-                return defaults;
-            }
+            if (string.IsNullOrWhiteSpace(json)) return null;
 
-            var loaded = JsonSerializer.Deserialize(json, FootballJsonSerializerContext.Default.UserPreferences);
-            if (loaded == null)
-            {
-                var defaults = DefaultPreferences.CreateDefault();
-                await SaveToDiskAsync(defaults, cancellationToken);
-                return defaults;
-            }
-
-            // Version check
-            if (loaded.PreferencesVersion < 1 || loaded.PreferencesVersion > UserPreferences.CurrentSchemaVersion)
-            {
-                System.Diagnostics.Debug.WriteLine($"[PREFERENCES] Unsupported preferences version ({loaded.PreferencesVersion}). Safely reverting to defaults.");
-                var defaults = DefaultPreferences.CreateDefault();
-                await SaveToDiskAsync(defaults, cancellationToken);
-                return defaults;
-            }
-
-            return NormalizePreferences(loaded);
+            return JsonSerializer.Deserialize(json, FootballJsonSerializerContext.Default.UserPreferences);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[PREFERENCES] Error reading preferences file: {ex.Message}. Recovering with defaults.");
-            var defaults = DefaultPreferences.CreateDefault();
-            try
-            {
-                await SaveToDiskAsync(defaults, cancellationToken);
-            }
-            catch
-            {
-                // Ignored in recovery
-            }
-            return defaults;
+            System.Diagnostics.Debug.WriteLine($"[PREFERENCES] Error reading file {path}: {ex.Message}");
+            return null;
         }
+    }
+
+    private static bool NeedsMigration(UserPreferences prefs)
+    {
+        if (prefs == null) return false;
+        if (prefs.PreferencesVersion > UserPreferences.CurrentSchemaVersion) return false;
+        if (prefs.PreferencesVersion < 2) return true;
+
+        if (prefs.FollowedTeams != null && prefs.FollowedTeams.Any(t =>
+            !string.IsNullOrWhiteSpace(t.Id) &&
+            CanonicalEntityIds.LegacyToCanonicalMap.ContainsKey(t.Id)))
+        {
+            return true;
+        }
+
+        if (prefs.FollowedCompetitions != null && prefs.FollowedCompetitions.Any(c =>
+            !string.IsNullOrWhiteSpace(c.Id) &&
+            CanonicalEntityIds.LegacyToCanonicalMap.ContainsKey(c.Id)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static UserPreferences MigrateToV2(UserPreferences raw)
+    {
+        var migratedTeams = new List<FollowedTeam>();
+        if (raw.FollowedTeams != null)
+        {
+            foreach (var team in raw.FollowedTeams)
+            {
+                if (string.IsNullOrWhiteSpace(team.Id)) continue;
+                string newId = team.Id.Trim();
+                if (CanonicalEntityIds.TryTranslateLegacyId(newId, out var canonicalId))
+                {
+                    newId = canonicalId;
+                }
+                else if (raw.PreferencesVersion < 2 &&
+                         !newId.StartsWith("ft_", StringComparison.OrdinalIgnoreCase) &&
+                         !newId.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
+                {
+                    newId = $"provisional:{newId}";
+                }
+                migratedTeams.Add(team with { Id = newId });
+            }
+        }
+
+        var migratedComps = new List<FollowedCompetition>();
+        if (raw.FollowedCompetitions != null)
+        {
+            foreach (var comp in raw.FollowedCompetitions)
+            {
+                if (string.IsNullOrWhiteSpace(comp.Id)) continue;
+                string newId = comp.Id.Trim();
+                if (CanonicalEntityIds.TryTranslateLegacyId(newId, out var canonicalId))
+                {
+                    newId = canonicalId;
+                }
+                else if (raw.PreferencesVersion < 2 &&
+                         !newId.StartsWith("ft_", StringComparison.OrdinalIgnoreCase) &&
+                         !newId.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
+                {
+                    newId = $"provisional:{newId}";
+                }
+                migratedComps.Add(comp with { Id = newId });
+            }
+        }
+
+        return raw with
+        {
+            PreferencesVersion = UserPreferences.CurrentSchemaVersion,
+            FollowedTeams = migratedTeams,
+            FollowedCompetitions = migratedComps
+        };
     }
 
     private async Task SaveToDiskAsync(UserPreferences preferences, CancellationToken cancellationToken)

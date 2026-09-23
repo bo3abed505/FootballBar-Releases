@@ -11,7 +11,8 @@ namespace FootballTray.Client.Services.Notifications;
 
 public sealed class NotificationHistoryModel
 {
-    public int SchemaVersion { get; set; } = 1;
+    public const int CurrentSchemaVersion = 2;
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public Dictionary<string, DateTimeOffset> NotifiedKeys { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -29,6 +30,13 @@ public sealed class NotificationDeduplicationStore
     private readonly string _filePath;
     private readonly SemaphoreSlim _ioLock = new(1, 1);
     private readonly Dictionary<string, DateTimeOffset> _notifiedKeys = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool NeedsV2Baseline { get; private set; }
+
+    public void MarkV2BaselineEstablished()
+    {
+        NeedsV2Baseline = false;
+    }
 
     public int Count
     {
@@ -107,6 +115,11 @@ public sealed class NotificationDeduplicationStore
 
             if (model?.NotifiedKeys != null)
             {
+                if (model.SchemaVersion < NotificationHistoryModel.CurrentSchemaVersion)
+                {
+                    NeedsV2Baseline = true;
+                }
+
                 lock (_notifiedKeys)
                 {
                     _notifiedKeys.Clear();
@@ -149,7 +162,7 @@ public sealed class NotificationDeduplicationStore
                 PruneInMemory();
                 model = new NotificationHistoryModel
                 {
-                    SchemaVersion = 1,
+                    SchemaVersion = NotificationHistoryModel.CurrentSchemaVersion,
                     NotifiedKeys = new Dictionary<string, DateTimeOffset>(_notifiedKeys, StringComparer.OrdinalIgnoreCase)
                 };
             }

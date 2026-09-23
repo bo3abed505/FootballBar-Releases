@@ -57,6 +57,9 @@ public class TrayMatchDto
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    [JsonPropertyName("legacyId")]
+    public string? LegacyId { get; set; }
+
     [JsonPropertyName("competition")]
     public CompetitionSummaryDto? Competition { get; set; }
 
@@ -83,12 +86,33 @@ public class TrayMatchDto
 
     [JsonPropertyName("recentEvents")]
     public List<TrayEventDto> RecentEvents { get; set; } = new();
+
+    [JsonPropertyName("trust")]
+    public V2TrustMetadataDto? Trust { get; set; }
+}
+
+public sealed class V2TrustMetadataDto
+{
+    [JsonPropertyName("freshnessState")]
+    public string FreshnessState { get; set; } = "UNKNOWN";
+
+    [JsonPropertyName("sourceObservedAt")]
+    public DateTimeOffset? SourceObservedAt { get; set; }
+
+    [JsonPropertyName("dataAgeSeconds")]
+    public int? DataAgeSeconds { get; set; }
+
+    [JsonPropertyName("provider")]
+    public string? Provider { get; set; }
 }
 
 public class TeamSummaryDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("legacyId")]
+    public string? LegacyId { get; set; }
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
@@ -104,6 +128,9 @@ public class CompetitionSummaryDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("legacyId")]
+    public string? LegacyId { get; set; }
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
@@ -165,6 +192,9 @@ public class MatchDetailDto
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    [JsonPropertyName("legacyId")]
+    public string? LegacyId { get; set; }
+
     [JsonPropertyName("competition")]
     public CompetitionSummaryDto? Competition { get; set; }
 
@@ -197,4 +227,7 @@ public class MatchDetailDto
 
     [JsonPropertyName("events")]
     public List<TrayEventDto> Events { get; set; } = new();
+
+    [JsonPropertyName("trust")]
+    public V2TrustMetadataDto? Trust { get; set; }
 }

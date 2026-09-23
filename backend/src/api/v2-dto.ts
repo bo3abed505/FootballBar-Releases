@@ -18,17 +18,20 @@ export interface V2TrayMatch {
   legacyId?: string; // legacy primary key e.g. 'fix_...'
   competition: {
     id: string; // canonical_id e.g. 'ft_comp_...'
+    legacyId?: string;
     name?: string;
     code?: string;
   };
   homeTeam: {
     id: string; // canonical_id e.g. 'ft_team_...'
+    legacyId?: string;
     name?: string;
     shortName?: string;
     logoUrl?: string;
   };
   awayTeam: {
     id: string; // canonical_id e.g. 'ft_team_...'
+    legacyId?: string;
     name?: string;
     shortName?: string;
     logoUrl?: string;
@@ -59,6 +62,7 @@ export interface V2MatchDetail {
   legacyId?: string;
   competition: {
     id: string; // canonical_id
+    legacyId?: string;
     name?: string;
     code?: string;
     type?: string;
@@ -68,6 +72,7 @@ export interface V2MatchDetail {
   season?: any;
   homeTeam: {
     id: string; // canonical_id
+    legacyId?: string;
     name?: string;
     shortName?: string;
     code?: string;
@@ -76,6 +81,7 @@ export interface V2MatchDetail {
   };
   awayTeam: {
     id: string; // canonical_id
+    legacyId?: string;
     name?: string;
     shortName?: string;
     code?: string;
@@ -139,7 +145,7 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
       };
     }
   } else if (FINISHED_STATES.includes(state)) {
-    // Concluded match: score and events are definitive and final
+    // Finished match: final state
     if (fixture.liveObservedAt) {
       sourceObservedAt = new Date(fixture.liveObservedAt);
     } else if (fixture.lastPolledAt) {
@@ -149,30 +155,26 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
     }
     provider = fixture.liveSourceProvider || fixture.scheduleSourceProvider || null;
 
-    const dataAgeSeconds = sourceObservedAt && !isNaN(sourceObservedAt.getTime())
-      ? Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000))
-      : null;
-
     return {
       freshnessState: 'FINAL',
       sourceObservedAt: sourceObservedAt ? sourceObservedAt.toISOString() : null,
-      dataAgeSeconds,
+      dataAgeSeconds: sourceObservedAt ? Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000)) : null,
       provider,
     };
-  } else if (PREMATCH_STATES.includes(state)) {
-    // Prematch: observation timestamp from schedule discovery
+  } else if (PREMATCH_STATES.includes(state) || !state) {
+    // Scheduled match: observation timestamp from schedule discovery
     if (fixture.scheduleObservedAt) {
       sourceObservedAt = new Date(fixture.scheduleObservedAt);
+    } else if (fixture.lastPolledAt) {
+      sourceObservedAt = new Date(fixture.lastPolledAt);
     } else if (fixture.updatedAt) {
       sourceObservedAt = new Date(fixture.updatedAt);
-    } else if (fixture.createdAt) {
-      sourceObservedAt = new Date(fixture.createdAt);
     }
     provider = fixture.scheduleSourceProvider || null;
 
     if (sourceObservedAt && !isNaN(sourceObservedAt.getTime())) {
       const dataAgeSeconds = Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000));
-      // Schedule matches are FRESH if observed within 24 hours (86,400s)
+      // Scheduled fixtures considered FRESH if observed within 24 hours (86400 seconds)
       freshnessState = dataAgeSeconds <= 86400 ? 'FRESH' : 'STALE';
       return {
         freshnessState,
@@ -181,22 +183,14 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
         provider,
       };
     }
-  } else {
-    // Postponed / cancelled / abandoned matches
-    if (fixture.liveObservedAt) {
-      sourceObservedAt = new Date(fixture.liveObservedAt);
-    } else if (fixture.scheduleObservedAt) {
-      sourceObservedAt = new Date(fixture.scheduleObservedAt);
-    } else if (fixture.updatedAt) {
-      sourceObservedAt = new Date(fixture.updatedAt);
-    }
-    provider = fixture.liveSourceProvider || fixture.scheduleSourceProvider || null;
-    const dataAgeSeconds = sourceObservedAt && !isNaN(sourceObservedAt.getTime())
-      ? Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000))
-      : null;
+  }
 
+  // Fallback if timestamps are not yet populated
+  if (fixture.lastPolledAt || fixture.updatedAt) {
+    sourceObservedAt = new Date(fixture.lastPolledAt || fixture.updatedAt);
+    const dataAgeSeconds = Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000));
     return {
-      freshnessState: 'FINAL',
+      freshnessState: 'UNKNOWN',
       sourceObservedAt: sourceObservedAt ? sourceObservedAt.toISOString() : null,
       dataAgeSeconds,
       provider,
@@ -220,17 +214,20 @@ export function formatV2TrayMatch(m: any, now: Date = new Date()): V2TrayMatch {
     legacyId: m.id,
     competition: {
       id: m.competition?.canonicalId || m.competition?.id,
+      legacyId: m.competition?.id,
       name: m.competition?.name,
       code: m.competition?.code,
     },
     homeTeam: {
       id: m.homeTeam?.canonicalId || m.homeTeam?.id,
+      legacyId: m.homeTeam?.id,
       name: m.homeTeam?.name,
       shortName: m.homeTeam?.shortName,
       logoUrl: m.homeTeam?.logoUrl,
     },
     awayTeam: {
       id: m.awayTeam?.canonicalId || m.awayTeam?.id,
+      legacyId: m.awayTeam?.id,
       name: m.awayTeam?.name,
       shortName: m.awayTeam?.shortName,
       logoUrl: m.awayTeam?.logoUrl,
@@ -266,6 +263,7 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     legacyId: fixture.id,
     competition: {
       id: fixture.competition?.canonicalId || fixture.competition?.id,
+      legacyId: fixture.competition?.id,
       name: fixture.competition?.name,
       code: fixture.competition?.code,
       type: fixture.competition?.type,
@@ -275,6 +273,7 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     season: fixture.season,
     homeTeam: {
       id: fixture.homeTeam?.canonicalId || fixture.homeTeam?.id,
+      legacyId: fixture.homeTeam?.id,
       name: fixture.homeTeam?.name,
       shortName: fixture.homeTeam?.shortName,
       code: fixture.homeTeam?.code,
@@ -283,6 +282,7 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     },
     awayTeam: {
       id: fixture.awayTeam?.canonicalId || fixture.awayTeam?.id,
+      legacyId: fixture.awayTeam?.id,
       name: fixture.awayTeam?.name,
       shortName: fixture.awayTeam?.shortName,
       code: fixture.awayTeam?.code,

@@ -63,10 +63,11 @@ public sealed class NotificationEngine
             return [];
         }
 
-        // 1. Startup Baseline: populate deduplication store to prevent historical replay
-        if (previous?.Matches == null)
+        // 1. Startup Baseline or Upgrade to v2 Baseline: populate deduplication store to prevent historical replay
+        if (previous?.Matches == null || _deduplicationStore.NeedsV2Baseline)
         {
             EstablishBaseline(current);
+            _deduplicationStore.MarkV2BaselineEstablished();
             return [];
         }
 
@@ -250,8 +251,11 @@ public sealed class NotificationEngine
                 HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
                 AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
                 CompetitionId = curr.Competition?.Id,
+                CompetitionLegacyId = curr.Competition?.LegacyId,
                 HomeTeamId = curr.HomeTeam?.Id,
+                HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
                 AwayTeamId = curr.AwayTeam?.Id,
+                AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
                 HomeScore = curr.Score?.Home ?? 0,
                 AwayScore = curr.Score?.Away ?? 0,
                 ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
@@ -289,8 +293,11 @@ public sealed class NotificationEngine
             HomeTeamName = match.HomeTeam?.Name ?? match.HomeTeam?.ShortName ?? "Home",
             AwayTeamName = match.AwayTeam?.Name ?? match.AwayTeam?.ShortName ?? "Away",
             CompetitionId = match.Competition?.Id,
+            CompetitionLegacyId = match.Competition?.LegacyId,
             HomeTeamId = match.HomeTeam?.Id,
+            HomeTeamLegacyId = match.HomeTeam?.LegacyId,
             AwayTeamId = match.AwayTeam?.Id,
+            AwayTeamLegacyId = match.AwayTeam?.LegacyId,
             HomeScore = match.Score?.Home ?? 0,
             AwayScore = match.Score?.Away ?? 0,
             ElapsedMinute = match.ElapsedMinute,

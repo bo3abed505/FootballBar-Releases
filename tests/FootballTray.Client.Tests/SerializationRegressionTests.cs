@@ -249,8 +249,8 @@ public class SerializationRegressionTests
         Assert.AreEqual(UserPreferences.CurrentSchemaVersion, initial.PreferencesVersion);
 
         // Follow a team and save
-        var barca = new FollowedTeam("team_529", "FC Barcelona", "BAR", "Spain", "https://media.api-sports.io/football/teams/529.png");
-        var alahly = new FollowedTeam("team_1029", "Al Ahly SC", "AHL", "Egypt", "https://media.api-sports.io/football/teams/1029.png");
+        var barca = new FollowedTeam(CanonicalEntityIds.Barcelona, "FC Barcelona", "BAR", "Spain", "https://media.api-sports.io/football/teams/529.png");
+        var alahly = new FollowedTeam(CanonicalEntityIds.AlAhly, "Al Ahly SC", "AHL", "Egypt", "https://media.api-sports.io/football/teams/1029.png");
         await preferencesService.FollowTeamAsync(barca);
         await preferencesService.FollowTeamAsync(alahly);
 
@@ -259,11 +259,11 @@ public class SerializationRegressionTests
         Assert.IsTrue(File.Exists(prefsFilePath), "preferences.json should exist on disk.");
 
         string rawJson = await File.ReadAllTextAsync(prefsFilePath);
-        Assert.IsTrue(rawJson.Contains("team_529"), "Saved JSON should contain followed team ID.");
-        Assert.IsTrue(rawJson.Contains("team_1029"), "Saved JSON should contain second followed team ID.");
+        Assert.IsTrue(rawJson.Contains(CanonicalEntityIds.Barcelona), "Saved JSON should contain followed team ID.");
+        Assert.IsTrue(rawJson.Contains(CanonicalEntityIds.AlAhly), "Saved JSON should contain second followed team ID.");
 
         // Unfollow team (this was the exact runtime crash reported in smoke test)
-        await preferencesService.UnfollowTeamAsync("team_1029");
+        await preferencesService.UnfollowTeamAsync(CanonicalEntityIds.AlAhly);
 
         // Reload from disk using a fresh PreferencesService instance
         var freshService = new PreferencesService(_tempDirectory);
@@ -271,7 +271,7 @@ public class SerializationRegressionTests
 
         Assert.IsNotNull(reloaded);
         Assert.AreEqual(1, reloaded.FollowedTeams.Count);
-        Assert.AreEqual("team_529", reloaded.FollowedTeams[0].Id);
+        Assert.AreEqual(CanonicalEntityIds.Barcelona, reloaded.FollowedTeams[0].Id);
         Assert.AreEqual("FC Barcelona", reloaded.FollowedTeams[0].Name);
 
         // Verify existing disk format compatibility (numeric enabledTypes enum array)

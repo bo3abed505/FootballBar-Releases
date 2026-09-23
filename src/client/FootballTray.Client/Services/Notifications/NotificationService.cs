@@ -99,9 +99,17 @@ public sealed class NotificationService
             // 3. Check Following Relevance (team or competition)
             if (preferences != null)
             {
-                bool homeFollowed = !string.IsNullOrWhiteSpace(candidate.HomeTeamId) && followedTeamIds != null && followedTeamIds.Contains(candidate.HomeTeamId);
-                bool awayFollowed = !string.IsNullOrWhiteSpace(candidate.AwayTeamId) && followedTeamIds != null && followedTeamIds.Contains(candidate.AwayTeamId);
-                bool compFollowed = !string.IsNullOrWhiteSpace(candidate.CompetitionId) && followedCompIds != null && followedCompIds.Contains(candidate.CompetitionId);
+                bool homeFollowed = followedTeamIds != null && (
+                    (!string.IsNullOrWhiteSpace(candidate.HomeTeamId) && followedTeamIds.Contains(candidate.HomeTeamId)) ||
+                    (!string.IsNullOrWhiteSpace(candidate.HomeTeamLegacyId) && followedTeamIds.Contains(candidate.HomeTeamLegacyId)));
+
+                bool awayFollowed = followedTeamIds != null && (
+                    (!string.IsNullOrWhiteSpace(candidate.AwayTeamId) && followedTeamIds.Contains(candidate.AwayTeamId)) ||
+                    (!string.IsNullOrWhiteSpace(candidate.AwayTeamLegacyId) && followedTeamIds.Contains(candidate.AwayTeamLegacyId)));
+
+                bool compFollowed = followedCompIds != null && (
+                    (!string.IsNullOrWhiteSpace(candidate.CompetitionId) && followedCompIds.Contains(candidate.CompetitionId)) ||
+                    (!string.IsNullOrWhiteSpace(candidate.CompetitionLegacyId) && followedCompIds.Contains(candidate.CompetitionLegacyId)));
 
                 if (!homeFollowed && !awayFollowed && !compFollowed)
                 {

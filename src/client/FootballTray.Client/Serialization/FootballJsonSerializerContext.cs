@@ -32,6 +32,7 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(NotificationPreferences))]
 [JsonSerializable(typeof(NotificationHistoryModel))]
 [JsonSerializable(typeof(Dictionary<string, DateTimeOffset>))]
+[JsonSerializable(typeof(V2TrustMetadataDto))]
 public partial class FootballJsonSerializerContext : JsonSerializerContext
 {
 }
