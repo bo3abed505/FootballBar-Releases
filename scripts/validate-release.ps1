@@ -38,12 +38,32 @@ function Get-CleanProductVersion([string]$rawVersion) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    if (Test-Path $VersionFile) {
-        $Version = (Get-Content $VersionFile -Raw).Trim()
-    } else {
-        $Version = "1.0.0"
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseDir)) {
+        $pubVersionTxt = Join-Path $ReleaseDir "win-x64\VERSION.txt"
+        $dirVersionTxt = Join-Path $ReleaseDir "VERSION.txt"
+        if (Test-Path -LiteralPath $pubVersionTxt) {
+            $firstLine = (Get-Content -LiteralPath $pubVersionTxt -TotalCount 1)
+            if ($firstLine -match 'FootballTray\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)') {
+                $Version = $Matches[1]
+            }
+        } elseif (Test-Path -LiteralPath $dirVersionTxt) {
+            $firstLine = (Get-Content -LiteralPath $dirVersionTxt -TotalCount 1)
+            if ($firstLine -match 'FootballTray\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)') {
+                $Version = $Matches[1]
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        if (Test-Path $VersionFile) {
+            $Version = (Get-Content $VersionFile -Raw).Trim()
+        } else {
+            $Version = "1.0.0"
+        }
     }
 }
+
+$validationErrors = [System.Collections.Generic.List[string]]::new()
 
 # Derive numeric 3-part core for Win32 AssemblyVersion and FileVersion
 $numericCore = $null
@@ -68,8 +88,6 @@ $ExePath = Join-Path $PublishDir "FootballTray.exe"
 $VersionTxtPath = Join-Path $PublishDir "VERSION.txt"
 $ChecksumFilePath = Join-Path $ReleaseDir "SHA256SUMS.txt"
 $ArchiveFilePath = Join-Path $ReleaseDir "FootballTray-v$Version-win-x64.zip"
-
-$validationErrors = [System.Collections.Generic.List[string]]::new()
 
 # 1. Verify Executable Exists
 Write-Host "`n[1/8] Checking executable existence..." -ForegroundColor Yellow

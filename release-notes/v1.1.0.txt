@@ -1,0 +1,35 @@
+FootballTray v1.1.0
+============================================================
+Feature & Polish Release — Match Center, Visual Pitch & Audio Alerts
+
+Key Highlights & Changes:
+
+1. Module 1: Taskbar Hover Micro-Flyout & Pinned Match State
+   - Added rich hover micro-flyout (Flyout) to the taskbar ticker displaying elapsed minutes, live goalscorers, status details, and one-click pinning.
+   - Pinned match state allows locking the taskbar ticker to an individual match of interest while preventing automatic match rotation.
+
+2. Module 2: Visual Lineup Pitch & Tournament Aggregate Scores
+   - Hydrated Match Center with dynamic head-to-head statistical comparison bars and tactical starting lineups.
+   - Implemented interactive visual pitch canvas with normalized coordinate mapping for common formations (4-3-3, 4-2-3-1, 3-5-2, etc.).
+   - Added two-legged knockout tournament aggregate score calculation and badge display.
+
+3. Module 3: Dynamic Search Catalog & Entity Management
+   - Built backend catalog search API (/api/v2/catalog/teams and /competitions) with sanitized partial wildcard matching against local database tables.
+   - Replaced static preference toggles with debounced dynamic search UI in WinUI 3 dashboard, integrating local image caching for club crests.
+   - Seamless followed clubs and leagues management with live synchronization across preferences and ticker rotation.
+
+4. "Hear" Layer: Native Audio Alert Playback
+   - Integrated AudioPlaybackService using Win32 System.Media.SoundPlayer for zero-delay auditory cues.
+   - Plays whistle sound on match kickoff and airhorn sound on goal events, with graceful fallback to SystemSounds.Asterisk in headless environments.
+   - Resolves absolute physical file paths under AppContext.BaseDirectory per WinUI 3 requirements.
+
+5. Technical Polish & Architecture Hardening
+   - Disk Image Cache: Added 30-day eviction retention policy, 1-hour stale upload cleanup, and automatic FileAttributes.NotContentIndexed.
+   - XAML Extraction: Refactored MatchCenterWindow.xaml by extracting MatchStatisticsControl and MatchLineupPitchControl user controls.
+   - Pitch Player Pill Overflow: Applied MaxWidth="70" and TextTrimming="CharacterEllipsis" to visual pitch player name tags.
+   - Backend Canonicalization: Transitioned API-Football provider logic to canonical alias resolvers in provider-alias.ts.
+
+Requirements:
+- Windows 11 64-bit (or Windows 10 build 17763+)
+- x64 processor
+- FootballTray Backend Service (Local or Network-hosted)

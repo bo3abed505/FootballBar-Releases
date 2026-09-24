@@ -5,6 +5,7 @@ import os from 'os';
 import { execSync } from 'child_process';
 
 describe('Production Backend Deployment & Packaging Logic', () => {
+  const rootDir = path.resolve(__dirname, '../..');
   const backendDir = path.resolve(__dirname, '..');
   const scriptsDir = path.resolve(__dirname, '../../scripts');
   const deployScriptPath = path.join(scriptsDir, 'deploy-backend-production.ps1');
@@ -36,8 +37,9 @@ describe('Production Backend Deployment & Packaging Logic', () => {
 
   it('Test 3: Production package manifest defines only necessary runtime dependencies', () => {
     const pkgJson = JSON.parse(fs.readFileSync(path.join(backendDir, 'package.json'), 'utf8'));
+    const rootVersion = fs.readFileSync(path.join(rootDir, 'VERSION'), 'utf8').trim();
 
-    expect(pkgJson.version).toBe('1.0.0');
+    expect(pkgJson.version).toBe(rootVersion);
     expect(pkgJson.main).toBe('dist/server.js');
 
     // Runtime dependencies must not include build/test tools

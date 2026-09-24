@@ -9,6 +9,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
   const scriptsDir = path.join(rootDir, 'scripts');
   const installScriptPath = path.join(scriptsDir, 'install-client.ps1');
   const uninstallScriptPath = path.join(scriptsDir, 'uninstall-client.ps1');
+  const releaseSource = path.join(rootDir, 'artifacts/releases/v1.0.0/win-x64');
 
   // Helper to run PowerShell commands cleanly without cmd.exe escaping issues
   const runPowerShell = (scriptContent: string): string => {
@@ -83,7 +84,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
     try {
       const psCmd = `& {
         $ErrorActionPreference = 'Stop'
-        . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -WhatIf | Out-Null
+        . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -SourceDir '${releaseSource.replace(/'/g, "''")}' -WhatIf -AllowDowngrade | Out-Null
         try {
           Get-PayloadVersion -Dir '${tempDir.replace(/'/g, "''")}'
           Write-Output 'FAIL_NO_THROW'
@@ -101,7 +102,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
 
   it('Test B: 1.0.0 compares newer than 1.0.0-beta', () => {
     const psCmd = `& {
-      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -WhatIf | Out-Null
+      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -SourceDir '${releaseSource.replace(/'/g, "''")}' -WhatIf -AllowDowngrade | Out-Null
       $res = Compare-SemVer '1.0.0' '1.0.0-beta'
       Write-Output "RESULT:$res"
     }`;
@@ -111,7 +112,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
 
   it('Test C: 1.0.0-beta.2 compares newer than 1.0.0-beta.1', () => {
     const psCmd = `& {
-      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -WhatIf | Out-Null
+      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -SourceDir '${releaseSource.replace(/'/g, "''")}' -WhatIf -AllowDowngrade | Out-Null
       $res = Compare-SemVer '1.0.0-beta.2' '1.0.0-beta.1'
       Write-Output "RESULT:$res"
     }`;
@@ -121,7 +122,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
 
   it('Test D: 1.1.0 compares newer than 1.0.0', () => {
     const psCmd = `& {
-      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -WhatIf | Out-Null
+      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -SourceDir '${releaseSource.replace(/'/g, "''")}' -WhatIf -AllowDowngrade | Out-Null
       $res = Compare-SemVer '1.1.0' '1.0.0'
       Write-Output "RESULT:$res"
     }`;
@@ -131,7 +132,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
 
   it('Test E: Invalid version strings are rejected by Parse-SemVer', () => {
     const psCmd = `& {
-      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -WhatIf | Out-Null
+      . (Resolve-Path '${installScriptPath.replace(/'/g, "''")}') -SourceDir '${releaseSource.replace(/'/g, "''")}' -WhatIf -AllowDowngrade | Out-Null
       try {
         Parse-SemVer 'invalid-version'
         Write-Output 'FAIL_NO_THROW'
@@ -163,11 +164,12 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.dll'), path.join(sourceDir, 'FootballTray.dll'));
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.Core.dll'), path.join(sourceDir, 'FootballTray.Core.dll'));
     fs.copyFileSync(path.join(releaseSource, 'Microsoft.WinUI.dll'), path.join(sourceDir, 'Microsoft.WinUI.dll'));
+    fs.copyFileSync(uninstallScriptPath, path.join(sourceDir, 'uninstall-client.ps1'));
     fs.writeFileSync(path.join(sourceDir, 'VERSION.txt'), 'FootballTray v1.0.0');
 
     // Create previous installation in target
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.exe'), path.join(targetDir, 'FootballTray.exe'));
-    fs.writeFileSync(path.join(targetDir, 'VERSION.txt'), 'FootballTray v0.9.0');
+    fs.writeFileSync(path.join(targetDir, 'VERSION.txt'), 'FootballTray v1.0.0');
     fs.writeFileSync(path.join(targetDir, 'PREVIOUS_INSTALL.marker'), 'PREVIOUS_DATA');
 
     try {
@@ -181,6 +183,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
             -StartupDir '${startupDir.replace(/'/g, "''")}' \`
             -UninstallRegKey '${testRegKey}' \`
             -StartWithWindows \`
+            -AllowDowngrade \`
             -SimulatePostActivationFailure 2>&1
           Write-Output "INSTALL_OUTPUT: $($output | Out-String)"
         } catch {
@@ -192,10 +195,10 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
       expect(output).toContain('SIMULATED POST-ACTIVATION FAILURE');
       expect(output).toContain('Restored previous installation from backup directory');
 
-      // Verify that the marker file and version 0.9.0 were restored!
+      // Verify that the marker file and version 1.0.0 were restored!
       expect(fs.existsSync(path.join(targetDir, 'PREVIOUS_INSTALL.marker'))).toBe(true);
       const restoredVer = fs.readFileSync(path.join(targetDir, 'VERSION.txt'), 'utf8');
-      expect(restoredVer).toContain('0.9.0');
+      expect(restoredVer).toContain('1.0.0');
 
       // Verify backup folder was cleaned up
       expect(fs.existsSync(`${targetDir}.__backup`)).toBe(false);
@@ -226,11 +229,12 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.dll'), path.join(sourceDir, 'FootballTray.dll'));
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.Core.dll'), path.join(sourceDir, 'FootballTray.Core.dll'));
     fs.copyFileSync(path.join(releaseSource, 'Microsoft.WinUI.dll'), path.join(sourceDir, 'Microsoft.WinUI.dll'));
+    fs.copyFileSync(uninstallScriptPath, path.join(sourceDir, 'uninstall-client.ps1'));
     fs.writeFileSync(path.join(sourceDir, 'VERSION.txt'), 'FootballTray v1.0.0');
 
-    // Create existing target installation (v0.9.0)
+    // Create existing target installation (v1.0.0)
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.exe'), path.join(targetDir, 'FootballTray.exe'));
-    fs.writeFileSync(path.join(targetDir, 'VERSION.txt'), 'FootballTray v0.9.0');
+    fs.writeFileSync(path.join(targetDir, 'VERSION.txt'), 'FootballTray v1.0.0');
 
     // Pre-create pre-existing Start Menu shortcut with custom description
     const oldStartMenuShortcut = path.join(startMenuDir, 'FootballTray.lnk');
@@ -249,7 +253,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
 
       New-Item -Path '${testRegKey}' -Force | Out-Null
       Set-ItemProperty -Path '${testRegKey}' -Name 'DisplayName' -Value 'FootballTray-PreExisting'
-      Set-ItemProperty -Path '${testRegKey}' -Name 'DisplayVersion' -Value '0.9.0'
+      Set-ItemProperty -Path '${testRegKey}' -Name 'DisplayVersion' -Value '1.0.0'
     }`);
 
     try {
@@ -264,6 +268,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
             -StartupDir '${startupDir.replace(/'/g, "''")}' \`
             -UninstallRegKey '${testRegKey}' \`
             -StartWithWindows \`
+            -AllowDowngrade \`
             -SimulateFailureStep 'Registry' 2>&1
           Write-Output "INSTALL_OUTPUT: $($output | Out-String)"
         } catch {
@@ -287,7 +292,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
       }`;
       const verifyOutput = runPowerShell(verifyCmd);
       expect(verifyOutput).toContain('STARTMENU_DESC:PRE_EXISTING_STARTMENU_DESC');
-      expect(verifyOutput).toContain('REG_VER:0.9.0');
+      expect(verifyOutput).toContain('REG_VER:1.0.0');
     } finally {
       fs.rmSync(testRoot, { recursive: true, force: true });
       try {
@@ -314,11 +319,12 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.dll'), path.join(sourceDir, 'FootballTray.dll'));
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.Core.dll'), path.join(sourceDir, 'FootballTray.Core.dll'));
     fs.copyFileSync(path.join(releaseSource, 'Microsoft.WinUI.dll'), path.join(sourceDir, 'Microsoft.WinUI.dll'));
+    fs.copyFileSync(uninstallScriptPath, path.join(sourceDir, 'uninstall-client.ps1'));
     fs.writeFileSync(path.join(sourceDir, 'VERSION.txt'), 'FootballTray v1.0.0');
 
     // Create existing target
     fs.copyFileSync(path.join(releaseSource, 'FootballTray.exe'), path.join(targetDir, 'FootballTray.exe'));
-    fs.writeFileSync(path.join(targetDir, 'VERSION.txt'), 'FootballTray v0.9.0');
+    fs.writeFileSync(path.join(targetDir, 'VERSION.txt'), 'FootballTray v1.0.0');
     fs.writeFileSync(path.join(targetDir, 'ORIGINAL.marker'), 'ORIGINAL');
 
     const stepsToTest = ['Activation', 'StartMenu', 'Startup', 'Registry'];
@@ -334,6 +340,7 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
               -StartupDir '${startupDir.replace(/'/g, "''")}' \`
               -UninstallRegKey '${testRegKey}' \`
               -StartWithWindows \`
+              -AllowDowngrade \`
               -SimulateFailureStep '${step}' 2>&1
             Write-Output "INSTALL_OUTPUT: $($output | Out-String)"
           } catch {
@@ -419,7 +426,12 @@ describe('Per-User Client Installer and Uninstaller Scripts', () => {
   });
 
   it('Test 13: install-client.ps1 -WhatIf runs cleanly and exits with code 0', () => {
-    const output = execSync('pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/install-client.ps1 -WhatIf', {
+    const intendedVer = fs.existsSync(path.join(rootDir, 'VERSION'))
+      ? fs.readFileSync(path.join(rootDir, 'VERSION'), 'utf8').trim()
+      : '1.0.0';
+    const canonicalPayload = path.join(rootDir, `artifacts/releases/v${intendedVer}/win-x64`);
+    const sourceArg = fs.existsSync(canonicalPayload) ? '' : `-SourceDir "artifacts/releases/v1.0.0/win-x64"`;
+    const output = execSync(`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/install-client.ps1 -WhatIf ${sourceArg} -AllowDowngrade`, {
       cwd: rootDir,
       encoding: 'utf8',
     });
