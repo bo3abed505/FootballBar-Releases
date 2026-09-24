@@ -310,3 +310,65 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     trust: calculateTrustMetadata(fixture, now),
   };
 }
+
+export interface V2CatalogTeam {
+  id: string; // canonical_id e.g. 'ft_team_...'
+  legacyId?: string;
+  name: string;
+  shortName?: string;
+  code?: string | null;
+  country?: string | null;
+  logo: string | null;
+  logoUrl?: string | null;
+}
+
+export interface V2CatalogCompetition {
+  id: string; // canonical_id e.g. 'ft_comp_...'
+  legacyId?: string;
+  name: string;
+  code?: string | null;
+  country?: string | null;
+  logo: string | null;
+  logoUrl?: string | null;
+}
+
+export function formatV2CatalogTeam(team: {
+  canonicalId: string;
+  id?: string;
+  name: string;
+  shortName?: string;
+  code?: string | null;
+  country?: string | null;
+  logoUrl?: string | null;
+}): V2CatalogTeam {
+  return {
+    id: team.canonicalId,
+    legacyId: team.id,
+    name: team.name,
+    shortName: team.shortName,
+    code: team.code ?? null,
+    country: team.country ?? null,
+    logo: team.logoUrl ?? null,
+    logoUrl: team.logoUrl ?? null,
+  };
+}
+
+export function formatV2CatalogCompetition(comp: {
+  canonicalId: string;
+  id?: string;
+  name: string;
+  code?: string | null;
+  country?: string | null;
+  logoUrl?: string | null;
+}): V2CatalogCompetition {
+  return {
+    id: comp.canonicalId,
+    legacyId: comp.id,
+    name: comp.name,
+    code: comp.code ?? null,
+    country: comp.country ?? null,
+    logo: comp.logoUrl ?? null,
+    logoUrl: comp.logoUrl ?? null,
+  };
+}
+

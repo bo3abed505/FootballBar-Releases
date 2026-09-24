@@ -5,9 +5,11 @@ import { checkDatabaseConnection } from '../db/index.js';
 import { createResponseEnvelope, createErrorEnvelope } from './envelope.js';
 import { RequestGateway } from '../gateway/request-gateway.js';
 import { formatV2TrayMatch, formatV2MatchDetail } from './v2-dto.js';
+import { CatalogRepository } from '../repositories/catalog.repository.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const fixturesRepo = new FixturesRepository();
+  const catalogRepo = new CatalogRepository();
 
   // ----------------------------------------------------
   // Health check endpoint (backward-compatible & enhanced)
@@ -276,4 +278,43 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       );
     }
   });
+
+  // ----------------------------------------------------
+  // Delivery API v2: Catalog Search (Teams)
+  // ----------------------------------------------------
+  fastify.get<{ Querystring: { q?: string; limit?: string } }>('/api/v2/catalog/teams', async (request, reply) => {
+    try {
+      const q = request.query.q ?? '';
+      const limit = parseInt(request.query.limit || '20', 10) || 20;
+      const results = await catalogRepo.searchTeams(q, limit);
+
+      const envelope = createResponseEnvelope(results, { schemaVersion: '2.0', version: 2 });
+      return reply.send(envelope);
+    } catch (err: any) {
+      request.log.error(err, 'Failed to search teams catalog');
+      return reply.status(500).send(
+        createErrorEnvelope('INTERNAL_ERROR', 'Failed to search teams catalog', { details: err?.message }, { schemaVersion: '2.0' })
+      );
+    }
+  });
+
+  // ----------------------------------------------------
+  // Delivery API v2: Catalog Search (Competitions)
+  // ----------------------------------------------------
+  fastify.get<{ Querystring: { q?: string; limit?: string } }>('/api/v2/catalog/competitions', async (request, reply) => {
+    try {
+      const q = request.query.q ?? '';
+      const limit = parseInt(request.query.limit || '20', 10) || 20;
+      const results = await catalogRepo.searchCompetitions(q, limit);
+
+      const envelope = createResponseEnvelope(results, { schemaVersion: '2.0', version: 2 });
+      return reply.send(envelope);
+    } catch (err: any) {
+      request.log.error(err, 'Failed to search competitions catalog');
+      return reply.status(500).send(
+        createErrorEnvelope('INTERNAL_ERROR', 'Failed to search competitions catalog', { details: err?.message }, { schemaVersion: '2.0' })
+      );
+    }
+  });
 };
+
