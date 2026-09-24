@@ -40,18 +40,94 @@ public class ImageCacheService
 
         try
         {
-            Directory.CreateDirectory(_cacheDirectory);
+            var di = Directory.CreateDirectory(_cacheDirectory);
+            if (!di.Attributes.HasFlag(FileAttributes.NotContentIndexed))
+            {
+                di.Attributes |= FileAttributes.NotContentIndexed;
+            }
         }
         catch
         {
             // Directory creation will be re-attempted on first write if needed
         }
+
+        // Evict stale cached images asynchronously at startup
+        _ = Task.Run(() => EvictStaleEntries());
     }
 
     public static string GetDefaultCacheDirectory() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FootballTray", "Cache", "Images");
 
     public string CacheDirectory => _cacheDirectory;
+
+    /// <summary>
+    /// Scans the cache directory, deleting cached image files older than maxAge (default 30 days)
+    /// and orphaned .tmp files older than 1 hour. Applies FileAttributes.NotContentIndexed.
+    /// </summary>
+    public int EvictStaleEntries(TimeSpan? maxAge = null)
+    {
+        if (!Directory.Exists(_cacheDirectory))
+        {
+            return 0;
+        }
+
+        TimeSpan threshold = maxAge ?? TimeSpan.FromDays(30);
+        DateTime utcNow = DateTime.UtcNow;
+        int deletedCount = 0;
+
+        try
+        {
+            var dirInfo = new DirectoryInfo(_cacheDirectory);
+
+            try
+            {
+                if (!dirInfo.Attributes.HasFlag(FileAttributes.NotContentIndexed))
+                {
+                    dirInfo.Attributes |= FileAttributes.NotContentIndexed;
+                }
+            }
+            catch
+            {
+                // Best effort attribute application
+            }
+
+            foreach (var file in dirInfo.EnumerateFiles())
+            {
+                try
+                {
+                    // Clean up abandoned temp files older than 1 hour
+                    if (file.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (utcNow - file.LastWriteTimeUtc > TimeSpan.FromHours(1))
+                        {
+                            file.Delete();
+                            deletedCount++;
+                        }
+                        continue;
+                    }
+
+                    // Evict entries older than threshold
+                    if (utcNow - file.LastWriteTimeUtc > threshold)
+                    {
+                        file.Delete();
+                        deletedCount++;
+                    }
+                }
+                catch
+                {
+                    // Skip locked or in-use files
+                }
+            }
+        }
+        catch
+        {
+            // Best effort scan
+        }
+
+        return deletedCount;
+    }
+
+    public Task<int> EvictStaleEntriesAsync(TimeSpan? maxAge = null) => Task.Run(() => EvictStaleEntries(maxAge));
 
     /// <summary>
     /// Downloads an image once and caches it to disk. On subsequent calls, returns the local disk path.

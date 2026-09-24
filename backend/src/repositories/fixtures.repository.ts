@@ -2,6 +2,7 @@ import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql } from 'drizzl
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
 import { generateCanonicalId } from '../db/canonical-id.js';
+import { resolveFixtureCanonicalIdByAlias, extractProviderId } from '../db/provider-alias.js';
 
 export class FixturesRepository {
   async getAll(limit = 50) {
@@ -99,16 +100,9 @@ export class FixturesRepository {
     if (fixture) return fixture;
 
     // 3. Resolve via fixture_provider_aliases (e.g. provider_id = '123' or 'fix_123')
-    const strippedId = trimmed.replace(/^fix_/, '');
-    const alias = await db.query.fixtureProviderAliases.findFirst({
-      where: or(
-        eq(schema.fixtureProviderAliases.providerId, trimmed),
-        eq(schema.fixtureProviderAliases.providerId, strippedId)
-      ),
-    });
-
-    if (alias) {
-      return await findFixture(eq(schema.fixtures.canonicalId, alias.canonicalFixtureId));
+    const canonicalFromAlias = await resolveFixtureCanonicalIdByAlias(db, trimmed);
+    if (canonicalFromAlias) {
+      return await findFixture(eq(schema.fixtures.canonicalId, canonicalFromAlias));
     }
 
     return null;
@@ -442,7 +436,7 @@ export class FixturesRepository {
       } else if (classification === 'STALE_PREMATCH') {
         stalePrematchCount++;
         if (f.competitionId) {
-          const compNum = parseInt(f.competitionId.replace(/^comp_/, ''), 10);
+          const compNum = parseInt(extractProviderId(f.competitionId, 'comp'), 10);
           if (!isNaN(compNum)) {
             staleCompetitionIds.push(compNum);
           }

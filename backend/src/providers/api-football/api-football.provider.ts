@@ -10,6 +10,7 @@ import {
 import { ApiFootballClient, ApiFootballClientConfig } from './api-football.client.js';
 import { ApiFootballMapper } from './api-football.mapper.js';
 import { Logger } from '../../diagnostics/logger.js';
+import { extractProviderId } from '../../db/provider-alias.js';
 
 export class ApiFootballProvider implements FootballProvider {
   readonly providerName = 'api_football';
@@ -93,7 +94,7 @@ export class ApiFootballProvider implements FootballProvider {
       if (filter.competitionIds && filter.competitionIds.length > 0) {
         const allowed = new Set(filter.competitionIds.map(String));
         return all.filter((f) => {
-          const rawLeagueId = f.competition?.providerId || f.competition?.id?.replace(/^comp_/, '') || f.competitionId?.replace(/^comp_/, '');
+          const rawLeagueId = f.competition?.providerId || (f.competition?.id ? extractProviderId(f.competition.id, 'comp') : '') || (f.competitionId ? extractProviderId(f.competitionId, 'comp') : '');
           return rawLeagueId && allowed.has(rawLeagueId);
         });
       }
@@ -122,7 +123,7 @@ export class ApiFootballProvider implements FootballProvider {
 
     // --- Path 4: legacy single competitionId (internal comp_* string) ---
     const leagueId = filter?.competitionId
-      ? parseInt(filter.competitionId.replace(/^comp_/, ''), 10)
+      ? parseInt(extractProviderId(filter.competitionId, 'comp'), 10)
       : undefined;
 
     const response = await this.client.getFixtures({
@@ -138,7 +139,7 @@ export class ApiFootballProvider implements FootballProvider {
 
 
   async getFixtureDetails(fixtureId: string, cycleId?: string): Promise<ProviderFixtureDetail | null> {
-    const numericId = parseInt(fixtureId.replace(/^fix_/, ''), 10);
+    const numericId = parseInt(extractProviderId(fixtureId, 'fix'), 10);
     if (isNaN(numericId)) return null;
 
     const response = await this.client.getFixtures({ id: numericId }, 'NORMAL', cycleId);
@@ -165,7 +166,7 @@ export class ApiFootballProvider implements FootballProvider {
     for (let i = 0; i < fixtureIds.length; i += 20) {
       const chunk = fixtureIds.slice(i, i + 20);
       const numericIds = chunk
-        .map((id) => parseInt(id.replace(/^fix_/, ''), 10))
+        .map((id) => parseInt(extractProviderId(id, 'fix'), 10))
         .filter((n) => !isNaN(n));
 
       if (numericIds.length === 0) continue;
@@ -201,7 +202,7 @@ export class ApiFootballProvider implements FootballProvider {
   }
 
   async getStandings(competitionId: string, seasonYear: number): Promise<ProviderStanding[]> {
-    const numericId = parseInt(competitionId.replace(/^comp_/, ''), 10);
+    const numericId = parseInt(extractProviderId(competitionId, 'comp'), 10);
     if (isNaN(numericId)) return [];
 
     const response = await this.client.getStandings(numericId, seasonYear);

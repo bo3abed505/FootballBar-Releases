@@ -7,6 +7,7 @@ import {
   ApiFootballFixtureItem,
   ApiFootballStandingItem,
 } from './api-football.dto.js';
+import { extractProviderId } from '../../db/provider-alias.js';
 
 export interface ApiFootballClientConfig {
   apiKey: string;
@@ -127,7 +128,7 @@ export class ApiFootballClient {
     cycleId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
     const cleanIds = fixtureIds
-      .map((id) => (typeof id === 'string' ? id.replace(/^fix_/, '') : id.toString()))
+      .map((id) => extractProviderId(id, 'fix'))
       .filter((id) => id.trim().length > 0 && !isNaN(Number(id)))
       .slice(0, 20);
 
@@ -167,7 +168,7 @@ export class ApiFootballClient {
     if (params.id) query.set('id', params.id.toString());
     if (params.ids) {
       const idsStr = Array.isArray(params.ids)
-        ? params.ids.map((id) => (typeof id === 'string' ? id.replace(/^fix_/, '') : id.toString())).join('-')
+        ? params.ids.map((id) => extractProviderId(id, 'fix')).join('-')
         : params.ids;
       query.set('ids', idsStr);
     }

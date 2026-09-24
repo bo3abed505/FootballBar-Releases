@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Diagnostics;
+using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Preferences;
 
 namespace FootballTray.Client.Services.Notifications;
@@ -17,21 +18,25 @@ public sealed class NotificationService
     private readonly NotificationEngine _engine;
     private readonly INotificationRenderer _renderer;
     private readonly NotificationDeduplicationStore _store;
+    private readonly IAudioPlaybackService? _audioService;
 
     public NotificationEngine Engine => _engine;
     public NotificationDeduplicationStore Store => _store;
     public INotificationRenderer Renderer => _renderer;
+    public IAudioPlaybackService? AudioService => _audioService;
 
     public event Action<NotificationPayload>? NotificationDispatched;
 
     public NotificationService(
         NotificationEngine? engine = null,
         INotificationRenderer? renderer = null,
-        NotificationDeduplicationStore? store = null)
+        NotificationDeduplicationStore? store = null,
+        IAudioPlaybackService? audioService = null)
     {
         _store = store ?? engine?.DeduplicationStore ?? new NotificationDeduplicationStore();
         _engine = engine ?? new NotificationEngine(_store);
         _renderer = renderer ?? new WindowsAppNotificationRenderer();
+        _audioService = audioService;
     }
 
     /// <summary>
@@ -129,6 +134,18 @@ public sealed class NotificationService
             catch (Exception ex)
             {
                 AppLogger.Error("Notifications", "NotificationRenderError", $"Failed to render notification for '{candidate.DeduplicationKey}': {ex.Message}", ex: ex);
+            }
+
+            if (_audioService != null)
+            {
+                try
+                {
+                    _audioService.PlaySound(payload.Type);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Debug("Notifications", "AudioPlaybackError", $"Audio playback failed for [{payload.Type}]: {ex.Message}");
+                }
             }
 
             dispatchedPayloads.Add(payload);

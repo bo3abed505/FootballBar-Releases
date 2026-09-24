@@ -1,9 +1,67 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { db, schema } from './index.js';
 
 export type AliasEntityType = 'competition' | 'team' | 'fixture';
 
 export type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export const API_FOOTBALL_FIXTURE_REGEX = /^fix_(\d+)$/;
+export const API_FOOTBALL_COMPETITION_REGEX = /^comp_(\d+)$/;
+export const API_FOOTBALL_TEAM_REGEX = /^team_(\d+)$/;
+
+/**
+ * Normalizes an API-Football entity ID to its pure provider ID (numeric string),
+ * extracting the number from prefix formats like 'fix_123', 'comp_456', or 'team_789'.
+ * If the input is already pure numeric or custom, it is returned without modification.
+ */
+export function extractProviderId(
+  id: string | number,
+  type?: 'comp' | 'team' | 'fix'
+): string {
+  const str = String(id).trim();
+  if (type === 'fix' || (!type && str.startsWith('fix_'))) {
+    const match = str.match(API_FOOTBALL_FIXTURE_REGEX);
+    return match ? match[1] : str.replace(/^fix_/, '');
+  }
+  if (type === 'comp' || (!type && str.startsWith('comp_'))) {
+    const match = str.match(API_FOOTBALL_COMPETITION_REGEX);
+    return match ? match[1] : str.replace(/^comp_/, '');
+  }
+  if (type === 'team' || (!type && str.startsWith('team_'))) {
+    const match = str.match(API_FOOTBALL_TEAM_REGEX);
+    return match ? match[1] : str.replace(/^team_/, '');
+  }
+  return str;
+}
+
+/**
+ * Resolves a canonical fixture ID from a provider ID or legacy ID using the fixture_provider_aliases table.
+ */
+export async function resolveFixtureCanonicalIdByAlias(
+  executor: DbExecutor,
+  idOrAlias: string,
+  provider?: string
+): Promise<string | null> {
+  const trimmed = idOrAlias.trim();
+  const providerId = extractProviderId(trimmed, 'fix');
+
+  const conditions = [
+    or(
+      eq(schema.fixtureProviderAliases.providerId, trimmed),
+      eq(schema.fixtureProviderAliases.providerId, providerId)
+    ),
+  ];
+
+  if (provider) {
+    conditions.push(eq(schema.fixtureProviderAliases.provider, provider));
+  }
+
+  const alias = await executor.query.fixtureProviderAliases.findFirst({
+    where: and(...conditions),
+  });
+
+  return alias?.canonicalFixtureId ?? null;
+}
 
 /**
  * Ensures that a provider alias is mapped to the canonical entity in PostgreSQL.

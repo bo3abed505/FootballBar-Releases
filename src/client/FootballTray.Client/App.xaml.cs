@@ -10,6 +10,7 @@ using Microsoft.Windows.AppNotifications;
 using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Taskbar;
 using FootballTray.Client.Services;
+using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Services.Updates;
@@ -77,7 +78,7 @@ public partial class App : Application
         _apiClient = new FootballApiClient();
         _cacheService = new LocalCacheService();
         _preferencesService = new PreferencesService();
-        var notificationService = new NotificationService();
+        var notificationService = new NotificationService(audioService: AudioPlaybackService.Instance);
         _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
         _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);
         CurrentDiagnosticsService = _diagnosticsService;

@@ -67,10 +67,9 @@ public sealed partial class MatchCenterWindow : Window
 
         // Empty states toggles
         NoEventsText.Visibility = ViewModel.TimelineItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        NoStatsBorder.Visibility = ViewModel.HasStatistics ? Visibility.Collapsed : Visibility.Visible;
-        StatsItemsControl.Visibility = ViewModel.HasStatistics ? Visibility.Visible : Visibility.Collapsed;
-        NoLineupsBorder.Visibility = ViewModel.HasLineups ? Visibility.Collapsed : Visibility.Visible;
-        LineupsContentContainer.Visibility = ViewModel.HasLineups ? Visibility.Visible : Visibility.Collapsed;
+        // Delegate panel state and empty states to extracted UserControls
+        StatisticsControl?.Update(ViewModel);
+        LineupControl?.Update(ViewModel);
 
         // Asynchronously load team crests on background thread without blocking UI
         _ = LoadLogosAsync(match);
@@ -130,19 +129,18 @@ public sealed partial class MatchCenterWindow : Window
 
     private void OnTabChecked(object sender, RoutedEventArgs e)
     {
-        if (StatisticsPanel == null || LineupsPanel == null) return;
+        if (StatisticsControl == null || LineupControl == null) return;
 
         if (StatsTabRadio?.IsChecked == true)
         {
-            StatisticsPanel.Visibility = Visibility.Visible;
-            LineupsPanel.Visibility = Visibility.Collapsed;
+            StatisticsControl.Visibility = Visibility.Visible;
+            LineupControl.Visibility = Visibility.Collapsed;
         }
         else if (LineupsTabRadio?.IsChecked == true)
         {
-            StatisticsPanel.Visibility = Visibility.Collapsed;
-            LineupsPanel.Visibility = Visibility.Visible;
-            NoLineupsBorder.Visibility = ViewModel.HasLineups ? Visibility.Collapsed : Visibility.Visible;
-            LineupsContentContainer.Visibility = ViewModel.HasLineups ? Visibility.Visible : Visibility.Collapsed;
+            StatisticsControl.Visibility = Visibility.Collapsed;
+            LineupControl.Visibility = Visibility.Visible;
+            LineupControl.Update(ViewModel);
         }
     }
 }
