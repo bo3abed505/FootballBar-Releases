@@ -58,6 +58,7 @@ public sealed partial class MainPage : Page
         if (_viewModel != null)
         {
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _viewModel.SearchCatalog.PropertyChanged -= OnSearchCatalogPropertyChanged;
         }
     }
 
@@ -66,11 +67,14 @@ public sealed partial class MainPage : Page
         if (_viewModel == null) return;
 
         MatchItemsList.ItemsSource = _viewModel.FilteredMatches;
-        TeamsList.ItemsSource = _viewModel.AvailableTeams;
-        CompetitionsList.ItemsSource = _viewModel.AvailableCompetitions;
+        TeamsList.ItemsSource = _viewModel.SearchCatalog.FollowedTeams;
+        CompetitionsList.ItemsSource = _viewModel.SearchCatalog.FollowedCompetitions;
+        TeamSearchResultsList.ItemsSource = _viewModel.SearchCatalog.TeamSearchResults;
+        CompetitionSearchResultsList.ItemsSource = _viewModel.SearchCatalog.CompetitionSearchResults;
         NotificationCategoriesList.ItemsSource = _viewModel.NotificationCategories;
 
         GlobalNotificationsSwitch.IsOn = _viewModel.IsGlobalNotificationsEnabled;
+        _viewModel.SearchCatalog.PropertyChanged += OnSearchCatalogPropertyChanged;
         UpdateUiFromViewModel();
     }
 
@@ -79,6 +83,14 @@ public sealed partial class MainPage : Page
         DispatcherQueue.TryEnqueue(() =>
         {
             UpdateUiFromViewModel();
+        });
+    }
+
+    private void OnSearchCatalogPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            UpdateSearchCatalogUi();
         });
     }
 
@@ -245,6 +257,93 @@ public sealed partial class MainPage : Page
 
         // Update active filter button styling
         UpdateFilterButtons();
+        UpdateSearchCatalogUi();
+    }
+
+    private void UpdateSearchCatalogUi()
+    {
+        if (_viewModel?.SearchCatalog == null) return;
+
+        var catalog = _viewModel.SearchCatalog;
+
+        CatalogSearchProgressBar.Visibility = catalog.IsSearching ? Visibility.Visible : Visibility.Collapsed;
+
+        if (catalog.HasSearchStatusMessage)
+        {
+            CatalogSearchStatusText.Visibility = Visibility.Visible;
+            CatalogSearchStatusText.Text = catalog.SearchStatusMessage ?? string.Empty;
+        }
+        else
+        {
+            CatalogSearchStatusText.Visibility = Visibility.Collapsed;
+            CatalogSearchStatusText.Text = string.Empty;
+        }
+
+        TeamSearchResultsList.Visibility = (catalog.IsTeamsScopeSelected && catalog.HasTeamSearchResults)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        CompetitionSearchResultsList.Visibility = (catalog.IsCompetitionsScopeSelected && catalog.HasCompetitionSearchResults)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        NoFollowedTeamsText.Visibility = catalog.HasFollowedTeams ? Visibility.Collapsed : Visibility.Visible;
+        NoFollowedCompetitionsText.Visibility = catalog.HasFollowedCompetitions ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnCatalogSearchTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (sender is TextBox tb && _viewModel != null)
+        {
+            _viewModel.SearchCatalog.SearchQuery = tb.Text;
+        }
+    }
+
+    private void OnSearchScopeChanged(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel?.SearchCatalog == null) return;
+
+        if (ScopeClubsRadio?.IsChecked == true)
+        {
+            _viewModel.SearchCatalog.SelectedScope = CatalogSearchScope.Teams;
+        }
+        else if (ScopeLeaguesRadio?.IsChecked == true)
+        {
+            _viewModel.SearchCatalog.SelectedScope = CatalogSearchScope.Competitions;
+        }
+        UpdateSearchCatalogUi();
+    }
+
+    private async void OnAddTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is FollowedTeamItemViewModel team && _viewModel != null)
+        {
+            await _viewModel.SearchCatalog.FollowTeamAsync(team);
+        }
+    }
+
+    private async void OnRemoveTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string teamId && _viewModel != null)
+        {
+            await _viewModel.SearchCatalog.UnfollowTeamAsync(teamId);
+        }
+    }
+
+    private async void OnAddCompetitionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is FollowedCompetitionItemViewModel comp && _viewModel != null)
+        {
+            await _viewModel.SearchCatalog.FollowCompetitionAsync(comp);
+        }
+    }
+
+    private async void OnRemoveCompetitionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string compId && _viewModel != null)
+        {
+            await _viewModel.SearchCatalog.UnfollowCompetitionAsync(compId);
+        }
     }
 
     private void UpdateFilterButtons()

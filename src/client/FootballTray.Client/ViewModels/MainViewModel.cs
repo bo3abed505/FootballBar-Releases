@@ -378,6 +378,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetProperty(ref _emptyStateMessage, value);
     }
 
+    public SearchCatalogViewModel SearchCatalog { get; }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public MainViewModel(
@@ -389,7 +391,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Func<TimeSpan, CancellationToken, Task>? delayFunc = null,
         IUpdatePackageAcquisitionService? updateAcquisitionService = null,
         IUpdateInstallationService? updateInstallationService = null,
-        IAppShutdownHandler? appShutdownHandler = null)
+        IAppShutdownHandler? appShutdownHandler = null,
+        FootballApiClient? apiClient = null)
     {
         _preferencesService = preferencesService ?? throw new ArgumentNullException(nameof(preferencesService));
         _syncService = syncService;
@@ -400,6 +403,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _updateAcquisitionService = updateAcquisitionService;
         _updateInstallationService = updateInstallationService;
         _appShutdownHandler = appShutdownHandler;
+
+        SearchCatalog = new SearchCatalogViewModel(
+            apiClient ?? new FootballApiClient(),
+            _preferencesService,
+            ImageCacheService.Instance,
+            _dispatcherQueue,
+            _delayFunc);
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -436,6 +446,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var prefs = await _preferencesService.LoadAsync();
             PopulatePreferenceCollections(prefs);
+            await SearchCatalog.InitializeAsync();
 
             if (_syncService != null)
             {
@@ -1364,6 +1375,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _disposeCts.Cancel();
         _disposeCts.Dispose();
+        SearchCatalog.Dispose();
         _preferencesService.PreferencesChanged -= OnPreferencesChanged;
         if (_syncService != null)
         {

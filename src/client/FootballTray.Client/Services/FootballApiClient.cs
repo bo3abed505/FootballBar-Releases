@@ -41,6 +41,19 @@ public class MatchDetailApiResponse
         new() { IsSuccess = false, ErrorMessage = message };
 }
 
+public class CatalogSearchApiResponse<T>
+{
+    public bool IsSuccess { get; init; }
+    public ApiResponseEnvelope<List<T>>? Envelope { get; init; }
+    public string? ErrorMessage { get; init; }
+
+    public static CatalogSearchApiResponse<T> Success(ApiResponseEnvelope<List<T>> envelope) =>
+        new() { IsSuccess = true, Envelope = envelope };
+
+    public static CatalogSearchApiResponse<T> Error(string message) =>
+        new() { IsSuccess = false, ErrorMessage = message };
+}
+
 public class FootballApiClient : IDisposable
 {
     public const string DefaultBaseUrl = "http://127.0.0.1:4000";
@@ -182,6 +195,100 @@ public class FootballApiClient : IDisposable
         catch (Exception ex)
         {
             return MatchDetailApiResponse.Error($"Network error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Searches clubs/teams in the backend catalog via /api/v2/catalog/teams?q={query}.
+    /// </summary>
+    public async Task<CatalogSearchApiResponse<V2CatalogTeamDto>> SearchTeamsAsync(string query, int limit = 20, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            var emptyEnvelope = new ApiResponseEnvelope<List<V2CatalogTeamDto>>
+            {
+                Data = new List<V2CatalogTeamDto>(),
+                SchemaVersion = "2.0",
+                Version = 2
+            };
+            return CatalogSearchApiResponse<V2CatalogTeamDto>.Success(emptyEnvelope);
+        }
+
+        try
+        {
+            string url = $"/api/v2/catalog/teams?q={Uri.EscapeDataString(query.Trim())}&limit={Math.Clamp(limit, 1, 50)}";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var envelope = await JsonSerializer.DeserializeAsync(contentStream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeListV2CatalogTeamDto, cancellationToken);
+
+                if (envelope == null || envelope.Data == null)
+                {
+                    return CatalogSearchApiResponse<V2CatalogTeamDto>.Error("Failed to deserialize catalog teams envelope.");
+                }
+
+                return CatalogSearchApiResponse<V2CatalogTeamDto>.Success(envelope);
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            return CatalogSearchApiResponse<V2CatalogTeamDto>.Error($"Server returned HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return CatalogSearchApiResponse<V2CatalogTeamDto>.Error($"Network error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Searches leagues/competitions in the backend catalog via /api/v2/catalog/competitions?q={query}.
+    /// </summary>
+    public async Task<CatalogSearchApiResponse<V2CatalogCompetitionDto>> SearchCompetitionsAsync(string query, int limit = 20, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            var emptyEnvelope = new ApiResponseEnvelope<List<V2CatalogCompetitionDto>>
+            {
+                Data = new List<V2CatalogCompetitionDto>(),
+                SchemaVersion = "2.0",
+                Version = 2
+            };
+            return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Success(emptyEnvelope);
+        }
+
+        try
+        {
+            string url = $"/api/v2/catalog/competitions?q={Uri.EscapeDataString(query.Trim())}&limit={Math.Clamp(limit, 1, 50)}";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var envelope = await JsonSerializer.DeserializeAsync(contentStream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeListV2CatalogCompetitionDto, cancellationToken);
+
+                if (envelope == null || envelope.Data == null)
+                {
+                    return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Error("Failed to deserialize catalog competitions envelope.");
+                }
+
+                return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Success(envelope);
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Error($"Server returned HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Error($"Network error: {ex.Message}");
         }
     }
 

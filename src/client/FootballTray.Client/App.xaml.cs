@@ -116,7 +116,8 @@ public partial class App : Application
             updateDiscoveryService: _updateDiscoveryService,
             updateAcquisitionService: _updatePackageAcquisitionService,
             updateInstallationService: _updateInstallationService,
-            appShutdownHandler: shutdownHandler);
+            appShutdownHandler: shutdownHandler,
+            apiClient: _apiClient);
 
         // 3. Create Main Application Window
         _window = new MainWindow();

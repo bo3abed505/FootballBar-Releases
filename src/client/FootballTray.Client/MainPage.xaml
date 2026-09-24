@@ -327,7 +327,7 @@
                             FontWeight="SemiBold" />
 
                         <!-- ======================================================== -->
-                        <!-- SECTION B: FOLLOWED TEAMS                                -->
+                        <!-- SECTION B: CATALOG SEARCH & DISCOVERY                    -->
                         <!-- ======================================================== -->
                         <Border
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -337,24 +337,69 @@
                             Padding="12">
                             <StackPanel Spacing="10">
                                 <TextBlock
-                                    Text="Followed Teams"
+                                    Text="Search Catalog"
                                     FontWeight="SemiBold"
                                     FontSize="14" />
                                 <TextBlock
-                                    Text="Live matches of followed teams take highest priority on the taskbar."
+                                    Text="Search the local database to follow clubs and competitions."
                                     FontSize="11"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     TextWrapping="Wrap" />
 
-                                <ItemsControl x:Name="TeamsList">
-                                    <ItemsControl.ItemTemplate>
+                                <TextBox
+                                    x:Name="CatalogSearchTextBox"
+                                    PlaceholderText="Search clubs or leagues..."
+                                    TextChanged="OnCatalogSearchTextChanged" />
+
+                                <StackPanel Orientation="Horizontal" Spacing="16">
+                                    <RadioButton
+                                        x:Name="ScopeClubsRadio"
+                                        Content="Clubs"
+                                        IsChecked="True"
+                                        Checked="OnSearchScopeChanged" />
+                                    <RadioButton
+                                        x:Name="ScopeLeaguesRadio"
+                                        Content="Leagues &amp; Cups"
+                                        Checked="OnSearchScopeChanged" />
+                                </StackPanel>
+
+                                <ProgressBar
+                                    x:Name="CatalogSearchProgressBar"
+                                    IsIndeterminate="True"
+                                    Visibility="Collapsed"
+                                    Height="2" />
+
+                                <TextBlock
+                                    x:Name="CatalogSearchStatusText"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Visibility="Collapsed"
+                                    TextWrapping="Wrap" />
+
+                                <!-- Team Search Results -->
+                                <ListView
+                                    x:Name="TeamSearchResultsList"
+                                    SelectionMode="None"
+                                    MaxHeight="200"
+                                    Visibility="Collapsed">
+                                    <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="vm:FollowedTeamItemViewModel">
                                             <Grid Padding="4,4,4,4" ColumnSpacing="10">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <Image
+                                                    Grid.Column="0"
+                                                    Width="24"
+                                                    Height="24"
+                                                    VerticalAlignment="Center">
+                                                    <Image.Source>
+                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
+                                                    </Image.Source>
+                                                </Image>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock
                                                         Text="{x:Bind Name}"
                                                         FontWeight="SemiBold"
@@ -364,23 +409,141 @@
                                                         FontSize="11"
                                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                                 </StackPanel>
-                                                <ToggleSwitch
-                                                    Grid.Column="1"
-                                                    IsOn="{x:Bind IsFollowed, Mode=TwoWay}"
-                                                    Tag="{x:Bind Id}"
-                                                    Toggled="OnTeamFollowToggled"
-                                                    OnContent="Following"
-                                                    OffContent="Follow"
-                                                    MinWidth="0" />
+                                                <Button
+                                                    Grid.Column="2"
+                                                    Content="{x:Bind FollowButtonText, Mode=OneWay}"
+                                                    IsEnabled="{x:Bind CanFollow, Mode=OneWay}"
+                                                    Tag="{x:Bind}"
+                                                    Click="OnAddTeamClicked"
+                                                    MinWidth="0"
+                                                    Padding="8,4" />
                                             </Grid>
                                         </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+
+                                <!-- Competition Search Results -->
+                                <ListView
+                                    x:Name="CompetitionSearchResultsList"
+                                    SelectionMode="None"
+                                    MaxHeight="200"
+                                    Visibility="Collapsed">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:FollowedCompetitionItemViewModel">
+                                            <Grid Padding="4,4,4,4" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Image
+                                                    Grid.Column="0"
+                                                    Width="24"
+                                                    Height="24"
+                                                    VerticalAlignment="Center">
+                                                    <Image.Source>
+                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
+                                                    </Image.Source>
+                                                </Image>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind Name}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="13" />
+                                                    <TextBlock
+                                                        Text="{x:Bind Country}"
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="2"
+                                                    Content="{x:Bind FollowButtonText, Mode=OneWay}"
+                                                    IsEnabled="{x:Bind CanFollow, Mode=OneWay}"
+                                                    Tag="{x:Bind}"
+                                                    Click="OnAddCompetitionClicked"
+                                                    MinWidth="0"
+                                                    Padding="8,4" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
                             </StackPanel>
                         </Border>
 
                         <!-- ======================================================== -->
-                        <!-- SECTION C: FOLLOWED COMPETITIONS                         -->
+                        <!-- SECTION C: FOLLOWED CLUBS                                -->
+                        <!-- ======================================================== -->
+                        <Border
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="12">
+                            <StackPanel Spacing="10">
+                                <TextBlock
+                                    Text="Followed Clubs"
+                                    FontWeight="SemiBold"
+                                    FontSize="14" />
+                                <TextBlock
+                                    Text="Live matches of followed teams take highest priority on the taskbar."
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap" />
+
+                                <TextBlock
+                                    x:Name="NoFollowedTeamsText"
+                                    Text="No clubs followed yet. Search above to add clubs."
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Visibility="Collapsed" />
+
+                                <ListView
+                                    x:Name="TeamsList"
+                                    SelectionMode="None"
+                                    MaxHeight="240">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:FollowedTeamItemViewModel">
+                                            <Grid Padding="4,4,4,4" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Image
+                                                    Grid.Column="0"
+                                                    Width="24"
+                                                    Height="24"
+                                                    VerticalAlignment="Center">
+                                                    <Image.Source>
+                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
+                                                    </Image.Source>
+                                                </Image>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind Name}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="13" />
+                                                    <TextBlock
+                                                        Text="{x:Bind Country}"
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="2"
+                                                    Content="Remove"
+                                                    Tag="{x:Bind Id}"
+                                                    Click="OnRemoveTeamClicked"
+                                                    MinWidth="0"
+                                                    Padding="8,4" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- ======================================================== -->
+                        <!-- SECTION D: FOLLOWED COMPETITIONS                         -->
                         <!-- ======================================================== -->
                         <Border
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -399,15 +562,35 @@
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     TextWrapping="Wrap" />
 
-                                <ItemsControl x:Name="CompetitionsList">
-                                    <ItemsControl.ItemTemplate>
+                                <TextBlock
+                                    x:Name="NoFollowedCompetitionsText"
+                                    Text="No competitions followed yet. Search above to add leagues."
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Visibility="Collapsed" />
+
+                                <ListView
+                                    x:Name="CompetitionsList"
+                                    SelectionMode="None"
+                                    MaxHeight="240">
+                                    <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="vm:FollowedCompetitionItemViewModel">
                                             <Grid Padding="4,4,4,4" ColumnSpacing="10">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <Image
+                                                    Grid.Column="0"
+                                                    Width="24"
+                                                    Height="24"
+                                                    VerticalAlignment="Center">
+                                                    <Image.Source>
+                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
+                                                    </Image.Source>
+                                                </Image>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock
                                                         Text="{x:Bind Name}"
                                                         FontWeight="SemiBold"
@@ -417,18 +600,17 @@
                                                         FontSize="11"
                                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                                 </StackPanel>
-                                                <ToggleSwitch
-                                                    Grid.Column="1"
-                                                    IsOn="{x:Bind IsFollowed, Mode=TwoWay}"
+                                                <Button
+                                                    Grid.Column="2"
+                                                    Content="Remove"
                                                     Tag="{x:Bind Id}"
-                                                    Toggled="OnCompetitionFollowToggled"
-                                                    OnContent="Following"
-                                                    OffContent="Follow"
-                                                    MinWidth="0" />
+                                                    Click="OnRemoveCompetitionClicked"
+                                                    MinWidth="0"
+                                                    Padding="8,4" />
                                             </Grid>
                                         </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                    </ListView.ItemTemplate>
+                                </ListView>
                             </StackPanel>
                         </Border>
 
