@@ -163,11 +163,11 @@ public static class TrayTickerFormatter
             var minuteText = match.ExtraMinute > 0
                 ? $"{match.ElapsedMinute}+{match.ExtraMinute}'"
                 : $"{match.ElapsedMinute}'";
-            mainText = $"⚽ {homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} {minuteText}";
+            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} {minuteText}";
         }
         else if (string.Equals(match.State, "HALFTIME", StringComparison.OrdinalIgnoreCase))
         {
-            mainText = $"⚽ {homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} HT";
+            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} HT";
         }
         else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
         {

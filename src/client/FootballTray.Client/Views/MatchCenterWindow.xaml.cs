@@ -29,6 +29,8 @@ public sealed partial class MatchCenterWindow : Window
         {
             // Ignore resize failure on unsupported platforms/runtimes
         }
+
+        Closed += OnWindowClosed;
     }
 
     public void Populate(MatchDetailDto match)
@@ -142,5 +144,36 @@ public sealed partial class MatchCenterWindow : Window
             LineupControl.Visibility = Visibility.Visible;
             LineupControl.Update(ViewModel);
         }
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        Closed -= OnWindowClosed;
+
+        if (HomeTeamLogo != null)
+        {
+            HomeTeamLogo.Source = null;
+        }
+        if (AwayTeamLogo != null)
+        {
+            AwayTeamLogo.Source = null;
+        }
+
+        if (EventsList != null)
+        {
+            EventsList.ItemsSource = null;
+        }
+        if (RootGrid != null)
+        {
+            RootGrid.DataContext = null;
+        }
+
+        TimelineItems.Clear();
+        ViewModel.PitchPlayers.Clear();
+        ViewModel.HomeLineup.StartingXI.Clear();
+        ViewModel.HomeLineup.Substitutes.Clear();
+        ViewModel.AwayLineup.StartingXI.Clear();
+        ViewModel.AwayLineup.Substitutes.Clear();
+        ViewModel.MatchStats.Clear();
     }
 }

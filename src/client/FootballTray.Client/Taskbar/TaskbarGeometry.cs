@@ -28,7 +28,7 @@ public sealed record TaskbarPlacement(
 /// </summary>
 public static class TaskbarGeometry
 {
-    public const int DefaultBaseWidth = 140;
+    public const int DefaultBaseWidth = 210;
     public const int DefaultBaseHeight = 32;
     public const int DefaultBaseMargin = 6;
 

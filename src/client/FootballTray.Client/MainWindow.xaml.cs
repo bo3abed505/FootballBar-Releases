@@ -1,3 +1,7 @@
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
 // To learn more about WinUI, the WinUI project structure,
@@ -6,12 +10,28 @@ using Microsoft.UI.Xaml;
 namespace FootballTray.Client;
 
 /// <summary>
-/// The application window. This hosts a Frame that displays pages. Add your
-/// UI and logic to MainPage.xaml / MainPage.xaml.cs instead of here so you
-/// can use Page features such as navigation events and the Loaded lifecycle.
+/// The application window. This hosts a Frame that displays pages.
+/// Intercepts window closing and minimizing to hide to the system tray instead of taskbar/exiting.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, nuint uIdSubclass, IntPtr dwRefData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, nuint uIdSubclass, IntPtr dwRefData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private readonly SubclassProc _subclassProc;
+
+    public bool IsClosingPermitted { get; set; }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -19,9 +39,35 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
-        AppWindow.SetIcon("Assets/AppIcon.ico");
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        AppWindow.SetIcon(iconPath);
+        AppWindow.Title = "Footballtray";
+
+        var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        _subclassProc = WindowSubclass;
+        SetWindowSubclass(hWnd, _subclassProc, 1, IntPtr.Zero);
+
+        AppWindow.Closing += (sender, args) =>
+        {
+            if (!IsClosingPermitted)
+            {
+                args.Cancel = true;
+                AppWindow.Hide();
+            }
+        };
 
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
+    }
+
+    private IntPtr WindowSubclass(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, nuint uIdSubclass, IntPtr dwRefData)
+    {
+        if (uMsg == 0x0112 && (wParam.ToInt32() & 0xFFF0) == 0xF020)
+        {
+            ShowWindow(hWnd, 0);
+            return IntPtr.Zero;
+        }
+
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
 }

@@ -88,17 +88,13 @@ public static class DefaultPreferences
             Notifications = new NotificationPreferences
             {
                 GlobalEnabled = true,
-                EnabledTypes = new List<NotificationType>
-                {
-                    NotificationType.MatchStarted,
-                    NotificationType.Goal,
-                    NotificationType.HalfTime,
-                    NotificationType.MatchFinished,
-                    NotificationType.MatchPostponed,
-                    NotificationType.MatchCancelled,
-                    NotificationType.MatchResumed
-                }
-            }
+                EnabledTypes = Enum.GetValues<NotificationType>().ToList()
+            },
+            SoundMode = NotificationSoundMode.Custom,
+            AudioVolume = 0.2,
+            IsTickerVisible = true,
+            TickerOffsetX = 0,
+            TargetScreenDeviceName = null
         };
     }
 }

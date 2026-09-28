@@ -342,7 +342,7 @@ public class DiagnosticsAndObservabilityTests
     [TestMethod]
     public async Task Test19_FailedRefresh_RecordsSafeErrorState()
     {
-        var sync = new SyncService(new FootballApiClient(), new LocalCacheService(_tempDir));
+        var sync = new SyncService(new FootballApiClient(baseUrl: "http://127.0.0.1:59999"), new LocalCacheService(_tempDir));
         var state = await sync.PollOnceAsync();
 
         Assert.AreEqual(DataFreshnessState.Empty, state);

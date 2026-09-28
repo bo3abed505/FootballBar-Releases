@@ -25,6 +25,28 @@ public sealed record UserPreferences
     [JsonPropertyName("notifications")]
     public NotificationPreferences Notifications { get; init; } = new();
 
+    [JsonPropertyName("soundMode")]
+    public NotificationSoundMode SoundMode { get; init; } = NotificationSoundMode.Custom;
+
+    [JsonPropertyName("isAudioEnabled")]
+    public bool IsAudioEnabled
+    {
+        get => SoundMode != NotificationSoundMode.Off;
+        init => SoundMode = value ? (SoundMode == NotificationSoundMode.Off ? NotificationSoundMode.Custom : SoundMode) : NotificationSoundMode.Off;
+    }
+
+    [JsonPropertyName("audioVolume")]
+    public double AudioVolume { get; init; } = 0.2;
+
+    [JsonPropertyName("isTickerVisible")]
+    public bool IsTickerVisible { get; init; } = true;
+
+    [JsonPropertyName("tickerOffsetX")]
+    public int TickerOffsetX { get; init; } = 0;
+
+    [JsonPropertyName("targetScreenDeviceName")]
+    public string? TargetScreenDeviceName { get; init; } = null;
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 

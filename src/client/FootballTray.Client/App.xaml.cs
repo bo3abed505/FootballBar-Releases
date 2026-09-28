@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
 using Microsoft.UI.Xaml;
+using Application = Microsoft.UI.Xaml.Application;
 using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
 using FootballTray.Client.Diagnostics;
@@ -24,13 +25,13 @@ namespace FootballTray.Client;
 public partial class App : Application
 {
     private Window? _window;
-    private TaskbarHost? _taskbarHost;
-    private TaskbarTicker? _tickerControl;
+    private static TaskbarHost? _taskbarHost;
+    private static TaskbarTicker? _tickerControl;
     private TaskbarTickerCoordinator? _tickerCoordinator;
     private SyncService? _syncService;
     private FootballApiClient? _apiClient;
     private LocalCacheService? _cacheService;
-    private PreferencesService? _preferencesService;
+    private static PreferencesService? _preferencesService;
     private DiagnosticsService? _diagnosticsService;
     private UpdateDiscoveryService? _updateDiscoveryService;
     private UpdatePackageAcquisitionService? _updatePackageAcquisitionService;
@@ -39,9 +40,11 @@ public partial class App : Application
     private Task? _startupUpdateCheckTask;
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
     private volatile bool _updateHandoffExitRequested;
+    private static System.Windows.Forms.NotifyIcon? _trayIcon;
 
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
+    public static TaskbarTickerCoordinator? CurrentTickerCoordinator { get; private set; }
     public static MainViewModel? CurrentMainViewModel { get; private set; }
     public static IDiagnosticsService? CurrentDiagnosticsService { get; private set; }
 
@@ -78,7 +81,9 @@ public partial class App : Application
         _apiClient = new FootballApiClient();
         _cacheService = new LocalCacheService();
         _preferencesService = new PreferencesService();
-        var notificationService = new NotificationService(audioService: AudioPlaybackService.Instance);
+        var audioService = new AudioPlaybackService(_preferencesService);
+        AudioPlaybackService.Instance = audioService;
+        var notificationService = new NotificationService(audioService: audioService);
         _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
         _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);
         CurrentDiagnosticsService = _diagnosticsService;
@@ -94,6 +99,11 @@ public partial class App : Application
 
             var win = _window;
             if (win == null) return false;
+
+            if (win is MainWindow mw)
+            {
+                mw.IsClosingPermitted = true;
+            }
 
             var dq = win.DispatcherQueue;
             if (dq == null) return false;
@@ -122,7 +132,7 @@ public partial class App : Application
 
         // 3. Create Main Application Window
         _window = new MainWindow();
-        _window.Activate();
+        // Silent Launch: Boot directly to taskbar and tray; do not activate/show MainWindow
 
         var activationWindow = _window;
         var activationDispatcher = activationWindow?.DispatcherQueue;
@@ -194,12 +204,14 @@ public partial class App : Application
             {
                 Application.Current.Exit();
             }
+            _trayIcon?.Dispose();
+            _trayIcon = null;
         };
 
         // 5. Initialize Taskbar Host and inject into primary taskbar
         try
         {
-            _taskbarHost = new TaskbarHost();
+            _taskbarHost = new TaskbarHost(null, _preferencesService);
             CurrentTaskbarHost = _taskbarHost;
 
             _taskbarHost.AttachmentChanged += attached =>
@@ -211,6 +223,7 @@ public partial class App : Application
             _tickerControl.PinToggled += (sender, matchId) =>
             {
                 _tickerCoordinator?.TogglePin(matchId);
+                CurrentMainViewModel?.OnTaskbarPinChanged(_tickerCoordinator?.PinnedMatchId);
             };
 
             if (activationDispatcher != null)
@@ -222,12 +235,18 @@ public partial class App : Application
                     (fixtureId, formattedText, homeLogo, awayLogo, match, isPinned) =>
                         _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo, match, isPinned));
             }
+            CurrentTickerCoordinator = _tickerCoordinator;
+            if (_tickerControl != null)
+            {
+                _tickerControl.MatchCenterRequested += (sender, matchId) => _tickerCoordinator?.OpenMatchCenter(matchId);
+                _tickerCoordinator?.SubscribeToTicker(_tickerControl);
+            }
 
-            bool initialized = await _taskbarHost.InitializeAsync(_tickerControl);
+            bool initialized = _tickerControl != null && await _taskbarHost.InitializeAsync(_tickerControl);
 
             if (initialized)
             {
-                _taskbarHost.Show();
+                _taskbarHost.ApplyVisibility();
                 _diagnosticsService.RecordTaskbarStatus("Attached");
                 AppLogger.Info("Taskbar", "Initialized", "TaskbarHost successfully initialized and displayed.");
             }
@@ -235,6 +254,77 @@ public partial class App : Application
             {
                 _diagnosticsService.RecordTaskbarStatus("Unattached (Waiting for recovery)");
                 AppLogger.Warn("Taskbar", "Unattached", "TaskbarHost initialization completed with unattached state. Waiting for recovery...");
+            }
+
+            // 6. Initialize native System Tray NotifyIcon
+            try
+            {
+                _trayIcon = new System.Windows.Forms.NotifyIcon
+                {
+                    Text = "Footballtray",
+                    Visible = true
+                };
+                string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    _trayIcon.Icon = new System.Drawing.Icon(iconPath);
+                }
+                _trayIcon.DoubleClick += (s, e) => OpenMainWindow();
+
+                var trayMenu = new System.Windows.Forms.ContextMenuStrip();
+                trayMenu.Items.Add("Open Footballtray", null, (s, e) => OpenMainWindow());
+
+                var showHideTickerItem = new System.Windows.Forms.ToolStripMenuItem("Hide Ticker");
+                showHideTickerItem.Click += async (s, e) =>
+                {
+                    if (_preferencesService == null) return;
+                    bool newVisible = !_preferencesService.Current.IsTickerVisible;
+                    await _preferencesService.SetTickerVisibleAsync(newVisible);
+                    _taskbarHost?.ApplyVisibility();
+                };
+
+                var resetPositionItem = new System.Windows.Forms.ToolStripMenuItem("Reset Position");
+                resetPositionItem.Click += async (s, e) =>
+                {
+                    if (_preferencesService != null)
+                    {
+                        await _preferencesService.SetTickerOffsetXAsync(0);
+                    }
+                    _taskbarHost?.UpdatePosition();
+                };
+
+                var muteSoundsItem = new System.Windows.Forms.ToolStripMenuItem("Mute Sounds");
+                muteSoundsItem.Click += async (s, e) =>
+                {
+                    if (_preferencesService == null) return;
+                    var currentMode = _preferencesService.Current.SoundMode;
+                    var newMode = (currentMode == NotificationSoundMode.Off)
+                        ? NotificationSoundMode.Custom
+                        : NotificationSoundMode.Off;
+                    await _preferencesService.SetSoundModeAsync(newMode);
+                };
+
+                trayMenu.Opening += (s, e) =>
+                {
+                    var prefs = _preferencesService?.Current;
+                    bool isVisible = prefs?.IsTickerVisible ?? true;
+                    showHideTickerItem.Text = isVisible ? "Hide Ticker" : "Show Ticker";
+
+                    bool isMuted = prefs?.SoundMode == NotificationSoundMode.Off;
+                    muteSoundsItem.Text = isMuted ? "Unmute Sounds" : "Mute Sounds";
+                };
+
+                trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+                trayMenu.Items.Add(showHideTickerItem);
+                trayMenu.Items.Add(resetPositionItem);
+                trayMenu.Items.Add(muteSoundsItem);
+                trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+                trayMenu.Items.Add("Exit", null, (s, e) => ExitApp());
+                _trayIcon.ContextMenuStrip = trayMenu;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn("App", "TrayIconInitFailed", $"Failed to initialize system tray icon: {ex.Message}");
             }
 
             _syncService.TrayUpdated += (sender, updateArgs) =>
@@ -315,7 +405,8 @@ public partial class App : Application
         {
             _window.DispatcherQueue.TryEnqueue(() =>
             {
-                _window.Activate();
+                try { _window.AppWindow.Show(); } catch { }
+                BringMainWindowToForeground(_window);
             });
         }
     }
@@ -382,6 +473,87 @@ public partial class App : Application
         catch (Exception ex)
         {
             AppLogger.Warn("App", "ForegroundActivationFailed", $"Non-fatal error restoring MainWindow: {ex.Message}");
+        }
+    }
+
+    public static void OpenMainWindow()
+    {
+        if (Current is not App app || app._window == null) return;
+        var dq = app._window.DispatcherQueue;
+        if (dq == null) return;
+
+        void Restore()
+        {
+            try
+            {
+                app._window.AppWindow.Show();
+            }
+            catch { }
+            BringMainWindowToForeground(app._window);
+        }
+
+        if (dq.HasThreadAccess)
+        {
+            Restore();
+        }
+        else
+        {
+            dq.TryEnqueue(Restore);
+        }
+    }
+
+    public static async void RestartTaskbarHost()
+    {
+        _taskbarHost?.Dispose();
+        _taskbarHost = new TaskbarHost(null, _preferencesService);
+        CurrentTaskbarHost = _taskbarHost;
+        _taskbarHost.AttachmentChanged += attached =>
+        {
+            CurrentDiagnosticsService?.RecordTaskbarStatus(attached ? "Attached" : "Detached (Recovering)");
+        };
+        if (_tickerControl != null)
+        {
+            await _taskbarHost.InitializeAsync(_tickerControl);
+            _taskbarHost.ApplyVisibility();
+        }
+    }
+
+    public static void ExitApp()
+    {
+        try
+        {
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+        }
+        catch { }
+
+        if (Current is not App app)
+        {
+            Application.Current?.Exit();
+            return;
+        }
+
+        var win = app._window;
+        if (win is MainWindow mw)
+        {
+            mw.IsClosingPermitted = true;
+        }
+
+        if (win != null && win.DispatcherQueue != null)
+        {
+            var dq = win.DispatcherQueue;
+            if (dq.HasThreadAccess)
+            {
+                win.Close();
+            }
+            else
+            {
+                dq.TryEnqueue(() => win.Close());
+            }
+        }
+        else
+        {
+            Application.Current?.Exit();
         }
     }
 

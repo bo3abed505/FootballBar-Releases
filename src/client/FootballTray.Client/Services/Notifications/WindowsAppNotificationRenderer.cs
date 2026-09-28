@@ -35,7 +35,8 @@ public sealed class WindowsAppNotificationRenderer : INotificationRenderer
 
             var builder = new AppNotificationBuilder()
                 .AddText(payload.Title)
-                .AddText(payload.Body);
+                .AddText(payload.Body)
+                .MuteAudio();
 
             if (!string.IsNullOrWhiteSpace(payload.ActivationArguments))
             {

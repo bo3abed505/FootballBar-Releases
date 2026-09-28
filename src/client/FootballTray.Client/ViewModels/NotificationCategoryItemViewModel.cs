@@ -36,6 +36,8 @@ public sealed class NotificationCategoryItemViewModel : INotifyPropertyChanged
             NotificationType.MatchPostponed => ("Match Postponed", "Alert if a fixture is rescheduled/postponed"),
             NotificationType.MatchCancelled => ("Match Cancelled", "Alert if a fixture is officially cancelled"),
             NotificationType.MatchResumed => ("Match Resumed", "Alert when a suspended/delayed match restarts"),
+            NotificationType.RedCard => ("Red Card", "Alert when a player is sent off"),
+            NotificationType.PenaltyAwarded => ("Penalty Awarded", "Alert when a penalty kick is awarded"),
             _ => (type.ToString(), "Match alert")
         };
 

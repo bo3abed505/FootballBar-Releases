@@ -21,4 +21,9 @@ public interface IAudioPlaybackService
     /// Plays the goal alert sound for goal events.
     /// </summary>
     void PlayGoalSound();
+
+    /// <summary>
+    /// Plays a test alert sound to verify audio output.
+    /// </summary>
+    void PlayTestSound();
 }

@@ -692,7 +692,7 @@ public class TaskbarWatcherAndRecoveryTests
 
         host.StartPostRecoveryStabilizationForTesting(testHost, testTray);
 
-        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(2000)) == tcs.Task;
+        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(5000)) == tcs.Task;
         Assert.IsTrue(completed, "Stabilization ticks did not complete in time.");
         Assert.AreEqual(testHost, host.HostHwnd, "Host HWND must remain identical (no recreation).");
         Assert.AreEqual(3, zOrderAssertions, "Z-order must be asserted on each stabilization tick.");

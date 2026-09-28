@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 using FootballTray.Client.Services.Notifications;
 
@@ -14,16 +15,7 @@ public sealed record NotificationPreferences
     public bool GlobalEnabled { get; init; } = true;
 
     [JsonPropertyName("enabledTypes")]
-    public List<NotificationType> EnabledTypes { get; init; } = new()
-    {
-        NotificationType.MatchStarted,
-        NotificationType.Goal,
-        NotificationType.HalfTime,
-        NotificationType.MatchFinished,
-        NotificationType.MatchPostponed,
-        NotificationType.MatchCancelled,
-        NotificationType.MatchResumed
-    };
+    public List<NotificationType> EnabledTypes { get; init; } = Enum.GetValues<NotificationType>().ToList();
 
     public bool IsTypeEnabled(NotificationType type)
     {

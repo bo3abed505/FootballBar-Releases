@@ -14,6 +14,8 @@ public interface IDiagnosticsService
 
     string GetSanitizedReportText();
 
+    string GenerateReport();
+
     IReadOnlyList<DiagnosticLogEntry> GetRecentLogEntries();
 
     void RecordError(string component, string errorSummary, Exception? ex = null);

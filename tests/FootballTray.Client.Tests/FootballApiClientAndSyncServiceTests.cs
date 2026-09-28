@@ -170,7 +170,7 @@ public class FootballApiClientAndSyncServiceTests
         Assert.IsGreaterThanOrEqualTo(1, receivedUpdates.Count);
         var latest = receivedUpdates[^1];
         Assert.AreEqual(TickerConnectionState.OnlineFresh, latest.ConnectionState);
-        Assert.AreEqual("⚽ BAR 1–1 RMA 72'", latest.FormattedText);
+        Assert.AreEqual("BAR 1–1 RMA 72'", latest.FormattedText);
         Assert.AreEqual(5, latest.Version);
 
         // Verify cache file was written to disk
@@ -222,7 +222,7 @@ public class FootballApiClientAndSyncServiceTests
         Assert.IsGreaterThanOrEqualTo(1, receivedUpdates.Count);
         var latest = receivedUpdates[^1];
         Assert.AreEqual(TickerConnectionState.OfflineCached, latest.ConnectionState);
-        Assert.AreEqual("⚽ BAR 1–0 RMA 40' · offline", latest.FormattedText);
+        Assert.AreEqual("BAR 1–0 RMA 40' · offline", latest.FormattedText);
     }
 
     [TestMethod]
@@ -327,7 +327,7 @@ public class FootballApiClientAndSyncServiceTests
         Assert.IsTrue(receivedUpdates.Count >= 2); // 1st is Stale from cache load, 2nd is OnlineFresh from poll
         var latestUpdate = receivedUpdates[^1];
         Assert.AreEqual(TickerConnectionState.OnlineFresh, latestUpdate.ConnectionState);
-        Assert.AreEqual("⚽ ARS 2–1 CHE 25'", latestUpdate.FormattedText);
+        Assert.AreEqual("ARS 2–1 CHE 25'", latestUpdate.FormattedText);
         Assert.AreEqual(1, latestUpdate.Version);
     }
 }

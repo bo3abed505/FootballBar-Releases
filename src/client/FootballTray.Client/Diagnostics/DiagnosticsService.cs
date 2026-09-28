@@ -115,6 +115,8 @@ public class DiagnosticsService : IDiagnosticsService
         return GetCurrentSnapshot().GenerateSanitizedReport();
     }
 
+    public string GenerateReport() => GetSanitizedReportText();
+
     public IReadOnlyList<DiagnosticLogEntry> GetRecentLogEntries()
     {
         return AppLogger.GetRecentEntries();

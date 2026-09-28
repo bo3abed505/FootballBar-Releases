@@ -29,6 +29,7 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(MatchDetailDto))]
 [JsonSerializable(typeof(CachedTrayPayload))]
 [JsonSerializable(typeof(UserPreferences))]
+[JsonSerializable(typeof(NotificationSoundMode))]
 [JsonSerializable(typeof(FollowedTeam))]
 [JsonSerializable(typeof(FollowedCompetition))]
 [JsonSerializable(typeof(NotificationPreferences))]

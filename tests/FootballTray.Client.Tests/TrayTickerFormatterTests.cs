@@ -46,7 +46,7 @@ public class TrayTickerFormatterTests
         Assert.AreEqual("BAR", activeMatch.HomeTeam.ShortName);
 
         var tickerText = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OnlineFresh);
-        Assert.AreEqual("⚽ BAR 1–1 RMA 72'", tickerText);
+        Assert.AreEqual("BAR 1–1 RMA 72'", tickerText);
     }
 
     [TestMethod]
@@ -140,7 +140,7 @@ public class TrayTickerFormatterTests
         };
 
         var result = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OnlineFresh);
-        Assert.AreEqual("⚽ BAR 1–1 RMA 72'", result);
+        Assert.AreEqual("BAR 1–1 RMA 72'", result);
     }
 
     [TestMethod]
@@ -164,7 +164,7 @@ public class TrayTickerFormatterTests
         };
 
         var result = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OnlineFresh);
-        Assert.AreEqual("⚽ BAR 2–1 RMA 90+4'", result);
+        Assert.AreEqual("BAR 2–1 RMA 90+4'", result);
     }
 
     [TestMethod]
@@ -187,7 +187,7 @@ public class TrayTickerFormatterTests
         };
 
         var result = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OnlineFresh);
-        Assert.AreEqual("⚽ BAR 1–0 RMA HT", result);
+        Assert.AreEqual("BAR 1–0 RMA HT", result);
     }
 
     [TestMethod]
@@ -236,10 +236,10 @@ public class TrayTickerFormatterTests
         };
 
         var offlineResult = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OfflineCached);
-        Assert.AreEqual("⚽ BAR 1–1 RMA 72' · offline", offlineResult);
+        Assert.AreEqual("BAR 1–1 RMA 72' · offline", offlineResult);
 
         var staleResult = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OnlineStale);
-        Assert.AreEqual("⚽ BAR 1–1 RMA 72' · cached", staleResult);
+        Assert.AreEqual("BAR 1–1 RMA 72' · cached", staleResult);
     }
 
     [TestMethod]

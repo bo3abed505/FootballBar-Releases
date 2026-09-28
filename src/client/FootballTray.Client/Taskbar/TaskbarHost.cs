@@ -1,7 +1,9 @@
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Windows.Graphics;
+using FootballTray.Client.Services.Preferences;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -31,6 +33,7 @@ public sealed class TaskbarHost : IDisposable
     private UIElement? _hostedContent;
     private TaskbarWatcher? _watcher;
     private ExplorerRecovery? _recovery;
+    private IPreferencesService? _preferencesService;
 
     private bool _isDisposed;
     private bool _receiverClassRegistered;
@@ -46,13 +49,21 @@ public sealed class TaskbarHost : IDisposable
     public IntPtr MessageReceiverHwnd => _messageReceiverHwnd;
     public IntPtr HostHwnd => _hostHwnd;
     public IntPtr TaskbarHwnd => _taskbarHwnd;
+    public int LastAppliedOffsetX { get; private set; }
 
     public event Action? Repositioned;
     public event Action<bool>? AttachmentChanged;
 
-    public TaskbarHost(DispatcherQueue? dispatcherQueue = null)
+    public IPreferencesService? PreferencesService
+    {
+        get => _preferencesService;
+        set => _preferencesService = value;
+    }
+
+    public TaskbarHost(DispatcherQueue? dispatcherQueue = null, IPreferencesService? preferencesService = null)
     {
         _dispatcherQueue = dispatcherQueue ?? DispatcherQueue.GetForCurrentThread();
+        _preferencesService = preferencesService;
         
         // Retain delegates in instance fields to prevent GC collection
         _messageReceiverWndProcDelegate = MessageReceiverWndProc;
@@ -100,7 +111,7 @@ public sealed class TaskbarHost : IDisposable
         _watcher = new TaskbarWatcher(_dispatcherQueue);
         _watcher.TaskbarChanged += () =>
         {
-            Reposition();
+            UpdatePosition();
         };
 
         // 4. Perform initial creation and injection
@@ -205,8 +216,34 @@ public sealed class TaskbarHost : IDisposable
         _taskbarHwnd = currentShellTray;
         TaskbarLogger.Info($"[RECOVERY] Discovered primary Shell_TrayWnd HWND: 0x{_taskbarHwnd.ToInt64():X}");
 
-        // 5. Calculate fresh taskbar geometry
-        if (!TaskbarGeometry.TryGetPrimaryTaskbarPlacement(_taskbarHwnd, out TaskbarPlacement placement))
+        // 5. Calculate fresh taskbar geometry with multi-monitor and offset support
+        var prefs = GetCurrentPreferences();
+        var targetScreen = System.Windows.Forms.Screen.AllScreens
+            .FirstOrDefault(s => !string.IsNullOrEmpty(prefs?.TargetScreenDeviceName) &&
+                                 string.Equals(s.DeviceName, prefs.TargetScreenDeviceName, StringComparison.OrdinalIgnoreCase))
+            ?? System.Windows.Forms.Screen.PrimaryScreen
+            ?? (System.Windows.Forms.Screen.AllScreens.Length > 0 ? System.Windows.Forms.Screen.AllScreens[0] : null);
+
+        IntPtr targetTaskbar = targetScreen != null ? FindTaskbarForScreen(targetScreen) : TaskbarInjection.FindPrimaryTaskbar();
+        if (targetTaskbar != IntPtr.Zero)
+        {
+            _taskbarHwnd = targetTaskbar;
+        }
+
+        bool placementFound;
+        TaskbarPlacement placement;
+        if (TryGetPlacementHook != null)
+        {
+            placementFound = TryGetPlacementHook(_taskbarHwnd, out placement);
+        }
+        else
+        {
+            int initialOffset = prefs?.TickerOffsetX ?? 0;
+            placementFound = TryCalculateTargetPlacement(targetScreen, _taskbarHwnd, ref initialOffset, out placement);
+            LastAppliedOffsetX = initialOffset;
+        }
+
+        if (!placementFound)
         {
             TaskbarLogger.Warn("[RECOVERY] Failed to calculate primary taskbar placement geometry.");
             _isAttached = false;
@@ -257,7 +294,7 @@ public sealed class TaskbarHost : IDisposable
         if (attached && IsWindow(_taskbarHwnd) && IsWindow(_hostHwnd) && GetParent(_hostHwnd) == _taskbarHwnd)
         {
             _isAttached = true;
-            ShowWindow(_hostHwnd, 5 /* SW_SHOW */);
+            ApplyVisibility();
             EnsureHostZOrder();
             _watcher?.Start(_taskbarHwnd);
             StartPostRecoveryStabilization(_hostHwnd, _taskbarHwnd);
@@ -279,25 +316,61 @@ public sealed class TaskbarHost : IDisposable
     }
 
     /// <summary>
-    /// Recalculates geometry and updates the host's position inside the taskbar.
+    /// Recalculates geometry using the configured display screen, taskbar bounds, and user X-offset,
+    /// updating the host window's position inside the taskbar in real time.
     /// Also reasserts HWND_TOP sibling Z-order on successful repositioning.
     /// </summary>
-    public bool Reposition()
+    public bool UpdatePosition(int? overrideOffsetX = null)
     {
         if (_isDisposed || _hostHwnd == IntPtr.Zero) return false;
 
-        if (_taskbarHwnd == IntPtr.Zero)
+        var prefs = GetCurrentPreferences();
+        int offsetX = overrideOffsetX ?? (prefs?.TickerOffsetX ?? 0);
+
+        // 1. Identify target screen via Screen.AllScreens matching TargetScreenDeviceName (fallback to PrimaryScreen)
+        System.Windows.Forms.Screen? targetScreen = null;
+        try
+        {
+            var screens = System.Windows.Forms.Screen.AllScreens;
+            if (!string.IsNullOrEmpty(prefs?.TargetScreenDeviceName))
+            {
+                targetScreen = screens.FirstOrDefault(s => string.Equals(s.DeviceName, prefs.TargetScreenDeviceName, StringComparison.OrdinalIgnoreCase));
+            }
+            targetScreen ??= System.Windows.Forms.Screen.PrimaryScreen ?? (screens.Length > 0 ? screens[0] : null);
+        }
+        catch (Exception ex)
+        {
+            TaskbarLogger.Warn($"Failed to query System.Windows.Forms.Screen: {ex.Message}");
+        }
+
+        // 2. Discover taskbar handle for target screen and reparent if moved across displays
+        IntPtr targetTaskbar = targetScreen != null ? FindTaskbarForScreen(targetScreen) : TaskbarInjection.FindPrimaryTaskbar();
+        if (targetTaskbar != IntPtr.Zero && targetTaskbar != _taskbarHwnd)
+        {
+            _taskbarHwnd = targetTaskbar;
+            SetParent(_hostHwnd, _taskbarHwnd);
+        }
+        else if (_taskbarHwnd == IntPtr.Zero)
         {
             _taskbarHwnd = TaskbarInjection.FindPrimaryTaskbar();
             if (_taskbarHwnd == IntPtr.Zero) return false;
         }
 
-        bool placementFound = TryGetPlacementHook != null
-            ? TryGetPlacementHook(_taskbarHwnd, out TaskbarPlacement placement)
-            : TaskbarGeometry.TryGetPrimaryTaskbarPlacement(_taskbarHwnd, out placement);
+        // 3. Placement calculation (respecting testing placement hook if active)
+        TaskbarPlacement placement;
+        bool placementFound;
+        if (TryGetPlacementHook != null)
+        {
+            placementFound = TryGetPlacementHook(_taskbarHwnd, out placement);
+        }
+        else
+        {
+            placementFound = TryCalculateTargetPlacement(targetScreen, _taskbarHwnd, ref offsetX, out placement);
+        }
 
         if (placementFound)
         {
+            LastAppliedOffsetX = offsetX;
             bool moved = TaskbarInjection.UpdatePosition(_hostHwnd, placement);
             if (moved)
             {
@@ -309,6 +382,156 @@ public sealed class TaskbarHost : IDisposable
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Legacy/compatibility alias for UpdatePosition().
+    /// </summary>
+    public bool Reposition()
+    {
+        return UpdatePosition();
+    }
+
+    /// <summary>
+    /// Evaluates current preferences (IsTickerVisible) and displays or hides the taskbar host widget.
+    /// </summary>
+    public void ApplyVisibility()
+    {
+        var prefs = GetCurrentPreferences();
+        bool isVisible = prefs?.IsTickerVisible ?? true;
+        ApplyVisibility(isVisible);
+    }
+
+    /// <summary>
+    /// Applies the specified visibility state directly to the taskbar host widget.
+    /// </summary>
+    public void ApplyVisibility(bool isVisible)
+    {
+        if (isVisible)
+        {
+            Show();
+        }
+        else
+        {
+            Hide();
+        }
+    }
+
+    private UserPreferences? GetCurrentPreferences()
+    {
+        return _preferencesService?.Current ?? App.CurrentMainViewModel?.PreferencesService?.Current;
+    }
+
+    private static bool TryCalculateTargetPlacement(
+        System.Windows.Forms.Screen? screen,
+        IntPtr taskbarHwnd,
+        ref int offsetX,
+        out TaskbarPlacement placement)
+    {
+        placement = null!;
+
+        // 1. Get taskbar rectangle
+        RECT taskbarRect = default;
+        bool hasRect = taskbarHwnd != IntPtr.Zero && GetWindowRect(taskbarHwnd, out taskbarRect) && taskbarRect.Width > 0 && taskbarRect.Height > 0;
+        if (!hasRect)
+        {
+            if (screen != null)
+            {
+                int tbHeight = screen.Bounds.Height - screen.WorkingArea.Height;
+                if (tbHeight <= 0) tbHeight = 48;
+                taskbarRect = new RECT(screen.Bounds.Left, screen.Bounds.Bottom - tbHeight, screen.Bounds.Right, screen.Bounds.Bottom);
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        // 2. Query TrayNotifyWnd (System Tray area) if on primary taskbar
+        RECT? trayNotifyRect = null;
+        if (taskbarHwnd != IntPtr.Zero)
+        {
+            IntPtr trayNotifyHwnd = FindWindowEx(taskbarHwnd, IntPtr.Zero, TrayNotifyWndClass, null);
+            if (trayNotifyHwnd != IntPtr.Zero && GetWindowRect(trayNotifyHwnd, out RECT notifyRect) && notifyRect.Width > 0)
+            {
+                trayNotifyRect = notifyRect;
+            }
+        }
+
+        // 3. Query DPI
+        uint dpi = 0;
+        if (taskbarHwnd != IntPtr.Zero)
+        {
+            dpi = GetDpiForWindow(taskbarHwnd);
+        }
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        double scale = dpi / 96.0;
+        int scaledWidth = (int)Math.Round(TaskbarGeometry.DefaultBaseWidth * scale);
+        int scaledHeight = (int)Math.Round(TaskbarGeometry.DefaultBaseHeight * scale);
+        int scaledMargin = (int)Math.Round(TaskbarGeometry.DefaultBaseMargin * scale);
+
+        int taskbarWidth = taskbarRect.Width;
+        int taskbarHeight = taskbarRect.Height;
+
+        if (scaledHeight > taskbarHeight - (scaledMargin * 2))
+        {
+            scaledHeight = Math.Max(16, taskbarHeight - (scaledMargin * 2));
+        }
+
+        int targetY = Math.Max(0, (taskbarHeight - scaledHeight) / 2);
+        int baseTargetX;
+
+        if (trayNotifyRect.HasValue && trayNotifyRect.Value.Width > 0)
+        {
+            baseTargetX = (trayNotifyRect.Value.Left - taskbarRect.Left) - scaledWidth - scaledMargin;
+        }
+        else
+        {
+            int estimatedTrayWidth = (int)Math.Round(180 * scale);
+            baseTargetX = taskbarWidth - estimatedTrayWidth - scaledWidth - scaledMargin;
+        }
+
+        offsetX = Math.Clamp(offsetX, 0, Math.Max(0, baseTargetX));
+
+        int targetX = baseTargetX - offsetX;
+
+        placement = new TaskbarPlacement(
+            X: targetX,
+            Y: targetY,
+            Width: scaledWidth,
+            Height: scaledHeight,
+            Dpi: dpi,
+            Scale: scale,
+            Edge: TaskbarEdge.Bottom,
+            TaskbarRect: taskbarRect,
+            TrayNotifyRect: trayNotifyRect);
+
+        return true;
+    }
+
+    private static IntPtr FindTaskbarForScreen(System.Windows.Forms.Screen screen)
+    {
+        if (screen.Primary)
+        {
+            return TaskbarInjection.FindPrimaryTaskbar();
+        }
+
+        IntPtr targetMonitor = MonitorFromPoint(new POINT { X = screen.Bounds.Left + 1, Y = screen.Bounds.Top + 1 }, 2);
+
+        IntPtr secWnd = IntPtr.Zero;
+        while ((secWnd = FindWindowEx(IntPtr.Zero, secWnd, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero)
+        {
+            if (MonitorFromWindow(secWnd, 2) == targetMonitor)
+            {
+                return secWnd;
+            }
+        }
+
+        return TaskbarInjection.FindPrimaryTaskbar();
     }
 
     /// <summary>
@@ -335,6 +558,41 @@ public sealed class TaskbarHost : IDisposable
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    private static IntPtr GetAppIconHandle()
+    {
+        try
+        {
+            string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+            if (System.IO.File.Exists(iconPath))
+            {
+                IntPtr hIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+                if (hIcon != IntPtr.Zero)
+                {
+                    return hIcon;
+                }
+            }
+        }
+        catch
+        {
+            // Best effort icon load
+        }
+        // Fallback to standard application icon to guarantee an icon handle is provided to the window class
+        return LoadIcon(IntPtr.Zero, (IntPtr)32512);
+    }
+
     private bool CreatePersistentMessageReceiver()
     {
         if (_messageReceiverHwnd != IntPtr.Zero) return true;
@@ -342,6 +600,7 @@ public sealed class TaskbarHost : IDisposable
         try
         {
             IntPtr hInstance = GetModuleHandle(null);
+            IntPtr hAppIcon = GetAppIconHandle();
 
             WNDCLASSEX wcx = new WNDCLASSEX
             {
@@ -351,12 +610,12 @@ public sealed class TaskbarHost : IDisposable
                 cbClsExtra = 0,
                 cbWndExtra = 0,
                 hInstance = hInstance,
-                hIcon = IntPtr.Zero,
+                hIcon = hAppIcon,
                 hCursor = IntPtr.Zero,
                 hbrBackground = IntPtr.Zero,
                 lpszMenuName = null,
                 lpszClassName = MessageReceiverClassName,
-                hIconSm = IntPtr.Zero
+                hIconSm = hAppIcon
             };
 
             ushort atom = RegisterClassEx(ref wcx);
@@ -428,6 +687,7 @@ public sealed class TaskbarHost : IDisposable
         try
         {
             IntPtr hInstance = GetModuleHandle(null);
+            IntPtr hAppIcon = GetAppIconHandle();
 
             if (!_hostClassRegistered)
             {
@@ -439,12 +699,12 @@ public sealed class TaskbarHost : IDisposable
                     cbClsExtra = 0,
                     cbWndExtra = 0,
                     hInstance = hInstance,
-                    hIcon = IntPtr.Zero,
+                    hIcon = hAppIcon,
                     hCursor = IntPtr.Zero,
                     hbrBackground = IntPtr.Zero,
                     lpszMenuName = null,
                     lpszClassName = HostWindowClassName,
-                    hIconSm = IntPtr.Zero
+                    hIconSm = hAppIcon
                 };
 
                 ushort atom = RegisterClassEx(ref wcx);

@@ -57,6 +57,14 @@ public static class TaskbarNativeMethods
     public const uint WM_DPICHANGED = 0x02E0;
     public const uint WM_NCDESTROY = 0x0082;
     public const uint WM_ERASEBKGND = 0x0014;
+    public const uint WM_SETICON = 0x0080;
+
+    // LoadImage and Icon constants
+    public const uint IMAGE_ICON = 1;
+    public const uint LR_LOADFROMFILE = 0x00000010;
+    public const uint LR_DEFAULTSIZE = 0x00000040;
+    public static readonly IntPtr ICON_SMALL = IntPtr.Zero;
+    public static readonly IntPtr ICON_BIG = new IntPtr(1);
 
     // ChangeWindowMessageFilterEx Actions
     public const uint MSGFLT_RESET = 0;
@@ -264,4 +272,19 @@ public static class TaskbarNativeMethods
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr LoadImage(
+        IntPtr hinst,
+        string lpszName,
+        uint uType,
+        int cxDesired,
+        int cyDesired,
+        uint fuLoad);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 }

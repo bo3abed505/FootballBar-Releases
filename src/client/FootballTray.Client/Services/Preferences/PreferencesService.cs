@@ -40,6 +40,8 @@ public sealed class PreferencesService : IPreferencesService
         _currentPreferences = DefaultPreferences.CreateDefault();
     }
 
+    public UserPreferences Current => _currentPreferences;
+
     public UserPreferences GetPreferences()
     {
         return _currentPreferences;
@@ -112,6 +114,7 @@ public sealed class PreferencesService : IPreferencesService
             bool alreadyFollowed = teams.Any(t =>
                 string.Equals(t.Id, team.Id, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(t.Name) && !string.IsNullOrWhiteSpace(team.Name) && string.Equals(t.Name.Trim(), team.Name.Trim(), StringComparison.OrdinalIgnoreCase)) ||
                 (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
 
             if (!alreadyFollowed)
@@ -178,6 +181,7 @@ public sealed class PreferencesService : IPreferencesService
             bool alreadyFollowed = comps.Any(c =>
                 string.Equals(c.Id, competition.Id, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(c.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(c.Name) && !string.IsNullOrWhiteSpace(competition.Name) && string.Equals(c.Name.Trim(), competition.Name.Trim(), StringComparison.OrdinalIgnoreCase)) ||
                 (CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
 
             if (!alreadyFollowed)
@@ -292,6 +296,140 @@ public sealed class PreferencesService : IPreferencesService
         PreferencesChanged?.Invoke(this, _currentPreferences);
     }
 
+    public async Task SetSoundModeAsync(NotificationSoundMode mode, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.SoundMode != mode)
+            {
+                var updated = _currentPreferences with { SoundMode = mode };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetAudioEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var targetMode = enabled ? NotificationSoundMode.Custom : NotificationSoundMode.Off;
+            if (_currentPreferences.SoundMode != targetMode)
+            {
+                var updated = _currentPreferences with { SoundMode = targetMode };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetAudioVolumeAsync(double volume, CancellationToken cancellationToken = default)
+    {
+        double clamped = Math.Clamp(volume, 0.0, 1.0);
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (Math.Abs(_currentPreferences.AudioVolume - clamped) > 0.001)
+            {
+                var updated = _currentPreferences with { AudioVolume = clamped };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetTickerVisibleAsync(bool visible, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.IsTickerVisible != visible)
+            {
+                var updated = _currentPreferences with { IsTickerVisible = visible };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetTickerOffsetXAsync(int offset, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.TickerOffsetX != offset)
+            {
+                var updated = _currentPreferences with { TickerOffsetX = offset };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetTargetScreenDeviceNameAsync(string? deviceName, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.TargetScreenDeviceName != deviceName)
+            {
+                var updated = _currentPreferences with { TargetScreenDeviceName = deviceName };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
     private async Task<UserPreferences> LoadFromDiskAsync(CancellationToken cancellationToken)
     {
         UserPreferences? primary = null;
@@ -332,7 +470,15 @@ public sealed class PreferencesService : IPreferencesService
                 return normalized;
             }
 
-            return NormalizePreferences(primary);
+            var normalizedPrimary = NormalizePreferences(primary);
+            if (primary.FollowedTeams?.Count != normalizedPrimary.FollowedTeams.Count ||
+                primary.FollowedCompetitions?.Count != normalizedPrimary.FollowedCompetitions.Count ||
+                !normalizedPrimary.FollowedTeams.SequenceEqual(primary.FollowedTeams ?? Enumerable.Empty<FollowedTeam>()) ||
+                !normalizedPrimary.FollowedCompetitions.SequenceEqual(primary.FollowedCompetitions ?? Enumerable.Empty<FollowedCompetition>()))
+            {
+                await SaveToDiskAsync(normalizedPrimary, cancellationToken);
+            }
+            return normalizedPrimary;
         }
 
         // Primary is missing, corrupted, or unreadable — attempt recovery from backup
@@ -509,31 +655,75 @@ public sealed class PreferencesService : IPreferencesService
     {
         if (raw == null) return DefaultPreferences.CreateDefault();
 
-        // 1. Normalize Teams (case-insensitive deduplication, skip null/empty IDs)
-        var seenTeamIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 1. Normalize Teams (deduplicate by Id, canonical Id, and Name ignoring case)
         var normalizedTeams = new List<FollowedTeam>();
+        var seenTeamIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenTeamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         if (raw.FollowedTeams != null)
         {
             foreach (var team in raw.FollowedTeams)
             {
-                if (!string.IsNullOrWhiteSpace(team.Id) && seenTeamIds.Add(team.Id))
+                if (team == null || string.IsNullOrWhiteSpace(team.Id)) continue;
+
+                string id = team.Id.Trim();
+                string canonicalId = CanonicalEntityIds.TryTranslateLegacyId(id, out var cId) ? cId : id;
+                string name = (team.Name ?? string.Empty).Trim();
+
+                if (seenTeamIds.Contains(id) || seenTeamIds.Contains(canonicalId))
                 {
-                    normalizedTeams.Add(team);
+                    continue;
                 }
+
+                if (!string.IsNullOrWhiteSpace(name) && seenTeamNames.Contains(name))
+                {
+                    continue;
+                }
+
+                seenTeamIds.Add(id);
+                seenTeamIds.Add(canonicalId);
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    seenTeamNames.Add(name);
+                }
+
+                normalizedTeams.Add(team);
             }
         }
 
-        // 2. Normalize Competitions (case-insensitive deduplication, skip null/empty IDs)
-        var seenCompIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 2. Normalize Competitions (deduplicate by Id, canonical Id, and Name ignoring case)
         var normalizedComps = new List<FollowedCompetition>();
+        var seenCompIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenCompNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         if (raw.FollowedCompetitions != null)
         {
             foreach (var comp in raw.FollowedCompetitions)
             {
-                if (!string.IsNullOrWhiteSpace(comp.Id) && seenCompIds.Add(comp.Id))
+                if (comp == null || string.IsNullOrWhiteSpace(comp.Id)) continue;
+
+                string id = comp.Id.Trim();
+                string canonicalId = CanonicalEntityIds.TryTranslateLegacyId(id, out var cId) ? cId : id;
+                string name = (comp.Name ?? string.Empty).Trim();
+
+                if (seenCompIds.Contains(id) || seenCompIds.Contains(canonicalId))
                 {
-                    normalizedComps.Add(comp);
+                    continue;
                 }
+
+                if (!string.IsNullOrWhiteSpace(name) && seenCompNames.Contains(name))
+                {
+                    continue;
+                }
+
+                seenCompIds.Add(id);
+                seenCompIds.Add(canonicalId);
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    seenCompNames.Add(name);
+                }
+
+                normalizedComps.Add(comp);
             }
         }
 
@@ -543,12 +733,20 @@ public sealed class PreferencesService : IPreferencesService
             .Distinct()
             .ToList() ?? new List<NotificationType>();
 
+        // 4. Normalize Audio
+        double normalizedVolume = Math.Clamp(raw.AudioVolume, 0.0, 1.0);
+
         return new UserPreferences
         {
             PreferencesVersion = raw.PreferencesVersion > 0 ? raw.PreferencesVersion : UserPreferences.CurrentSchemaVersion,
             FollowedTeams = normalizedTeams,
             FollowedCompetitions = normalizedComps,
             Notifications = notifs with { EnabledTypes = normalizedTypes },
+            SoundMode = raw.SoundMode,
+            AudioVolume = normalizedVolume,
+            IsTickerVisible = raw.IsTickerVisible,
+            TickerOffsetX = raw.TickerOffsetX,
+            TargetScreenDeviceName = raw.TargetScreenDeviceName,
             ExtensionData = raw.ExtensionData
         };
     }

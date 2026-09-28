@@ -137,7 +137,7 @@ public class CrossLayerEndToEndLifecycleTests
 
         Assert.AreEqual(DataFreshnessState.Fresh, state);
         var formatted = TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState);
-        Assert.AreEqual("⚽ ARS 0–0 CHE 1'", formatted);
+        Assert.AreEqual("ARS 0–0 CHE 1'", formatted);
     }
 
     [TestMethod]
@@ -170,7 +170,7 @@ public class CrossLayerEndToEndLifecycleTests
         Assert.AreEqual(0, syncService.CurrentTrayData?.Matches[0].Score.Away);
 
         var formatted = TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState);
-        Assert.AreEqual("⚽ ARS 1–0 CHE 15'", formatted);
+        Assert.AreEqual("ARS 1–0 CHE 15'", formatted);
     }
 
     [TestMethod]
@@ -297,7 +297,7 @@ public class CrossLayerEndToEndLifecycleTests
         Assert.IsNotNull(syncService.CurrentTrayData);
 
         var formatted = TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState);
-        Assert.AreEqual("⚽ ARS 1–0 CHE 40' · offline", formatted);
+        Assert.AreEqual("ARS 1–0 CHE 40' · offline", formatted);
     }
 
     [TestMethod]
@@ -333,7 +333,7 @@ public class CrossLayerEndToEndLifecycleTests
         // 1. Startup during outage -> Stale
         await syncService.StartAsync();
         Assert.AreEqual(DataFreshnessState.Stale, syncService.FreshnessState);
-        Assert.AreEqual("⚽ ARS 1–0 CHE 40' · offline", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 1–0 CHE 40' · offline", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // 2. Backend recovers -> Fresh 2-1 min 78
         backendIsUp = true;
@@ -342,7 +342,7 @@ public class CrossLayerEndToEndLifecycleTests
         Assert.AreEqual(DataFreshnessState.Fresh, state);
         Assert.AreEqual(2, syncService.CurrentTrayData?.Matches[0].Score.Home);
         Assert.AreEqual(1, syncService.CurrentTrayData?.Matches[0].Score.Away);
-        Assert.AreEqual("⚽ ARS 2–1 CHE 78'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 2–1 CHE 78'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
     }
 
     // ============================================================
@@ -467,14 +467,14 @@ public class CrossLayerEndToEndLifecycleTests
         currentServerPayload = CreateServerPayload("LIVE", 1, 0, 0, 0, null, 2);
         currentEtag = "\"etag_stage2\"";
         await syncService.PollOnceAsync();
-        Assert.AreEqual("⚽ ARS 0–0 CHE 1'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 0–0 CHE 1'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // Stage 3: LIVE 15' (1-0, Saka goal)
         var eventsStage3 = new List<TrayEventDto> { new() { Id = "e1", Type = "Goal", Minute = 15, TeamId = "team_ars", PlayerName = "B. Saka" } };
         currentServerPayload = CreateServerPayload("LIVE", 15, 0, 1, 0, eventsStage3, 3);
         currentEtag = "\"etag_stage3\"";
         await syncService.PollOnceAsync();
-        Assert.AreEqual("⚽ ARS 1–0 CHE 15'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 1–0 CHE 15'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // Stage 4: LIVE 38' (1-1, Palmer goal)
         var eventsStage4 = new List<TrayEventDto>
@@ -485,19 +485,19 @@ public class CrossLayerEndToEndLifecycleTests
         currentServerPayload = CreateServerPayload("LIVE", 38, 0, 1, 1, eventsStage4, 4);
         currentEtag = "\"etag_stage4\"";
         await syncService.PollOnceAsync();
-        Assert.AreEqual("⚽ ARS 1–1 CHE 38'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 1–1 CHE 38'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // Stage 5: HALFTIME (1-1)
         currentServerPayload = CreateServerPayload("HALFTIME", 45, 0, 1, 1, eventsStage4, 5);
         currentEtag = "\"etag_stage5\"";
         await syncService.PollOnceAsync();
-        Assert.AreEqual("⚽ ARS 1–1 CHE HT", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 1–1 CHE HT", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // Stage 6: LIVE 55' (1-1)
         currentServerPayload = CreateServerPayload("LIVE", 55, 0, 1, 1, eventsStage4, 6);
         currentEtag = "\"etag_stage6\"";
         await syncService.PollOnceAsync();
-        Assert.AreEqual("⚽ ARS 1–1 CHE 55'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 1–1 CHE 55'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // Stage 7: LIVE 78' (2-1, Martinelli goal)
         var eventsStage7 = new List<TrayEventDto>
@@ -509,7 +509,7 @@ public class CrossLayerEndToEndLifecycleTests
         currentServerPayload = CreateServerPayload("LIVE", 78, 0, 2, 1, eventsStage7, 7);
         currentEtag = "\"etag_stage7\"";
         await syncService.PollOnceAsync();
-        Assert.AreEqual("⚽ ARS 2–1 CHE 78'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
+        Assert.AreEqual("ARS 2–1 CHE 78'", TrayTickerFormatter.FormatTicker(syncService.CurrentTrayData, syncService.FreshnessState));
 
         // Stage 8: FINISHED (2-1, FT)
         currentServerPayload = CreateServerPayload("FINISHED", 90, 4, 2, 1, eventsStage7, 8);

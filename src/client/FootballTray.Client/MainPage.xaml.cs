@@ -1,9 +1,13 @@
 using System;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Notifications;
+using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.ViewModels;
 
 namespace FootballTray.Client;
@@ -258,6 +262,7 @@ public sealed partial class MainPage : Page
         // Update active filter button styling
         UpdateFilterButtons();
         UpdateSearchCatalogUi();
+        UpdateSoundModeUi();
     }
 
     private void UpdateSearchCatalogUi()
@@ -366,6 +371,18 @@ public sealed partial class MainPage : Page
     private void OnFilterUpcomingClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Upcoming);
     private void OnFilterFinishedClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Finished);
 
+    private void OnUnpinMatchClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem)
+        {
+            _viewModel?.UnpinMatch(matchItem.Id);
+        }
+        else
+        {
+            _viewModel?.UnpinMatch(null);
+        }
+    }
+
     private async void OnTeamFollowToggled(object sender, RoutedEventArgs e)
     {
         if (sender is ToggleSwitch ts && ts.Tag is string teamId && _viewModel != null)
@@ -400,7 +417,115 @@ public sealed partial class MainPage : Page
 
     private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e)
     {
-        _viewModel?.CopyDiagnosticsToClipboard();
+        try
+        {
+            if (_viewModel != null)
+            {
+                var report = _viewModel.DiagnosticsService.GenerateReport();
+                ClipboardHelper.SetText(report);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DIAGNOSTICS] Copy to clipboard failed: {ex.Message}");
+        }
+    }
+
+    private static class ClipboardHelper
+    {
+        private const uint CF_UNICODETEXT = 13;
+        private const uint GMEM_MOVEABLE = 0x0002;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalLock(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GlobalUnlock(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalFree(IntPtr hMem);
+
+        public static bool SetText(string text)
+        {
+            if (text == null) return false;
+
+            bool opened = false;
+            for (int i = 0; i < 10; i++)
+            {
+                if (OpenClipboard(IntPtr.Zero))
+                {
+                    opened = true;
+                    break;
+                }
+                Thread.Sleep(20);
+            }
+
+            if (!opened) return false;
+
+            try
+            {
+                if (!EmptyClipboard())
+                {
+                    return false;
+                }
+
+                char[] chars = text.ToCharArray();
+                int byteCount = (chars.Length + 1) * sizeof(char);
+                IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)byteCount);
+                if (hGlobal == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr target = GlobalLock(hGlobal);
+                if (target == IntPtr.Zero)
+                {
+                    GlobalFree(hGlobal);
+                    return false;
+                }
+
+                try
+                {
+                    Marshal.Copy(chars, 0, target, chars.Length);
+                    Marshal.WriteInt16(target + (chars.Length * sizeof(char)), 0);
+                }
+                finally
+                {
+                    GlobalUnlock(hGlobal);
+                }
+
+                if (SetClipboardData(CF_UNICODETEXT, hGlobal) == IntPtr.Zero)
+                {
+                    GlobalFree(hGlobal);
+                    return false;
+                }
+
+                return true;
+            }
+            finally
+            {
+                CloseClipboard();
+            }
+        }
     }
 
     private async void OnCheckForUpdatesClick(object sender, RoutedEventArgs e)
@@ -425,5 +550,51 @@ public sealed partial class MainPage : Page
         {
             await _viewModel.InstallUpdateAsync();
         }
+    }
+
+    private bool _isUpdatingSoundModeUi;
+
+    private void UpdateSoundModeUi()
+    {
+        if (_viewModel == null || SoundModeComboBox == null) return;
+
+        _isUpdatingSoundModeUi = true;
+        try
+        {
+            SoundModeComboBox.SelectedIndex = _viewModel.SoundMode switch
+            {
+                NotificationSoundMode.Custom => 0,
+                NotificationSoundMode.SystemDefault => 1,
+                NotificationSoundMode.Off => 2,
+                _ => 0
+            };
+        }
+        finally
+        {
+            _isUpdatingSoundModeUi = false;
+        }
+    }
+
+    private async void OnSoundModeSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isUpdatingSoundModeUi || _viewModel == null || SoundModeComboBox == null) return;
+
+        var targetMode = SoundModeComboBox.SelectedIndex switch
+        {
+            0 => NotificationSoundMode.Custom,
+            1 => NotificationSoundMode.SystemDefault,
+            2 => NotificationSoundMode.Off,
+            _ => NotificationSoundMode.Custom
+        };
+
+        if (_viewModel.SoundMode != targetMode)
+        {
+            await _viewModel.SetSoundModeAsync(targetMode);
+        }
+    }
+
+    private void OnTestSoundClicked(object sender, RoutedEventArgs e)
+    {
+        AudioPlaybackService.Instance.PlayTestSound();
     }
 }

@@ -90,59 +90,8 @@
                                 <!-- Bottom Penalty Spot -->
                                 <Ellipse Margin="0,0,0,52" Width="4" Height="4" Fill="#85FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
 
-                                <!-- 22 Starting Players via ItemsControl with ItemContainerStyle -->
-                                <ItemsControl ItemsSource="{Binding PitchPlayers}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <Canvas Width="340" Height="500" />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemContainerStyle>
-                                        <Style TargetType="ContentPresenter">
-                                            <Setter Property="Canvas.Left" Value="{Binding CanvasLeft}" />
-                                            <Setter Property="Canvas.Top" Value="{Binding CanvasTop}" />
-                                        </Style>
-                                    </ItemsControl.ItemContainerStyle>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:PitchPlayerNodeViewModel">
-                                            <Grid Width="70" HorizontalAlignment="Center">
-                                                <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                                    <!-- Circular Badge with Jersey Number -->
-                                                    <Grid HorizontalAlignment="Center" Width="26" Height="26">
-                                                        <!-- Goalkeeper Circle (Gold/Amber) -->
-                                                        <Ellipse Width="26" Height="26" Fill="#D97706" Stroke="#FFFFFF" StrokeThickness="1.5"
-                                                                 Visibility="{x:Bind GoalkeeperVisibility, Mode=OneWay}" />
-                                                        <!-- Home Outfield Circle (Accent / Royal Blue) -->
-                                                        <Ellipse Width="26" Height="26" Fill="#0078D4" Stroke="#FFFFFF" StrokeThickness="1.5"
-                                                                 Visibility="{x:Bind HomeOutfieldVisibility, Mode=OneWay}" />
-                                                        <!-- Away Outfield Circle (Coral / Crimson Red) -->
-                                                        <Ellipse Width="26" Height="26" Fill="#D13438" Stroke="#FFFFFF" StrokeThickness="1.5"
-                                                                 Visibility="{x:Bind AwayOutfieldVisibility, Mode=OneWay}" />
-
-                                                        <TextBlock Text="{x:Bind Number}"
-                                                                   FontSize="11"
-                                                                   FontWeight="Bold"
-                                                                   Foreground="#FFFFFF"
-                                                                   HorizontalAlignment="Center"
-                                                                   VerticalAlignment="Center" />
-                                                    </Grid>
-
-                                                    <!-- Player Surname Pill (Clipped with MaxWidth="70" and TextTrimming="CharacterEllipsis") -->
-                                                    <Border Background="#CC0F172A" CornerRadius="4" Padding="4,1,4,1" HorizontalAlignment="Center" MaxWidth="70">
-                                                        <TextBlock Text="{x:Bind ShortDisplayName}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold"
-                                                                   Foreground="#F8FAFC"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   MaxWidth="70"
-                                                                   MaxLines="1"
-                                                                   HorizontalAlignment="Center" />
-                                                    </Border>
-                                                </StackPanel>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <!-- 22 Starting Players explicitly positioned via Canvas -->
+                                <Canvas x:Name="PitchCanvas" Width="340" Height="500" />
                             </Grid>
                         </Viewbox>
                     </Border>

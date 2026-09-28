@@ -607,15 +607,15 @@ public class ProductionClientDeliveryAndOfflineConsistencyTests
 
         // Fresh
         var textFresh = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.Fresh);
-        Assert.AreEqual("⚽ ARS 1–0 CHE 35'", textFresh);
+        Assert.AreEqual("ARS 1–0 CHE 35'", textFresh);
 
         // NotModified
         var textNotMod = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.NotModified);
-        Assert.AreEqual("⚽ ARS 1–0 CHE 35'", textNotMod);
+        Assert.AreEqual("ARS 1–0 CHE 35'", textNotMod);
 
         // Stale
         var textStale = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.Stale);
-        Assert.AreEqual("⚽ ARS 1–0 CHE 35' · offline", textStale);
+        Assert.AreEqual("ARS 1–0 CHE 35' · offline", textStale);
 
         // Empty
         var textEmpty = TrayTickerFormatter.FormatTicker(null, DataFreshnessState.Empty);

@@ -227,7 +227,8 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                     if (response.IsSuccess && response.Envelope?.Data != null)
                     {
                         var followedIds = new HashSet<string>(FollowedTeams.Select(t => t.Id), StringComparer.OrdinalIgnoreCase);
-                        foreach (var dto in response.Envelope.Data)
+                        var uniqueTeams = response.Envelope.Data.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+                        foreach (var dto in uniqueTeams)
                         {
                             bool isFollowed = followedIds.Contains(dto.Id) ||
                                               (dto.LegacyId != null && followedIds.Contains(dto.LegacyId));
@@ -261,7 +262,8 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                     if (response.IsSuccess && response.Envelope?.Data != null)
                     {
                         var followedIds = new HashSet<string>(FollowedCompetitions.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
-                        foreach (var dto in response.Envelope.Data)
+                        var uniqueComps = response.Envelope.Data.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+                        foreach (var dto in uniqueComps)
                         {
                             bool isFollowed = followedIds.Contains(dto.Id) ||
                                               (dto.LegacyId != null && followedIds.Contains(dto.LegacyId));

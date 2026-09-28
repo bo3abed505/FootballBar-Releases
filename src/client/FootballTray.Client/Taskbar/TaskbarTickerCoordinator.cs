@@ -5,6 +5,7 @@ using Microsoft.UI.Dispatching;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.Views;
 
 namespace FootballTray.Client.Taskbar;
 
@@ -173,6 +174,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     private TickerConnectionState _currentConnectionState = TickerConnectionState.OnlineFresh;
     private string? _pinnedMatchId;
     private bool _isDisposed;
+    private MatchCenterWindow? _matchCenterWindow;
 
     public static readonly TimeSpan RotationInterval = TimeSpan.FromSeconds(7);
 
@@ -203,6 +205,40 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
         _timer.Interval = RotationInterval;
         _timer.Tick += OnTimerTick;
+    }
+
+    public void SubscribeToTicker(TaskbarTicker? ticker)
+    {
+        if (ticker == null) return;
+        ticker.MatchCenterRequested += (sender, matchId) => OpenMatchCenter(matchId);
+    }
+
+    public async void OpenMatchCenter(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId) || _isDisposed) return;
+
+        try
+        {
+            using var apiClient = new FootballApiClient();
+            var response = await apiClient.GetMatchDetailsAsync(matchId);
+
+            if (response.IsSuccess && response.Envelope?.Data != null)
+            {
+                var detail = response.Envelope.Data;
+                if (_matchCenterWindow == null)
+                {
+                    _matchCenterWindow = new MatchCenterWindow();
+                    _matchCenterWindow.Closed += (s, args) => _matchCenterWindow = null;
+                }
+
+                _matchCenterWindow.Populate(detail);
+                _matchCenterWindow.Activate();
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[TICKER] Failed to open MatchCenterWindow: {ex.Message}");
+        }
     }
 
     public bool PinMatch(string? matchId = null)
@@ -335,9 +371,18 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     private void EmitCurrentDisplay()
     {
         var displayState = _state.GetDisplayState(_currentConnectionState, IsPinned);
-        _displayCallback(displayState.FixtureId, displayState.FormattedText);
-        _extendedDisplayCallback?.Invoke(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl);
-        _fullDisplayCallback?.Invoke(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl, displayState.Match, displayState.IsPinned);
+        if (_fullDisplayCallback != null)
+        {
+            _fullDisplayCallback(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl, displayState.Match, displayState.IsPinned);
+        }
+        else if (_extendedDisplayCallback != null)
+        {
+            _extendedDisplayCallback(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl);
+        }
+        else
+        {
+            _displayCallback(displayState.FixtureId, displayState.FormattedText);
+        }
     }
 
     public void Dispose()

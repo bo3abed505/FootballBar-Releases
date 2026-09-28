@@ -86,6 +86,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
 
     public Diagnostics.IDiagnosticsService DiagnosticsService => _diagnosticsService;
+    public IPreferencesService PreferencesService => _preferencesService;
     public IUpdateDiscoveryService? UpdateDiscoveryService => _updateDiscoveryService;
     public IUpdatePackageAcquisitionService? UpdateAcquisitionService => _updateAcquisitionService;
     public IUpdateInstallationService? UpdateInstallationService => _updateInstallationService;
@@ -427,6 +428,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
             dataPackage.SetText(report);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
         }
         catch
         {
@@ -478,14 +480,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Also add any extra teams in saved preferences
         foreach (var followed in prefs.FollowedTeams)
         {
-            if (!standardTeams.Any(t => t.Id.Equals(followed.Id, StringComparison.OrdinalIgnoreCase)))
+            if (!standardTeams.Any(t => t.Id.Equals(followed.Id, StringComparison.OrdinalIgnoreCase) ||
+                                        (!string.IsNullOrWhiteSpace(t.Name) && !string.IsNullOrWhiteSpace(followed.Name) && string.Equals(t.Name.Trim(), followed.Name.Trim(), StringComparison.OrdinalIgnoreCase))))
             {
                 standardTeams.Add(followed);
             }
         }
 
         var followedTeamIds = prefs.GetFollowedTeamIdSet();
-        foreach (var team in standardTeams)
+        var dedupedTeams = standardTeams.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var team in dedupedTeams)
         {
             bool isFollowed = followedTeamIds.Contains(team.Id);
             var existing = AvailableTeams.FirstOrDefault(t => t.Id.Equals(team.Id, StringComparison.OrdinalIgnoreCase));
@@ -513,14 +517,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Also add any extra competitions in saved preferences
         foreach (var followed in prefs.FollowedCompetitions)
         {
-            if (!standardComps.Any(c => c.Id.Equals(followed.Id, StringComparison.OrdinalIgnoreCase)))
+            if (!standardComps.Any(c => c.Id.Equals(followed.Id, StringComparison.OrdinalIgnoreCase) ||
+                                        (!string.IsNullOrWhiteSpace(c.Name) && !string.IsNullOrWhiteSpace(followed.Name) && string.Equals(c.Name.Trim(), followed.Name.Trim(), StringComparison.OrdinalIgnoreCase))))
             {
                 standardComps.Add(followed);
             }
         }
 
         var followedCompIds = prefs.GetFollowedCompetitionIdSet();
-        foreach (var comp in standardComps)
+        var dedupedComps = standardComps.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var comp in dedupedComps)
         {
             bool isFollowed = followedCompIds.Contains(comp.Id);
             var existing = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(comp.Id, StringComparison.OrdinalIgnoreCase));
@@ -650,6 +656,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public NotificationSoundMode SoundMode => _preferencesService.Current.SoundMode;
+
+    public async Task SetSoundModeAsync(NotificationSoundMode mode)
+    {
+        try
+        {
+            await _preferencesService.SetSoundModeAsync(mode);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SoundMode)));
+            StatusMessage = null;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Unable to update notification sound mode: {ex.Message}";
+        }
+    }
+
     public void SetFilter(MatchFilterType filter)
     {
         ActiveFilter = filter;
@@ -725,6 +747,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         ApplyCurrentFilter();
+    }
+
+    public void UnpinMatch(string? matchId = null)
+    {
+        App.CurrentTickerCoordinator?.UnpinMatch();
+        ActiveMatchId = null;
+        ActiveTickerText = "Taskbar match unpinned";
+
+        foreach (var match in FilteredMatches)
+        {
+            if (string.IsNullOrEmpty(matchId) || match.Id == matchId)
+            {
+                match.IsActiveTaskbarMatch = false;
+            }
+        }
+    }
+
+    public void OnTaskbarPinChanged(string? pinnedMatchId)
+    {
+        foreach (var match in FilteredMatches)
+        {
+            match.IsActiveTaskbarMatch = !string.IsNullOrEmpty(pinnedMatchId)
+                ? string.Equals(match.Id, pinnedMatchId, StringComparison.Ordinal)
+                : string.Equals(match.Id, ActiveMatchId, StringComparison.Ordinal);
+        }
     }
 
     private void ReapplyRelevanceAndFilters()

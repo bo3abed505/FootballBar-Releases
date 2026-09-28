@@ -313,7 +313,7 @@ public class TaskbarTickerCoordinatorTests
         var displayState = state.GetDisplayState(TickerConnectionState.OnlineFresh);
 
         Assert.AreEqual("m1", displayState.FixtureId);
-        Assert.AreEqual("⚽ ARS 2–1 CHE 30'", displayState.FormattedText);
+        Assert.AreEqual("ARS 2–1 CHE 30'", displayState.FormattedText);
     }
 
     [TestMethod]
@@ -619,7 +619,7 @@ public class TaskbarTickerCoordinatorTests
     }
 
     [TestMethod]
-    public void Test23_TaskbarTickerPinButtonEventInterception_StructuralContractGuards()
+    public void Test23_TaskbarTickerContextMenu_StructuralContractGuards()
     {
         string root = FindRepoRoot();
         string xamlPath = Path.Combine(root, "src", "client", "FootballTray.Client", "Taskbar", "TaskbarTicker.xaml");
@@ -634,20 +634,28 @@ public class TaskbarTickerCoordinatorTests
         // 1. ToolTip must have ShowDuration="30000"
         Assert.IsTrue(xaml.Contains("ShowDuration=\"30000\""), "TaskbarTicker.xaml must specify ShowDuration=\"30000\" on ToolTip.");
 
-        // 2. PinButton must be declared with click and tap handlers
-        Assert.IsTrue(xaml.Contains("x:Name=\"PinButton\""), "TaskbarTicker.xaml must declare PinButton.");
-        Assert.IsTrue(xaml.Contains("Click=\"PinButton_Click\""), "PinButton must wire Click to PinButton_Click.");
-        Assert.IsTrue(xaml.Contains("Tapped=\"PinButton_Tapped\""), "PinButton must wire Tapped to PinButton_Tapped.");
+        // 2. ContextFlyout with MenuFlyout must be declared
+        Assert.IsTrue(xaml.Contains("<Border.ContextFlyout>"), "TaskbarTicker.xaml must declare Border.ContextFlyout.");
+        Assert.IsTrue(xaml.Contains("<MenuFlyout"), "TaskbarTicker.xaml must declare MenuFlyout.");
+        Assert.IsTrue(xaml.Contains("Text=\"Open Match Center\""), "MenuFlyout must contain 'Open Match Center'.");
+        Assert.IsTrue(xaml.Contains("Text=\"Toggle Pin\""), "MenuFlyout must contain 'Toggle Pin'.");
+        Assert.IsTrue(xaml.Contains("Text=\"Open FootballTray\""), "MenuFlyout must contain 'Open FootballTray'.");
+        Assert.IsTrue(xaml.Contains("Text=\"Exit\""), "MenuFlyout must contain 'Exit'.");
 
-        // 3. PinButton_Click and PinButton_Tapped must mark e.Handled = true
-        Assert.IsTrue(cs.Contains("PinButton_Click"), "TaskbarTicker.xaml.cs must implement PinButton_Click.");
-        Assert.IsTrue(cs.Contains("PinButton_Tapped"), "TaskbarTicker.xaml.cs must implement PinButton_Tapped.");
-        Assert.IsTrue(cs.Contains("e.Handled = true;"), "Event handlers must set e.Handled = true to stop event bubbling.");
+        // 3. PinButton must be removed completely from the ticker UI
+        Assert.IsFalse(xaml.Contains("x:Name=\"PinButton\""), "TaskbarTicker.xaml must not contain PinButton element.");
 
         // 4. PinToggled event must be declared
         Assert.IsTrue(cs.Contains("public event EventHandler<string?>? PinToggled;"), "TaskbarTicker must declare PinToggled event.");
 
-        // 5. RootBorder_Tapped must verify not handled and guard against PinButton descendants
-        Assert.IsTrue(cs.Contains("IsDescendantOf(orig, PinButton)"), "RootBorder_Tapped must intercept events originating from PinButton.");
+        // 5. Explicit ticker elements must be present
+        Assert.IsTrue(xaml.Contains("x:Name=\"HomeCrest\""), "TaskbarTicker.xaml must declare HomeCrest.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"HomeTeamName\""), "TaskbarTicker.xaml must declare HomeTeamName.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"HomeRedCard\""), "TaskbarTicker.xaml must declare HomeRedCard.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"Score\""), "TaskbarTicker.xaml must declare Score.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"AwayRedCard\""), "TaskbarTicker.xaml must declare AwayRedCard.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"AwayTeamName\""), "TaskbarTicker.xaml must declare AwayTeamName.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"AwayCrest\""), "TaskbarTicker.xaml must declare AwayCrest.");
+        Assert.IsTrue(xaml.Contains("x:Name=\"StatusText\""), "TaskbarTicker.xaml must declare StatusText.");
     }
 }

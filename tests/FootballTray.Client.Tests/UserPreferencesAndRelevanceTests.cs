@@ -70,7 +70,7 @@ public class UserPreferencesAndRelevanceTests
         Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.WorldCup));
 
         Assert.IsTrue(prefs.Notifications.GlobalEnabled);
-        Assert.AreEqual(7, prefs.Notifications.EnabledTypes.Count);
+        Assert.AreEqual(Enum.GetValues<NotificationType>().Length, prefs.Notifications.EnabledTypes.Count);
     }
 
     [TestMethod]
@@ -877,16 +877,16 @@ public class UserPreferencesAndRelevanceTests
         var data = new TrayDataDto { Matches = new List<TrayMatchDto> { match } };
 
         var formattedFresh = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.Fresh, prefs);
-        Assert.AreEqual("⚽ BAR 2–1 RMA 65'", formattedFresh);
+        Assert.AreEqual("BAR 2–1 RMA 65'", formattedFresh);
 
         var formattedStale = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.Stale, prefs);
-        Assert.AreEqual("⚽ BAR 2–1 RMA 65' · offline", formattedStale);
+        Assert.AreEqual("BAR 2–1 RMA 65' · offline", formattedStale);
 
         var formattedOnlineStale = TrayTickerFormatter.FormatTicker(data, TickerConnectionState.OnlineStale, prefs);
-        Assert.AreEqual("⚽ BAR 2–1 RMA 65' · cached", formattedOnlineStale);
+        Assert.AreEqual("BAR 2–1 RMA 65' · cached", formattedOnlineStale);
 
         var formattedOffline = TrayTickerFormatter.FormatTicker(data, TickerConnectionState.OfflineCached, prefs);
-        Assert.AreEqual("⚽ BAR 2–1 RMA 65' · offline", formattedOffline);
+        Assert.AreEqual("BAR 2–1 RMA 65' · offline", formattedOffline);
     }
 
     // ============================================================
@@ -1008,7 +1008,7 @@ public class UserPreferencesAndRelevanceTests
         var enabledTypes = defaults.Notifications.EnabledTypes;
 
         Assert.IsNotNull(enabledTypes);
-        Assert.AreEqual(7, enabledTypes.Count);
+        Assert.AreEqual(Enum.GetValues<NotificationType>().Length, enabledTypes.Count);
 
         // Ensure every enabled type is a valid defined enum member of NotificationType
         foreach (var type in enabledTypes)
@@ -1016,7 +1016,7 @@ public class UserPreferencesAndRelevanceTests
             Assert.IsTrue(Enum.IsDefined(typeof(NotificationType), type), $"Type {type} is not a valid defined NotificationType enum member.");
         }
 
-        // Specifically verify exact WP6 canonical categories
+        // Specifically verify exact canonical categories
         Assert.IsTrue(enabledTypes.Contains(NotificationType.MatchStarted));
         Assert.IsTrue(enabledTypes.Contains(NotificationType.Goal));
         Assert.IsTrue(enabledTypes.Contains(NotificationType.HalfTime));
@@ -1024,6 +1024,8 @@ public class UserPreferencesAndRelevanceTests
         Assert.IsTrue(enabledTypes.Contains(NotificationType.MatchPostponed));
         Assert.IsTrue(enabledTypes.Contains(NotificationType.MatchCancelled));
         Assert.IsTrue(enabledTypes.Contains(NotificationType.MatchResumed));
+        Assert.IsTrue(enabledTypes.Contains(NotificationType.RedCard));
+        Assert.IsTrue(enabledTypes.Contains(NotificationType.PenaltyAwarded));
     }
 
     // ============================================================

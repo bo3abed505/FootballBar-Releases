@@ -681,7 +681,7 @@ public class MainViewModelAndUiTests
         var data = new TrayDataDto { Matches = new List<TrayMatchDto> { matchBarca } };
 
         var formatted = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.Fresh, _prefService.GetPreferences());
-        Assert.AreEqual("⚽ BAR 2–1 RMA 65'", formatted);
+        Assert.AreEqual("BAR 2–1 RMA 65'", formatted);
     }
 
     [TestMethod]
@@ -694,7 +694,7 @@ public class MainViewModelAndUiTests
         var data = new TrayDataDto { Matches = new List<TrayMatchDto> { matchBarca } };
 
         var formattedStale = TrayTickerFormatter.FormatTicker(data, DataFreshnessState.Stale, _prefService.GetPreferences());
-        Assert.AreEqual("⚽ BAR 2–1 RMA 65' · offline", formattedStale);
+        Assert.AreEqual("BAR 2–1 RMA 65' · offline", formattedStale);
     }
 
     [TestMethod]
@@ -911,6 +911,10 @@ public class MainViewModelAndUiTests
         public Task SetNotificationsGloballyEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
 
         public Task SetNotificationTypeEnabledAsync(NotificationType type, bool enabled, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
+
+        public Task SetAudioEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
+
+        public Task SetAudioVolumeAsync(double volume, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
 
         public Task SetPreferencesAsync(UserPreferences preferences, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
     }

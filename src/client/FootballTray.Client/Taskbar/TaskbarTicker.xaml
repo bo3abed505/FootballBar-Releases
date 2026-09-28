@@ -13,12 +13,56 @@
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="6"
-        Padding="6,2,8,2"
+        Padding="6,2,6,2"
         HorizontalAlignment="Stretch"
         VerticalAlignment="Stretch"
         PointerEntered="RootBorder_PointerEntered"
         PointerExited="RootBorder_PointerExited"
-        Tapped="RootBorder_Tapped">
+        PointerPressed="RootBorder_PointerPressed"
+        PointerMoved="RootBorder_PointerMoved"
+        PointerReleased="RootBorder_PointerReleased"
+        Tapped="RootBorder_Tapped"
+        DoubleTapped="RootBorder_DoubleTapped">
+
+        <Border.ContextFlyout>
+            <MenuFlyout x:Name="TickerContextMenu">
+                <MenuFlyoutItem
+                    x:Name="MenuOpenMatchCenter"
+                    Text="Open Match Center"
+                    Click="OnOpenMatchCenterClicked" />
+                <MenuFlyoutItem
+                    x:Name="MenuTogglePin"
+                    Text="Toggle Pin"
+                    Click="OnTogglePinClicked" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem
+                    x:Name="MenuHideTicker"
+                    Text="Hide Ticker"
+                    Click="MenuHideTicker_Click" />
+                <MenuFlyoutItem
+                    x:Name="MenuResetPosition"
+                    Text="Reset Position"
+                    Click="MenuResetPosition_Click" />
+                <MenuFlyoutItem
+                    x:Name="MenuManualPosition"
+                    Text="Manual Position"
+                    Click="MenuManualPosition_Click" />
+                <MenuFlyoutSeparator x:Name="MenuDisplaySeparator" />
+                <MenuFlyoutSeparator />
+                <ToggleMenuFlyoutItem
+                    x:Name="MenuMuteToggle"
+                    Text="Mute Sounds"
+                    Click="MenuMuteToggle_Click" />
+                <MenuFlyoutItem
+                    x:Name="MenuOpenApp"
+                    Text="Open FootballTray"
+                    Click="OnOpenAppClicked" />
+                <MenuFlyoutItem
+                    x:Name="MenuExit"
+                    Text="Exit"
+                    Click="OnExitClicked" />
+            </MenuFlyout>
+        </Border.ContextFlyout>
 
         <ToolTipService.ToolTip>
             <ToolTip
@@ -103,7 +147,7 @@
                         <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,2,0,2" />
                         <TextBlock
                             x:Name="FlyoutPinHintText"
-                            Text="Click 📌 to pause ticker carousel"
+                            Text="Right-click to pin match or open details"
                             FontSize="10"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                     </StackPanel>
@@ -112,60 +156,111 @@
         </ToolTipService.ToolTip>
 
         <StackPanel
+            x:Name="TickerContentPanel"
             Orientation="Horizontal"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
             Spacing="5">
 
-            <Button
-                x:Name="PinButton"
-                Padding="0"
-                Width="18"
-                Height="18"
-                MinWidth="18"
-                MinHeight="18"
-                CornerRadius="4"
-                Background="Transparent"
-                BorderThickness="0"
-                VerticalAlignment="Center"
-                Click="PinButton_Click"
-                Tapped="PinButton_Tapped"
-                ToolTipService.ToolTip="Pin match to pause ticker rotation">
-                <FontIcon
-                    x:Name="PinIcon"
-                    Glyph="&#xE718;"
-                    FontSize="10"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-            </Button>
-            
-            <FontIcon
-                x:Name="TickerIcon"
-                Glyph="&#xE7FC;"
+            <!-- Fallback TextBlock when no active match is available -->
+            <TextBlock
+                x:Name="FallbackText"
+                Text="FootballTray"
                 FontSize="12"
-                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                FontWeight="SemiBold"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Visibility="Visible" />
 
+            <!-- Explicit Ticker Elements: [HomeCrest] [HomeTeamName] [HomeRedCard] [Score] [AwayRedCard] [AwayTeamName] [AwayCrest] [StatusText] -->
             <Image
-                x:Name="HomeTeamLogo"
-                Width="14"
-                Height="14"
+                x:Name="HomeCrest"
+                Width="16"
+                Height="16"
                 VerticalAlignment="Center"
                 Stretch="Uniform"
                 Visibility="Collapsed" />
 
             <TextBlock
-                x:Name="TickerText"
-                Text="FootballTray"
+                x:Name="HomeTeamName"
+                Text=""
                 FontSize="12"
                 FontWeight="SemiBold"
                 VerticalAlignment="Center"
-                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Visibility="Collapsed" />
+
+            <Border
+                x:Name="HomeRedCard"
+                Background="#D32F2F"
+                CornerRadius="2"
+                MinWidth="8"
+                Height="11"
+                Padding="1,0"
+                VerticalAlignment="Center"
+                Visibility="Collapsed">
+                <TextBlock
+                    x:Name="HomeRedCardText"
+                    Text=""
+                    FontSize="8"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center" />
+            </Border>
+
+            <TextBlock
+                x:Name="Score"
+                Text=""
+                FontSize="12"
+                FontWeight="Bold"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Visibility="Collapsed" />
+
+            <Border
+                x:Name="AwayRedCard"
+                Background="#D32F2F"
+                CornerRadius="2"
+                MinWidth="8"
+                Height="11"
+                Padding="1,0"
+                VerticalAlignment="Center"
+                Visibility="Collapsed">
+                <TextBlock
+                    x:Name="AwayRedCardText"
+                    Text=""
+                    FontSize="8"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center" />
+            </Border>
+
+            <TextBlock
+                x:Name="AwayTeamName"
+                Text=""
+                FontSize="12"
+                FontWeight="SemiBold"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Visibility="Collapsed" />
 
             <Image
-                x:Name="AwayTeamLogo"
-                Width="14"
-                Height="14"
+                x:Name="AwayCrest"
+                Width="16"
+                Height="16"
                 VerticalAlignment="Center"
                 Stretch="Uniform"
+                Visibility="Collapsed" />
+
+            <TextBlock
+                x:Name="StatusText"
+                Text=""
+                FontSize="11"
+                FontWeight="Normal"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Visibility="Collapsed" />
         </StackPanel>
     </Border>

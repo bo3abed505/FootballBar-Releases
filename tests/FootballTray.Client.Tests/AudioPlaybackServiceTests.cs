@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Notifications;
+using FootballTray.Client.Services.Preferences;
 using FootballTray.Core.Dto;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -16,6 +17,7 @@ public class AudioPlaybackServiceTests
     {
         public int WhistleCallCount { get; private set; }
         public int GoalCallCount { get; private set; }
+        public int TestSoundCallCount { get; private set; }
         public List<NotificationType> PlayedTypes { get; } = new();
 
         public void PlaySound(NotificationType type)
@@ -40,6 +42,11 @@ public class AudioPlaybackServiceTests
         {
             GoalCallCount++;
         }
+
+        public void PlayTestSound()
+        {
+            TestSoundCallCount++;
+        }
     }
 
     private sealed class ThrowingAudioPlaybackService : IAudioPlaybackService
@@ -47,6 +54,7 @@ public class AudioPlaybackServiceTests
         public void PlaySound(NotificationType type) => throw new InvalidOperationException("Simulated hardware audio failure.");
         public void PlayWhistle() => throw new InvalidOperationException("Simulated hardware audio failure.");
         public void PlayGoalSound() => throw new InvalidOperationException("Simulated hardware audio failure.");
+        public void PlayTestSound() => throw new InvalidOperationException("Simulated hardware audio failure.");
     }
 
     [TestMethod]
@@ -67,9 +75,14 @@ public class AudioPlaybackServiceTests
         // Must gracefully handle sound hardware absence in headless CI/unit test environments
         service.PlayWhistle();
         service.PlayGoalSound();
+        service.PlayTestSound();
         service.PlaySound(NotificationType.MatchStarted);
         service.PlaySound(NotificationType.Goal);
         service.PlaySound(NotificationType.HalfTime);
+        service.PlaySound(NotificationType.MatchFinished);
+        service.PlaySound(NotificationType.MatchResumed);
+        service.PlaySound(NotificationType.RedCard);
+        service.PlaySound(NotificationType.PenaltyAwarded);
     }
 
     [TestMethod]
@@ -202,5 +215,105 @@ public class AudioPlaybackServiceTests
         Assert.AreEqual(1, dispatched.Count);
         Assert.AreEqual(1, renderer.Rendered.Count);
         Assert.IsTrue(store.IsAlreadyNotified("match:ft_fix_test:started"));
+    }
+
+    [TestMethod]
+    public void AudioPlaybackService_HonorsMutePreference()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"ft_audio_{Guid.NewGuid():N}");
+        try
+        {
+            var prefs = new PreferencesService(tempDir);
+            prefs.SetAudioEnabledAsync(false).GetAwaiter().GetResult();
+
+            var service = new AudioPlaybackService(prefs);
+
+            // When audio is disabled, methods must return immediately without playing or throwing
+            service.PlayWhistle();
+            service.PlayGoalSound();
+            service.PlaySound(NotificationType.MatchStarted);
+            service.PlaySound(NotificationType.Goal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void AudioPreferences_DefaultValuesAndVolumeClamping_OperateDeterministically()
+    {
+        var defaults = DefaultPreferences.CreateDefault();
+        Assert.IsTrue(defaults.IsAudioEnabled, "Audio should be enabled by default.");
+        Assert.AreEqual(0.2, defaults.AudioVolume, 0.001, "Audio volume should default to 20% (0.2).");
+
+        string tempDir = Path.Combine(Path.GetTempPath(), $"ft_audio_vol_{Guid.NewGuid():N}");
+        try
+        {
+            var prefs = new PreferencesService(tempDir);
+            Assert.IsTrue(prefs.Current.IsAudioEnabled);
+            Assert.AreEqual(0.2, prefs.Current.AudioVolume, 0.001);
+
+            // Test volume mutation and clamping above 1.0
+            prefs.SetAudioVolumeAsync(1.5).GetAwaiter().GetResult();
+            Assert.AreEqual(1.0, prefs.Current.AudioVolume, 0.001, "Volume above 1.0 must be clamped to 1.0.");
+
+            // Test volume mutation and clamping below 0.0
+            prefs.SetAudioVolumeAsync(-0.5).GetAwaiter().GetResult();
+            Assert.AreEqual(0.0, prefs.Current.AudioVolume, 0.001, "Volume below 0.0 must be clamped to 0.0.");
+
+            // Test valid volume
+            prefs.SetAudioVolumeAsync(0.65).GetAwaiter().GetResult();
+            Assert.AreEqual(0.65, prefs.Current.AudioVolume, 0.001);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void AudioPlaybackService_HonorsNotificationSoundModes()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"ft_audio_modes_{Guid.NewGuid():N}");
+        try
+        {
+            var prefs = new PreferencesService(tempDir);
+            Assert.AreEqual(NotificationSoundMode.Custom, prefs.Current.SoundMode);
+            Assert.IsTrue(prefs.Current.IsAudioEnabled);
+
+            var service = new AudioPlaybackService(prefs);
+
+            // 1. Custom mode - safely executes in headless CI
+            service.PlayWhistle();
+            service.PlayGoalSound();
+
+            // 2. SystemDefault mode
+            prefs.SetSoundModeAsync(NotificationSoundMode.SystemDefault).GetAwaiter().GetResult();
+            Assert.AreEqual(NotificationSoundMode.SystemDefault, prefs.Current.SoundMode);
+            Assert.IsTrue(prefs.Current.IsAudioEnabled);
+            service.PlayWhistle();
+            service.PlayGoalSound();
+
+            // 3. Off mode
+            prefs.SetSoundModeAsync(NotificationSoundMode.Off).GetAwaiter().GetResult();
+            Assert.AreEqual(NotificationSoundMode.Off, prefs.Current.SoundMode);
+            Assert.IsFalse(prefs.Current.IsAudioEnabled);
+            service.PlayWhistle();
+            service.PlayGoalSound();
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
     }
 }
