@@ -12,6 +12,7 @@ using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Taskbar;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Audio;
+using FootballTray.Client.Services.Daemon;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Services.Updates;
@@ -28,6 +29,7 @@ public partial class App : Application
     private static TaskbarHost? _taskbarHost;
     private static TaskbarTicker? _tickerControl;
     private TaskbarTickerCoordinator? _tickerCoordinator;
+    private DaemonLifecycleManager? _daemonManager;
     private SyncService? _syncService;
     private FootballApiClient? _apiClient;
     private LocalCacheService? _cacheService;
@@ -76,6 +78,11 @@ public partial class App : Application
     protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         AppLogger.Info("App", "StartupBegin", "FootballTray client startup sequence initiated.");
+
+        // 0. Ensure Local Backend Engine is Active
+        _daemonManager = new DaemonLifecycleManager();
+        AppDomain.CurrentDomain.ProcessExit += (s, e) => _daemonManager?.StopDaemon();
+        await _daemonManager.StartDaemonAsync(_appShutdownCts.Token);
 
         // 1. Initialize Core Client Services first
         _apiClient = new FootballApiClient();
@@ -181,6 +188,9 @@ public partial class App : Application
             _syncService = null;
             _apiClient?.Dispose();
             _apiClient = null;
+            _daemonManager?.StopDaemon();
+            _daemonManager?.Dispose();
+            _daemonManager = null;
             _updateDiscoveryService?.Dispose();
             _updateDiscoveryService = null;
             _updatePackageAcquisitionService?.Dispose();
@@ -532,6 +542,8 @@ public partial class App : Application
             Application.Current?.Exit();
             return;
         }
+
+        app._daemonManager?.StopDaemon();
 
         var win = app._window;
         if (win is MainWindow mw)

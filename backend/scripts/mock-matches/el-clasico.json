@@ -1,0 +1,220 @@
+{
+  "fixture": {
+    "id": "fix_mock_9999",
+    "canonicalId": "ft_fix_mock_9999",
+    "competitionId": "comp_140",
+    "seasonId": "season_140_2026",
+    "homeTeamId": "team_barcelona",
+    "awayTeamId": "team_realmadrid",
+    "homeTeamLogoUrl": "https://media.api-sports.io/football/teams/529.png",
+    "awayTeamLogoUrl": "https://media.api-sports.io/football/teams/541.png",
+    "venue": "Spotify Camp Nou",
+    "referee": "Alejandro Hernández"
+  },
+  "lineups": [
+    {
+      "teamId": "team_barcelona",
+      "formation": "4-3-3",
+      "coachName": "Hansi Flick",
+      "startXi": [
+        { "name": "Ter Stegen", "number": 1, "position": "G", "grid": "1:1" },
+        { "name": "Koundé", "number": 23, "position": "D", "grid": "2:4" },
+        { "name": "Cubarsí", "number": 2, "position": "D", "grid": "2:3" },
+        { "name": "Martínez", "number": 5, "position": "D", "grid": "2:2" },
+        { "name": "Balde", "number": 3, "position": "D", "grid": "2:1" },
+        { "name": "Casadó", "number": 17, "position": "M", "grid": "3:3" },
+        { "name": "Pedri", "number": 8, "position": "M", "grid": "3:2" },
+        { "name": "Olmo", "number": 20, "position": "M", "grid": "3:1" },
+        { "name": "Yamal", "number": 19, "position": "F", "grid": "4:3" },
+        { "name": "Lewandowski", "number": 9, "position": "F", "grid": "4:2" },
+        { "name": "Raphinha", "number": 11, "position": "F", "grid": "4:1" }
+      ],
+      "substitutes": [
+        { "name": "Iñaki Peña", "number": 13, "position": "G" },
+        { "name": "Ferran Torres", "number": 7, "position": "F" },
+        { "name": "Ansu Fati", "number": 10, "position": "F" },
+        { "name": "Pablo Torre", "number": 14, "position": "M" },
+        { "name": "Fermín López", "number": 16, "position": "M" },
+        { "name": "Pau Víctor", "number": 18, "position": "F" },
+        { "name": "Frenkie de Jong", "number": 21, "position": "M" },
+        { "name": "Eric García", "number": 24, "position": "D" }
+      ]
+    },
+    {
+      "teamId": "team_realmadrid",
+      "formation": "4-3-3",
+      "coachName": "Carlo Ancelotti",
+      "startXi": [
+        { "name": "Courtois", "number": 1, "position": "G", "grid": "1:1" },
+        { "name": "Vázquez", "number": 17, "position": "D", "grid": "2:4" },
+        { "name": "Militão", "number": 3, "position": "D", "grid": "2:3" },
+        { "name": "Rüdiger", "number": 22, "position": "D", "grid": "2:2" },
+        { "name": "Mendy", "number": 23, "position": "D", "grid": "2:1" },
+        { "name": "Valverde", "number": 8, "position": "M", "grid": "3:3" },
+        { "name": "Tchouaméni", "number": 14, "position": "M", "grid": "3:2" },
+        { "name": "Bellingham", "number": 5, "position": "M", "grid": "3:1" },
+        { "name": "Rodrygo", "number": 11, "position": "F", "grid": "4:3" },
+        { "name": "Mbappé", "number": 9, "position": "F", "grid": "4:2" },
+        { "name": "Vinícius Jr", "number": 7, "position": "F", "grid": "4:1" }
+      ],
+      "substitutes": [
+        { "name": "Andriy Lunin", "number": 13, "position": "G" },
+        { "name": "Eduardo Camavinga", "number": 6, "position": "M" },
+        { "name": "Luka Modrić", "number": 10, "position": "M" },
+        { "name": "Arda Güler", "number": 15, "position": "M" },
+        { "name": "Endrick", "number": 16, "position": "F" },
+        { "name": "Dani Ceballos", "number": 19, "position": "M" },
+        { "name": "Fran García", "number": 20, "position": "D" },
+        { "name": "Brahim Díaz", "number": 21, "position": "F" }
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "step": 1,
+      "title": "PREMATCH",
+      "state": "PREMATCH",
+      "elapsed": 0,
+      "extra": 0,
+      "homeScore": 0,
+      "awayScore": 0,
+      "event": null
+    },
+    {
+      "step": 2,
+      "title": "FIRST HALF KICKOFF",
+      "state": "LIVE",
+      "elapsed": 1,
+      "extra": 0,
+      "homeScore": 0,
+      "awayScore": 0,
+      "event": {
+        "id": "evt_mock_01",
+        "type": "PeriodStart",
+        "minute": 1,
+        "description": "Kickoff: First half underway at Spotify Camp Nou"
+      }
+    },
+    {
+      "step": 3,
+      "title": "TACTICAL BOOKING",
+      "state": "LIVE",
+      "elapsed": 18,
+      "extra": 0,
+      "homeScore": 0,
+      "awayScore": 0,
+      "event": {
+        "id": "evt_mock_02",
+        "type": "YellowCard",
+        "minute": 18,
+        "teamId": "team_realmadrid",
+        "playerName": "Vinícius Júnior",
+        "description": "Yellow card for foul on Koundé"
+      }
+    },
+    {
+      "step": 4,
+      "title": "GOAL: FC BARCELONA 1 - 0",
+      "state": "LIVE",
+      "elapsed": 29,
+      "extra": 0,
+      "homeScore": 1,
+      "awayScore": 0,
+      "event": {
+        "id": "evt_mock_03",
+        "type": "Goal",
+        "minute": 29,
+        "teamId": "team_barcelona",
+        "playerName": "Robert Lewandowski",
+        "assistPlayerName": "Pedri",
+        "description": "Goal! FC Barcelona 1, Real Madrid 0. Robert Lewandowski with a composed finish inside the box."
+      }
+    },
+    {
+      "step": 5,
+      "title": "HALFTIME",
+      "state": "HALFTIME",
+      "elapsed": 45,
+      "extra": 1,
+      "homeScore": 1,
+      "awayScore": 0,
+      "homeScoreHt": 1,
+      "awayScoreHt": 0,
+      "event": {
+        "id": "evt_mock_04",
+        "type": "PeriodEnd",
+        "minute": 45,
+        "extraMinute": 1,
+        "description": "Halftime: FC Barcelona 1 - 0 Real Madrid"
+      }
+    },
+    {
+      "step": 6,
+      "title": "SECOND HALF KICKOFF",
+      "state": "LIVE",
+      "elapsed": 46,
+      "extra": 0,
+      "homeScore": 1,
+      "awayScore": 0,
+      "event": {
+        "id": "evt_mock_05",
+        "type": "PeriodStart",
+        "minute": 46,
+        "description": "Second half kicks off"
+      }
+    },
+    {
+      "step": 7,
+      "title": "GOAL: REAL MADRID EQUALIZES 1 - 1",
+      "state": "LIVE",
+      "elapsed": 67,
+      "extra": 0,
+      "homeScore": 1,
+      "awayScore": 1,
+      "event": {
+        "id": "evt_mock_06",
+        "type": "Goal",
+        "minute": 67,
+        "teamId": "team_realmadrid",
+        "playerName": "Kylian Mbappé",
+        "assistPlayerName": "Jude Bellingham",
+        "description": "Goal! FC Barcelona 1, Real Madrid 1. Kylian Mbappé fires into the top corner."
+      }
+    },
+    {
+      "step": 8,
+      "title": "GOAL: BARCELONA STOPPAGE TIME WINNER 2 - 1",
+      "state": "LIVE",
+      "elapsed": 90,
+      "extra": 2,
+      "homeScore": 2,
+      "awayScore": 1,
+      "event": {
+        "id": "evt_mock_07",
+        "type": "Goal",
+        "minute": 90,
+        "extraMinute": 2,
+        "teamId": "team_barcelona",
+        "playerName": "Lamine Yamal",
+        "assistPlayerName": "Raphinha",
+        "description": "Goal! FC Barcelona 2, Real Madrid 1. Lamine Yamal strikes in stoppage time!"
+      }
+    },
+    {
+      "step": 9,
+      "title": "FULL TIME",
+      "state": "FINISHED",
+      "elapsed": 90,
+      "extra": 4,
+      "homeScore": 2,
+      "awayScore": 1,
+      "event": {
+        "id": "evt_mock_08",
+        "type": "PeriodEnd",
+        "minute": 90,
+        "extraMinute": 4,
+        "description": "Full Time: FC Barcelona 2 - 1 Real Madrid"
+      }
+    }
+  ]
+}

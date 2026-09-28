@@ -19,6 +19,7 @@
     "dev:sync:goal": "tsx src/acquisition/cli-sync.ts --simulate-goal",
     "dev:sync:reset": "tsx src/acquisition/cli-sync.ts --reset",
     "provider:check": "tsx src/acquisition/cli-provider-check.ts",
+    "simulate:match": "tsx scripts/simulate-match.ts",
     "sync:live": "tsx src/acquisition/cli-sync.ts"
   },
   "dependencies": {
