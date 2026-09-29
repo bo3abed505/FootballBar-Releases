@@ -821,6 +821,213 @@ public class MainViewModelAndUiTests
     }
 
     // ============================================================
+    // Strike 2: Sorting Engine & 7-Day Navigation Tests (32-37)
+    // ============================================================
+
+    [TestMethod]
+    public async Task Test32_MasterSorting_AllTab_FollowsStrictHierarchy()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        // 1. Followed Team match (Barcelona - Finished)
+        var barcaFinished = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_sevilla", CanonicalEntityIds.LaLiga, state: "FT");
+        // 2. Followed Competition match (Premier League - Prematch)
+        var plUpcoming = CreateMatch("fix_pl", "team_chelsea", "team_arsenal", CanonicalEntityIds.PremierLeague, state: "PREMATCH");
+        // 3. Other match (Serie A - Live 80')
+        var otherLive = CreateMatch("fix_other", "team_roma", "team_lazio", "comp_seriea", state: "LIVE", elapsed: 80);
+
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { otherLive, plUpcoming, barcaFinished } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+        vm.SetFilter(MatchFilterType.All);
+
+        Assert.AreEqual(3, vm.FilteredMatches.Count);
+        // Strict Hierarchy: Followed Teams (Top) -> Followed Competitions -> Other matches
+        Assert.AreEqual("fix_barca", vm.FilteredMatches[0].Id, "Followed team must rank top regardless of match state.");
+        Assert.AreEqual("fix_pl", vm.FilteredMatches[1].Id, "Followed competition must rank second.");
+        Assert.AreEqual("fix_other", vm.FilteredMatches[2].Id, "Other matches must rank third.");
+
+        // Distinct Followed vs Other collections
+        Assert.AreEqual(2, vm.FollowedMatches.Count);
+        Assert.AreEqual(1, vm.OtherMatches.Count);
+        Assert.AreEqual("fix_other", vm.OtherMatches[0].Id);
+    }
+
+    [TestMethod]
+    public async Task Test33_MasterSorting_OtherMatchesSortedByPopularity()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        // All 3 matches are unfollowed, but belong to different tiers of popularity
+        var uclMatch = CreateMatch("fix_ucl", "team_x", "team_y", "comp_2", compName: "UEFA Champions League", state: "PREMATCH");
+        var serieAMatch = CreateMatch("fix_sa", "team_a", "team_b", "comp_135", compName: "Serie A", state: "PREMATCH");
+        var unknownMatch = CreateMatch("fix_unk", "team_c", "team_d", "comp_9999", compName: "Regional Cup", state: "PREMATCH");
+
+        // Supply in reverse popularity order
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { unknownMatch, serieAMatch, uclMatch } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+        vm.SetFilter(MatchFilterType.All);
+
+        Assert.AreEqual(3, vm.FilteredMatches.Count);
+        Assert.AreEqual("fix_ucl", vm.FilteredMatches[0].Id, "Champions League (tier 1 popularity) must rank first.");
+        Assert.AreEqual("fix_sa", vm.FilteredMatches[1].Id, "Serie A (tier 5 popularity) must rank second.");
+        Assert.AreEqual("fix_unk", vm.FilteredMatches[2].Id, "Unknown regional cup (tier 100) must rank last.");
+    }
+
+    [TestMethod]
+    public async Task Test34_MasterSorting_FollowingTab_ExcludesOtherMatches()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var barcaMatch = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga);
+        var plMatch = CreateMatch("fix_pl", "team_tot", "team_mci", CanonicalEntityIds.PremierLeague);
+        var otherMatch = CreateMatch("fix_other", "team_roma", "team_lazio", "comp_seriea");
+
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { otherMatch, plMatch, barcaMatch } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+        vm.SetFilter(MatchFilterType.Following);
+
+        Assert.AreEqual(2, vm.FilteredMatches.Count);
+        Assert.AreEqual("fix_barca", vm.FilteredMatches[0].Id);
+        Assert.AreEqual("fix_pl", vm.FilteredMatches[1].Id);
+        Assert.AreEqual(0, vm.OtherMatches.Count, "Following tab must exclude other matches.");
+        Assert.IsFalse(vm.IsOtherMatchesVisible);
+    }
+
+    [TestMethod]
+    public async Task Test35_7DayCalendar_PopulatesSevenDaysWithTodaySelected()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        Assert.AreEqual(7, vm.CalendarDays.Count);
+        Assert.AreEqual(DateTime.Today.AddDays(-1).Date, vm.CalendarDays[0].Date);
+        Assert.AreEqual("Yesterday", vm.CalendarDays[0].RelativeLabel);
+        Assert.IsFalse(vm.CalendarDays[0].IsToday);
+
+        Assert.AreEqual(DateTime.Today.Date, vm.CalendarDays[1].Date);
+        Assert.AreEqual("Today", vm.CalendarDays[1].RelativeLabel);
+        Assert.IsTrue(vm.CalendarDays[1].IsToday);
+        Assert.IsTrue(vm.CalendarDays[1].IsSelected);
+
+        Assert.AreEqual(DateTime.Today.AddDays(1).Date, vm.CalendarDays[2].Date);
+        Assert.AreEqual("Tomorrow", vm.CalendarDays[2].RelativeLabel);
+
+        Assert.AreEqual(DateTime.Today.AddDays(5).Date, vm.CalendarDays[6].Date);
+    }
+
+    [TestMethod]
+    public async Task Test36_7DayCalendar_DateSelection_FiltersMatches()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var today = DateTime.Today;
+        var todayKickoff = new DateTimeOffset(today.Year, today.Month, today.Day, 15, 0, 0, TimeSpan.Zero);
+        var tomorrowKickoff = todayKickoff.AddDays(1);
+
+        var matchToday = CreateMatch("fix_today", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, kickoff: todayKickoff);
+        var matchTomorrow = CreateMatch("fix_tomorrow", "team_chelsea", "team_arsenal", CanonicalEntityIds.PremierLeague, kickoff: tomorrowKickoff);
+
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { matchToday, matchTomorrow } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        // Initially on Today
+        Assert.AreEqual(1, vm.FilteredMatches.Count);
+        Assert.AreEqual("fix_today", vm.FilteredMatches[0].Id);
+
+        // Select Tomorrow
+        vm.SelectCalendarDate(today.AddDays(1));
+        Assert.AreEqual(1, vm.FilteredMatches.Count);
+        Assert.AreEqual("fix_tomorrow", vm.FilteredMatches[0].Id);
+        Assert.IsTrue(vm.CalendarDays.First(d => d.Date == today.AddDays(1)).IsSelected);
+        Assert.IsFalse(vm.CalendarDays.First(d => d.Date == today).IsSelected);
+    }
+
+    [TestMethod]
+    public async Task Test37_CollapsibleOtherMatches_ExpanderStateToggle()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        // Scenario 1: Followed matches exist in Live tab
+        var barcaLive = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, state: "LIVE", elapsed: 20);
+        var otherLive = CreateMatch("fix_other", "team_roma", "team_lazio", "comp_seriea", state: "LIVE", elapsed: 40);
+
+        var dataWithFollowed = new TrayDataDto { Matches = new List<TrayMatchDto> { barcaLive, otherLive } };
+        vm.RefreshMatches(dataWithFollowed, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+        vm.SetFilter(MatchFilterType.Live);
+
+        Assert.IsTrue(vm.HasFollowedMatches);
+        Assert.IsTrue(vm.HasOtherMatches);
+        Assert.IsTrue(vm.IsOtherMatchesVisible);
+        // By default, if followed matches exist, other matches section is collapsed
+        Assert.IsFalse(vm.IsOtherMatchesExpanded, "Other matches section must default to collapsed when followed matches exist.");
+
+        // Scenario 2: No followed matches exist in Live tab
+        var dataNoFollowed = new TrayDataDto { Matches = new List<TrayMatchDto> { otherLive } };
+        vm.RefreshMatches(dataNoFollowed, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+        vm.SetFilter(MatchFilterType.Upcoming);
+        vm.SetFilter(MatchFilterType.Live); // re-trigger filter change
+
+        Assert.IsFalse(vm.HasFollowedMatches);
+        Assert.IsTrue(vm.HasOtherMatches);
+        // By default, if no followed matches exist, other matches section is expanded so user sees matches
+        Assert.IsTrue(vm.IsOtherMatchesExpanded, "Other matches section must default to expanded when no followed matches exist.");
+    }
+
+    [TestMethod]
+    public async Task Test38_Strike21_AllTab_OtherMatchesAlwaysExpanded()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var barca = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga);
+        var other = CreateMatch("fix_other", "team_roma", "team_lazio", "comp_seriea");
+
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { barca, other } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        vm.SetFilter(MatchFilterType.All);
+        Assert.IsTrue(vm.HasFollowedMatches);
+        Assert.IsTrue(vm.HasOtherMatches);
+        Assert.IsTrue(vm.IsOtherMatchesExpanded, "All tab must always have other matches expanded so master schedule is fully visible.");
+    }
+
+    [TestMethod]
+    public async Task Test39_Strike21_CalendarVisibility_OnlyOnAllAndFollowing()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        vm.SetFilter(MatchFilterType.All);
+        Assert.IsTrue(vm.IsCalendarVisible, "Calendar must be visible on All tab.");
+
+        vm.SetFilter(MatchFilterType.Following);
+        Assert.IsTrue(vm.IsCalendarVisible, "Calendar must be visible on Following tab.");
+
+        vm.SetFilter(MatchFilterType.Live);
+        Assert.IsFalse(vm.IsCalendarVisible, "Calendar must be hidden on Live tab.");
+
+        vm.SetFilter(MatchFilterType.Upcoming);
+        Assert.IsFalse(vm.IsCalendarVisible, "Calendar must be hidden on Upcoming tab.");
+
+        vm.SetFilter(MatchFilterType.Finished);
+        Assert.IsFalse(vm.IsCalendarVisible, "Calendar must be hidden on Finished tab.");
+    }
+
+    [TestMethod]
+    public void Test40_DaemonLifecycleManager_PortSelfHealing_DoesNotThrow()
+    {
+        var pids = FootballTray.Client.Services.Daemon.DaemonLifecycleManager.FindPidsListeningOnPort(65534);
+        Assert.IsNotNull(pids);
+
+        FootballTray.Client.Services.Daemon.DaemonLifecycleManager.FreePortIfOccupied(65534);
+    }
+
+    // ============================================================
     // Helpers & Test Doubles
     // ============================================================
 

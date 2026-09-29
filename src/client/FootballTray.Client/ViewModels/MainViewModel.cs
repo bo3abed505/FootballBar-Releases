@@ -44,6 +44,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _emptyStateMessage = "Waiting for synchronized football data...";
     private bool _isInitialized;
     private TrayDataDto? _latestTrayData;
+    private DateTime _selectedCalendarDate = DateTime.Today;
+    private MatchFilterType? _lastFilterApplied;
+    private DateTime? _lastDateApplied;
+    private bool _hasFollowedMatches;
+    private bool _hasOtherMatches;
+    private bool _isOtherMatchesVisible;
+    private bool _isOtherMatchesExpanded;
+    private string _otherMatchesHeader = "Other Matches";
 
     private UpdateCheckState _updateCheckState = UpdateCheckState.NotChecked;
     private bool _isCheckingForUpdates;
@@ -81,6 +89,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public ObservableCollection<MatchItemViewModel> FilteredMatches { get; } = new();
+    public ObservableCollection<MatchItemViewModel> FollowedMatches { get; } = new();
+    public ObservableCollection<MatchItemViewModel> OtherMatches { get; } = new();
+    public ObservableCollection<CalendarDayItemViewModel> CalendarDays { get; } = new();
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
@@ -339,10 +350,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (SetProperty(ref _activeFilter, value))
             {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCalendarVisible)));
                 ApplyCurrentFilter();
             }
         }
     }
+
+    public bool IsCalendarVisible => _activeFilter is MatchFilterType.All or MatchFilterType.Following;
 
     public string ConnectionStatusText
     {
@@ -416,6 +430,65 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetProperty(ref _emptyStateMessage, value);
     }
 
+    public DateTime SelectedCalendarDate
+    {
+        get => _selectedCalendarDate;
+        set
+        {
+            if (_selectedCalendarDate.Date != value.Date)
+            {
+                _selectedCalendarDate = value.Date;
+                UpdateCalendarSelection();
+                ApplyCurrentFilter();
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateDisplay)));
+            }
+        }
+    }
+
+    public string SelectedCalendarDateDisplay => _selectedCalendarDate.Date == DateTime.Today
+        ? "Today"
+        : _selectedCalendarDate.Date == DateTime.Today.AddDays(-1)
+            ? "Yesterday"
+            : _selectedCalendarDate.Date == DateTime.Today.AddDays(1)
+                ? "Tomorrow"
+                : _selectedCalendarDate.ToString("dddd, MMM d");
+
+    public bool HasFollowedMatches
+    {
+        get => _hasFollowedMatches;
+        private set => SetProperty(ref _hasFollowedMatches, value);
+    }
+
+    public bool HasOtherMatches
+    {
+        get => _hasOtherMatches;
+        private set => SetProperty(ref _hasOtherMatches, value);
+    }
+
+    public bool IsOtherMatchesVisible
+    {
+        get => _isOtherMatchesVisible;
+        private set => SetProperty(ref _isOtherMatchesVisible, value);
+    }
+
+    public bool IsOtherMatchesExpanded
+    {
+        get => _isOtherMatchesExpanded;
+        set => SetProperty(ref _isOtherMatchesExpanded, value);
+    }
+
+    public string OtherMatchesHeader
+    {
+        get => _otherMatchesHeader;
+        private set => SetProperty(ref _otherMatchesHeader, value);
+    }
+
+    public void SelectCalendarDate(DateTime date)
+    {
+        SelectedCalendarDate = date.Date;
+    }
+
     public SearchCatalogViewModel SearchCatalog { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -455,6 +528,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _syncService.TrayUpdated += OnTrayUpdated;
         }
+
+        RebuildCalendarDays();
     }
 
     public string CopyDiagnosticsToClipboard()
@@ -816,10 +891,109 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ApplyCurrentFilter();
     }
 
+    public void RebuildCalendarDays()
+    {
+        var today = DateTime.Today;
+        var allMatches = _latestTrayData?.Matches ?? (IReadOnlyList<TrayMatchDto>)Array.Empty<TrayMatchDto>();
+
+        var existingMap = CalendarDays.ToDictionary(d => d.Date.Date);
+
+        var days = new List<CalendarDayItemViewModel>();
+        for (int offset = -1; offset <= 5; offset++)
+        {
+            var targetDate = today.AddDays(offset).Date;
+            bool isToday = offset == 0;
+            bool isSelected = targetDate == _selectedCalendarDate.Date;
+
+            int matchCount = allMatches.Count(m =>
+            {
+                var matchDate = m.KickoffTime.ToLocalTime().Date;
+                if (matchDate == targetDate) return true;
+                if (isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
+                return false;
+            });
+
+            if (existingMap.TryGetValue(targetDate, out var existing))
+            {
+                existing.IsSelected = isSelected;
+                existing.MatchCount = matchCount;
+                days.Add(existing);
+            }
+            else
+            {
+                days.Add(new CalendarDayItemViewModel(targetDate, isToday, isSelected, matchCount));
+            }
+        }
+
+        if (CalendarDays.Count != days.Count || !CalendarDays.SequenceEqual(days))
+        {
+            CalendarDays.Clear();
+            foreach (var d in days)
+            {
+                CalendarDays.Add(d);
+            }
+        }
+    }
+
+    private void UpdateCalendarSelection()
+    {
+        foreach (var day in CalendarDays)
+        {
+            day.IsSelected = day.Date.Date == _selectedCalendarDate.Date;
+        }
+    }
+
+    private static int GetCompetitionPopularityRank(string? compId, string? compName)
+    {
+        if (!string.IsNullOrWhiteSpace(compId))
+        {
+            if (CanonicalEntityIds.TryTranslateLegacyId(compId, out var canon))
+            {
+                if (canon == CanonicalEntityIds.ChampionsLeague) return 1;
+                if (canon == CanonicalEntityIds.WorldCup) return 2;
+                if (canon == CanonicalEntityIds.PremierLeague) return 3;
+                if (canon == CanonicalEntityIds.LaLiga) return 4;
+                if (canon == CanonicalEntityIds.AfricaCupOfNations) return 10;
+                if (canon == CanonicalEntityIds.EgyptianPremierLeague) return 12;
+            }
+
+            if (compId.Contains("135") || compId.Equals("comp_sa", StringComparison.OrdinalIgnoreCase)) return 5;
+            if (compId.Contains("78") || compId.Equals("comp_bl1", StringComparison.OrdinalIgnoreCase)) return 6;
+            if (compId.Contains("61") || compId.Equals("comp_fl1", StringComparison.OrdinalIgnoreCase)) return 7;
+            if (compId.Contains("3") || compId.Equals("comp_uel", StringComparison.OrdinalIgnoreCase)) return 8;
+            if (compId.Contains("848") || compId.Equals("comp_uecl", StringComparison.OrdinalIgnoreCase)) return 9;
+            if (compId.Contains("9") || compId.Equals("comp_ca", StringComparison.OrdinalIgnoreCase)) return 11;
+            if (compId.Contains("307") || compId.Equals("comp_spl", StringComparison.OrdinalIgnoreCase)) return 13;
+        }
+
+        if (!string.IsNullOrWhiteSpace(compName))
+        {
+            if (compName.Contains("Champions League", StringComparison.OrdinalIgnoreCase) || compName.Contains("UCL", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (compName.Contains("World Cup", StringComparison.OrdinalIgnoreCase)) return 2;
+            if (compName.Contains("Premier League", StringComparison.OrdinalIgnoreCase)) return 3;
+            if (compName.Contains("La Liga", StringComparison.OrdinalIgnoreCase) || compName.Contains("Primera División", StringComparison.OrdinalIgnoreCase)) return 4;
+            if (compName.Contains("Serie A", StringComparison.OrdinalIgnoreCase)) return 5;
+            if (compName.Contains("Bundesliga", StringComparison.OrdinalIgnoreCase)) return 6;
+            if (compName.Contains("Ligue 1", StringComparison.OrdinalIgnoreCase)) return 7;
+            if (compName.Contains("Europa League", StringComparison.OrdinalIgnoreCase)) return 8;
+            if (compName.Contains("Conference League", StringComparison.OrdinalIgnoreCase)) return 9;
+            if (compName.Contains("Africa Cup", StringComparison.OrdinalIgnoreCase) || compName.Contains("AFCON", StringComparison.OrdinalIgnoreCase)) return 10;
+            if (compName.Contains("Copa America", StringComparison.OrdinalIgnoreCase)) return 11;
+            if (compName.Contains("Egyptian", StringComparison.OrdinalIgnoreCase)) return 12;
+            if (compName.Contains("Saudi", StringComparison.OrdinalIgnoreCase)) return 13;
+            if (compName.Contains("Cup", StringComparison.OrdinalIgnoreCase) || compName.Contains("Copa", StringComparison.OrdinalIgnoreCase)) return 14;
+        }
+
+        return 100;
+    }
+
     private void ApplyCurrentFilter()
     {
         var prefs = _preferencesService.GetPreferences();
         var allMatches = _latestTrayData?.Matches ?? new List<TrayMatchDto>();
+
+        // Rebuild/update calendar days match counts
+        RebuildCalendarDays();
 
         // Prioritize and determine active taskbar match
         var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
@@ -838,53 +1012,198 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ActiveTickerText = allMatches.Count > 0 ? "No prioritized match for taskbar" : "No matches synchronized";
         }
 
-        // Evaluate relevance for all matches
-        var prioritizedList = FixtureRelevanceEngine.PrioritizeMatches(allMatches, prefs);
-        var viewModels = new List<MatchItemViewModel>();
+        // 1. Filter by Selected Calendar Date
+        var targetDate = _selectedCalendarDate.Date;
+        var dateFiltered = allMatches.Where(m =>
+        {
+            if (!IsCalendarVisible)
+            {
+                // On Live, Upcoming, and Finished tabs, calendar date filtering does not constrain the query
+                return true;
+            }
 
-        foreach (var match in prioritizedList)
+            var matchDate = m.KickoffTime.ToLocalTime().Date;
+            if (matchDate == targetDate) return true;
+            if (targetDate == DateTime.Today && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
+            return false;
+        }).ToList();
+
+        // 2. Evaluate relevance and build view models
+        var viewModels = new List<MatchItemViewModel>();
+        foreach (var match in dateFiltered)
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
             bool isActive = match.Id == ActiveMatchId;
             viewModels.Add(MatchItemViewModel.FromDto(match, relevance, isActive, prefs?.Use24HourFormat ?? true));
         }
 
-        // Apply selected filter
-        IEnumerable<MatchItemViewModel> filtered = _activeFilter switch
+        // 3. Partition into the 3 strict buckets:
+        //    Bucket 0: Matches from Followed Teams
+        //    Bucket 1: Matches from Followed Competitions (and not followed teams)
+        //    Bucket 2: Other matches
+        var bucket0 = viewModels.Where(m => m.FollowedByTeam).ToList();
+        var bucket1 = viewModels.Where(m => m.FollowedByCompetition && !m.FollowedByTeam).ToList();
+        var bucket2 = viewModels.Where(m => !m.FollowedByTeam && !m.FollowedByCompetition).ToList();
+
+        Func<MatchItemViewModel, int> statusRank = m =>
         {
-            MatchFilterType.Following => viewModels.Where(m => m.IsRelevant),
-            MatchFilterType.Live => viewModels.Where(m => m.IsLive),
-            MatchFilterType.Upcoming => viewModels.Where(m => m.IsPrematch),
-            MatchFilterType.Finished => viewModels.Where(m => m.IsFinished),
-            _ => viewModels
+            if (m.IsLive) return 0;
+            if (m.IsPrematch) return 1;
+            if (m.IsFinished) return 2;
+            return 3;
         };
 
-        var filteredList = filtered.ToList();
+        IOrderedEnumerable<MatchItemViewModel> SortFollowedBucket(IEnumerable<MatchItemViewModel> source)
+        {
+            if (_activeFilter == MatchFilterType.Live)
+            {
+                return source.OrderByDescending(m => m.ElapsedMinute)
+                             .ThenBy(m => m.KickoffTime)
+                             .ThenBy(m => m.Id, StringComparer.Ordinal);
+            }
+            if (_activeFilter == MatchFilterType.Upcoming)
+            {
+                return source.OrderBy(m => m.KickoffTime)
+                             .ThenBy(m => m.Id, StringComparer.Ordinal);
+            }
+            if (_activeFilter == MatchFilterType.Finished)
+            {
+                return source.OrderByDescending(m => m.KickoffTime)
+                             .ThenBy(m => m.Id, StringComparer.Ordinal);
+            }
+            // All or Following
+            return source.OrderBy(statusRank)
+                         .ThenByDescending(m => m.IsLive ? m.ElapsedMinute : 0)
+                         .ThenBy(m => m.KickoffTime)
+                         .ThenBy(m => m.Id, StringComparer.Ordinal);
+        }
 
-        // Update ObservableCollection in-place or replacement to minimize UI thrashing
+        IOrderedEnumerable<MatchItemViewModel> SortOtherBucket(IEnumerable<MatchItemViewModel> source)
+        {
+            if (_activeFilter == MatchFilterType.Live)
+            {
+                return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
+                             .ThenByDescending(m => m.ElapsedMinute)
+                             .ThenBy(m => m.KickoffTime)
+                             .ThenBy(m => m.Id, StringComparer.Ordinal);
+            }
+            if (_activeFilter == MatchFilterType.Upcoming)
+            {
+                return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
+                             .ThenBy(m => m.KickoffTime)
+                             .ThenBy(m => m.Id, StringComparer.Ordinal);
+            }
+            if (_activeFilter == MatchFilterType.Finished)
+            {
+                return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
+                             .ThenByDescending(m => m.KickoffTime)
+                             .ThenBy(m => m.Id, StringComparer.Ordinal);
+            }
+            // All Tab: Other matches sorted by popularity
+            return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
+                         .ThenBy(statusRank)
+                         .ThenByDescending(m => m.IsLive ? m.ElapsedMinute : 0)
+                         .ThenBy(m => m.KickoffTime)
+                         .ThenBy(m => m.Id, StringComparer.Ordinal);
+        }
+
+        IEnumerable<MatchItemViewModel> FilterByTab(IEnumerable<MatchItemViewModel> bucket)
+        {
+            return _activeFilter switch
+            {
+                MatchFilterType.Live => bucket.Where(m => m.IsLive),
+                MatchFilterType.Upcoming => bucket.Where(m => m.IsPrematch),
+                MatchFilterType.Finished => bucket.Where(m => m.IsFinished),
+                _ => bucket
+            };
+        }
+
+        var sortedBucket0 = SortFollowedBucket(FilterByTab(bucket0)).ToList();
+        var sortedBucket1 = SortFollowedBucket(FilterByTab(bucket1)).ToList();
+        var sortedBucket2 = _activeFilter == MatchFilterType.Following
+            ? new List<MatchItemViewModel>()
+            : SortOtherBucket(FilterByTab(bucket2)).ToList();
+
+        var followedList = sortedBucket0.Concat(sortedBucket1).ToList();
+        var otherList = sortedBucket2;
+
+        FollowedMatches.Clear();
+        foreach (var item in followedList)
+        {
+            FollowedMatches.Add(item);
+        }
+
+        OtherMatches.Clear();
+        foreach (var item in otherList)
+        {
+            OtherMatches.Add(item);
+        }
+
+        var completeFilteredList = followedList.Concat(otherList).ToList();
         FilteredMatches.Clear();
-        foreach (var item in filteredList)
+        foreach (var item in completeFilteredList)
         {
             FilteredMatches.Add(item);
+        }
+
+        HasFollowedMatches = FollowedMatches.Count > 0;
+        HasOtherMatches = OtherMatches.Count > 0;
+        IsOtherMatchesVisible = HasOtherMatches && _activeFilter != MatchFilterType.Following;
+        OtherMatchesHeader = $"Other Matches ({OtherMatches.Count})";
+
+        bool filterChanged = _lastFilterApplied != _activeFilter;
+        bool dateChanged = _lastDateApplied != _selectedCalendarDate.Date;
+        if (filterChanged || dateChanged)
+        {
+            _lastFilterApplied = _activeFilter;
+            _lastDateApplied = _selectedCalendarDate.Date;
+
+            if (_activeFilter == MatchFilterType.Following)
+            {
+                IsOtherMatchesExpanded = false;
+            }
+            else if (_activeFilter == MatchFilterType.All)
+            {
+                IsOtherMatchesExpanded = true;
+            }
+            else
+            {
+                IsOtherMatchesExpanded = !HasFollowedMatches;
+            }
         }
 
         HasMatches = FilteredMatches.Count > 0;
         IsEmpty = !HasMatches;
 
-        // Update empty state messages
         if (IsEmpty)
         {
-            if (allMatches.Count == 0)
+            if (dateFiltered.Count == 0)
             {
-                if (IsOffline)
+                string dateLabel = _selectedCalendarDate.Date == DateTime.Today
+                    ? "today"
+                    : _selectedCalendarDate.Date == DateTime.Today.AddDays(-1)
+                        ? "yesterday"
+                        : _selectedCalendarDate.Date == DateTime.Today.AddDays(1)
+                            ? "tomorrow"
+                            : $"on {_selectedCalendarDate:dddd, MMM d}";
+
+                if (allMatches.Count == 0)
                 {
-                    EmptyStateTitle = "Offline — No Cached Matches";
-                    EmptyStateMessage = "FootballTray is offline and no cached fixture data is stored locally. Connect to backend to sync matches.";
+                    if (IsOffline)
+                    {
+                        EmptyStateTitle = "Offline — No Cached Matches";
+                        EmptyStateMessage = "FootballTray is offline and no cached fixture data is stored locally. Connect to backend to sync matches.";
+                    }
+                    else
+                    {
+                        EmptyStateTitle = "No Matches Synchronized";
+                        EmptyStateMessage = "There are no matches currently scheduled or live across target competitions.";
+                    }
                 }
                 else
                 {
-                    EmptyStateTitle = "No Matches Synchronized";
-                    EmptyStateMessage = "There are no matches currently scheduled or live across target competitions.";
+                    EmptyStateTitle = "No Matches Scheduled";
+                    EmptyStateMessage = $"There are no fixtures synchronized {dateLabel}. Select another date from the calendar or refresh.";
                 }
             }
             else if (_activeFilter == MatchFilterType.Following)

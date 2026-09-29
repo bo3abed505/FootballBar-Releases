@@ -139,7 +139,16 @@ public sealed class DaemonLifecycleManager : IDisposable
             return true;
         }
 
-        // 2. Locate backend directory
+        // 2. Pre-launch check: If port is occupied by an unresponsive/zombie process, terminate it to prevent EADDRINUSE
+        int targetPort = 4000;
+        if (Uri.TryCreate(_baseUrl, UriKind.Absolute, out var baseUri) && baseUri.Port > 0)
+        {
+            targetPort = baseUri.Port;
+        }
+
+        FreePortIfOccupied(targetPort);
+
+        // 3. Locate backend directory
         string? backendDir = ResolveBackendDirectory();
         if (string.IsNullOrWhiteSpace(backendDir))
         {
@@ -353,5 +362,90 @@ public sealed class DaemonLifecycleManager : IDisposable
         {
             _httpClient.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Checks if the target port is held by an unresponsive process and terminates it
+    /// so the new daemon can bind without encountering EADDRINUSE.
+    /// </summary>
+    public static void FreePortIfOccupied(int port)
+    {
+        try
+        {
+            var pids = FindPidsListeningOnPort(port);
+            foreach (var pid in pids)
+            {
+                if (pid > 0 && pid != Process.GetCurrentProcess().Id)
+                {
+                    AppLogger.Warn("Daemon", "OrphanedProcessDetected", $"Port {port} is occupied by unresponsive process (PID {pid}). Terminating orphan process...");
+                    try
+                    {
+                        using var proc = Process.GetProcessById(pid);
+                        proc.Kill(entireProcessTree: true);
+                        proc.WaitForExit(2000);
+                        AppLogger.Info("Daemon", "OrphanTerminated", $"Successfully terminated orphan process PID {pid} on port {port}.");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Warn("Daemon", "KillOrphanFailed", $"Could not kill process PID {pid}: {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("Daemon", "PortCheckFailed", $"Error checking port {port}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Locates the PIDs of any process currently listening on the specified TCP port.
+    /// </summary>
+    public static System.Collections.Generic.List<int> FindPidsListeningOnPort(int port)
+    {
+        var result = new System.Collections.Generic.List<int>();
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "netstat.exe",
+                Arguments = "-ano -p tcp",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            using var proc = Process.Start(psi);
+            if (proc == null) return result;
+
+            string output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(1500);
+
+            string targetPortStr = $":{port}";
+            using var reader = new StringReader(output);
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                var trimmed = line.Trim();
+                if (!trimmed.StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!trimmed.Contains("LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var parts = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 5 && parts[1].EndsWith(targetPortStr, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(parts[parts.Length - 1], out int pid) && !result.Contains(pid))
+                    {
+                        result.Add(pid);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fallback silent
+        }
+
+        return result;
     }
 }

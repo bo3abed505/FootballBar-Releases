@@ -70,7 +70,9 @@ public sealed partial class MainPage : Page
     {
         if (_viewModel == null) return;
 
-        MatchItemsList.ItemsSource = _viewModel.FilteredMatches;
+        FollowedMatchesList.ItemsSource = _viewModel.FollowedMatches;
+        OtherMatchesList.ItemsSource = _viewModel.OtherMatches;
+        CalendarDaysList.ItemsSource = _viewModel.CalendarDays;
         TeamsList.ItemsSource = _viewModel.SearchCatalog.FollowedTeams;
         CompetitionsList.ItemsSource = _viewModel.SearchCatalog.FollowedCompetitions;
         TeamSearchResultsList.ItemsSource = _viewModel.SearchCatalog.TeamSearchResults;
@@ -145,6 +147,20 @@ public sealed partial class MainPage : Page
         else
         {
             EmptyStateBorder.Visibility = Visibility.Collapsed;
+        }
+
+        // Collapsible Other Matches Expander
+        if (OtherMatchesExpander != null)
+        {
+            OtherMatchesExpander.Header = _viewModel.OtherMatchesHeader;
+            OtherMatchesExpander.Visibility = _viewModel.IsOtherMatchesVisible ? Visibility.Visible : Visibility.Collapsed;
+            OtherMatchesExpander.IsExpanded = _viewModel.IsOtherMatchesExpanded;
+        }
+
+        // 7-Day Calendar Navigation Bar visibility
+        if (CalendarScrollViewer != null)
+        {
+            CalendarScrollViewer.Visibility = _viewModel.IsCalendarVisible ? Visibility.Visible : Visibility.Collapsed;
         }
 
         // Status / Error InfoBar
@@ -382,6 +398,14 @@ public sealed partial class MainPage : Page
     private void OnFilterLiveClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Live);
     private void OnFilterUpcomingClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Upcoming);
     private void OnFilterFinishedClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Finished);
+
+    private void OnCalendarDayClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CalendarDayItemViewModel day && _viewModel != null)
+        {
+            _viewModel.SelectCalendarDate(day.Date);
+        }
+    }
 
     private void OnUnpinMatchClicked(object sender, RoutedEventArgs e)
     {
