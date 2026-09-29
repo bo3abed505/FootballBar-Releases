@@ -27,7 +27,7 @@ import { createProvider } from '../acquisition/provider-factory.js';
 import { SyncService } from '../acquisition/sync.service.js';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import { AcquisitionScheduler } from '../acquisition/acquisition-scheduler.js';
-import { getTargetCompetitionIds } from '../acquisition/competition-config.js';
+import { DaemonPreferencesService } from '../acquisition/daemon-preferences.service.js';
 
 export interface RuntimeLogger {
   info(message: string, meta?: Record<string, unknown>): void;
@@ -52,6 +52,7 @@ export class AppRuntime {
   public readonly provider: FootballProvider;
   public readonly syncService: SyncService;
   public readonly fixturesRepository: FixturesRepository;
+  public readonly preferencesService: DaemonPreferencesService;
   public readonly scheduler: AcquisitionScheduler | null;
   public readonly port: number;
   public readonly host: string;
@@ -80,23 +81,28 @@ export class AppRuntime {
     // 2. Initialize Repositories and Services
     this.fixturesRepository = options.fixturesRepository ?? new FixturesRepository();
     this.syncService = new SyncService(this.provider);
+    this.preferencesService = new DaemonPreferencesService();
 
     // 3. Construct Scheduler if enabled
     const enableScheduler = options.enableScheduler ?? true;
     if (enableScheduler) {
-      const targetCompetitionIds = getTargetCompetitionIds();
+      const initialCompetitionIds = this.preferencesService.getEffectiveCompetitionNumericIds();
       this.scheduler =
         options.scheduler ??
         new AcquisitionScheduler({
           syncService: this.syncService,
           fixturesRepository: this.fixturesRepository,
-          targetCompetitionIds: targetCompetitionIds.length > 0 ? targetCompetitionIds : undefined,
+          targetCompetitionIds: initialCompetitionIds.length > 0 ? initialCompetitionIds : undefined,
           providerName: this.provider.providerName,
         });
+      this.preferencesService.bindScheduler(this.scheduler);
       (this.app as any).scheduler = this.scheduler;
     } else {
       this.scheduler = null;
     }
+
+    (this.app as any).syncService = this.syncService;
+    (this.app as any).preferencesService = this.preferencesService;
   }
 
   /**

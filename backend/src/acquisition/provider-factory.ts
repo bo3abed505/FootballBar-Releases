@@ -55,8 +55,11 @@ export interface ProviderFactoryOptions {
  * Never silently falls back from api_football to mock.
  */
 export function createProvider(options?: ProviderFactoryOptions): FootballProvider {
+  const hasActiveProviderOption = options && 'activeProvider' in options;
   const rawProvider = (
-    options?.activeProvider ?? process.env.ACTIVE_PROVIDER ?? 'mock'
+    hasActiveProviderOption
+      ? options.activeProvider ?? 'mock'
+      : process.env.ACTIVE_PROVIDER ?? 'mock'
   ).trim().toLowerCase();
 
   switch (rawProvider) {
@@ -67,8 +70,10 @@ export function createProvider(options?: ProviderFactoryOptions): FootballProvid
       // --- Live-request safety guard ---
       // Must check BEFORE constructing ApiFootballProvider so zero HTTP I/O
       // can occur if the guard fails.
-      const allowLive =
-        options?.allowLiveRequests ?? process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'false';
+      const hasAllowLiveOption = options && 'allowLiveRequests' in options;
+      const allowLive = hasAllowLiveOption
+        ? options.allowLiveRequests ?? 'false'
+        : process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'false';
 
       if (allowLive.trim().toLowerCase() !== 'true') {
         throw new ProviderConfigError(
@@ -79,11 +84,11 @@ export function createProvider(options?: ProviderFactoryOptions): FootballProvid
       }
 
       // Check API key presence (never log or expose the key value).
-      const keyIsPresent =
-        options?.apiKeyPresent ?? (
-          typeof process.env.API_FOOTBALL_KEY === 'string' &&
-          process.env.API_FOOTBALL_KEY.trim().length > 0
-        );
+      const hasApiKeyPresentOption = options && 'apiKeyPresent' in options;
+      const keyIsPresent = hasApiKeyPresentOption
+        ? options.apiKeyPresent ?? false
+        : typeof process.env.API_FOOTBALL_KEY === 'string' &&
+          process.env.API_FOOTBALL_KEY.trim().length > 0;
 
       if (!keyIsPresent) {
         throw new ProviderConfigError(

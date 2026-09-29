@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -101,6 +103,9 @@ public class SyncService : ISyncService
     {
         // Immediate UI refresh when following or notification preferences are updated
         RefreshTickerOnPreferenceChange();
+
+        // Push updated followed competitions and teams to the daemon
+        _ = PushPreferencesToDaemonAsync(preferences, _cts?.Token ?? CancellationToken.None);
     }
 
     /// <summary>
@@ -115,7 +120,8 @@ public class SyncService : ISyncService
         // 0. Initialize preferences and notification deduplication history
         if (_preferencesService != null)
         {
-            await _preferencesService.LoadAsync(_cts.Token);
+            var prefs = await _preferencesService.LoadAsync(_cts.Token);
+            _ = PushPreferencesToDaemonAsync(prefs, _cts.Token);
         }
 
         if (_notificationService != null)
@@ -353,6 +359,21 @@ public class SyncService : ISyncService
             DataFreshnessState.Empty => TickerConnectionState.NoCacheOffline,
             _ => TickerConnectionState.NoCacheOffline,
         };
+
+    private async Task PushPreferencesToDaemonAsync(UserPreferences preferences, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var compIds = preferences.FollowedCompetitions?.Select(c => c.Id).Where(id => !string.IsNullOrWhiteSpace(id)) ?? Enumerable.Empty<string>();
+            var teamIds = preferences.FollowedTeams?.Select(t => t.Id).Where(id => !string.IsNullOrWhiteSpace(id)) ?? Enumerable.Empty<string>();
+
+            await _apiClient.SyncPreferencesAsync(compIds, teamIds, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SyncService] Failed to push preferences to daemon: {ex.Message}");
+        }
+    }
 
     public void Stop()
     {

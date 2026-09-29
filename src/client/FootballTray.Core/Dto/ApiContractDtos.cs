@@ -495,3 +495,12 @@ public class V2CatalogCompetitionDto
     public string? LogoUrl { get; set; }
 }
 
+public class SyncPreferencesRequestDto
+{
+    [JsonPropertyName("competitionIds")]
+    public List<string> CompetitionIds { get; set; } = new();
+
+    [JsonPropertyName("teamIds")]
+    public List<string> TeamIds { get; set; } = new();
+}
+

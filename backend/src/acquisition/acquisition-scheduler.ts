@@ -176,7 +176,7 @@ export class AcquisitionScheduler {
   private readonly getBudget: (provider?: string, now?: Date) => Promise<BudgetContext>;
   private readonly now: () => Date;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
-  private readonly targetCompetitionIds?: number[];
+  private targetCompetitionIds?: number[];
   private readonly providerName: string;
   private readonly onCycleComplete?: (plan: SyncPlan, summary: SyncSummary | null) => void;
   private readonly onErrorCallback?: (error: Error) => void;
@@ -234,6 +234,15 @@ export class AcquisitionScheduler {
       warn: (msg, meta) => console.warn(`[SCHEDULER:WARN] ${msg}`, meta ? JSON.stringify(meta) : ''),
       error: (msg, meta) => console.error(`[SCHEDULER:ERROR] ${msg}`, meta ? JSON.stringify(meta) : ''),
     };
+  }
+
+  public setTargetCompetitionIds(ids?: number[]): void {
+    this.targetCompetitionIds = ids;
+    this.logger.info(`Updated scheduler target competition IDs: [${ids ? ids.join(', ') : 'ALL'}]`);
+  }
+
+  public getTargetCompetitionIds(): number[] | undefined {
+    return this.targetCompetitionIds;
   }
 
   /**

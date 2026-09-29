@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -289,6 +290,38 @@ public class FootballApiClient : IDisposable
         catch (Exception ex)
         {
             return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Error($"Network error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Pushes the user's followed competitions and teams to the daemon via POST /api/v2/preferences.
+    /// </summary>
+    public async Task<bool> SyncPreferencesAsync(
+        IEnumerable<string> competitionIds,
+        IEnumerable<string> teamIds,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var payload = new SyncPreferencesRequestDto
+            {
+                CompetitionIds = competitionIds.ToList(),
+                TeamIds = teamIds.ToList(),
+            };
+
+            var json = JsonSerializer.Serialize(payload, FootballJsonSerializerContext.Default.SyncPreferencesRequestDto);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await _httpClient.PostAsync("/api/v2/preferences", content, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[FootballApiClient] Failed to sync preferences: {ex.Message}");
+            return false;
         }
     }
 

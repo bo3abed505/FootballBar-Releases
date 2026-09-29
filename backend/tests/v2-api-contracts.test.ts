@@ -346,4 +346,38 @@ describe('Checkpoint 4 — Delivery API v2 Canonical Contract & Per-Fixture Fres
     expect(body.error).toBeDefined();
     expect(body.error.code).toBe('MATCH_NOT_FOUND');
   });
+
+  // =========================================================================
+  // Test 8: GET and POST /api/v2/preferences
+  // =========================================================================
+  it('8. GET and POST /api/v2/preferences dynamically updates followed competitions and teams', async () => {
+    const { DaemonPreferencesService } = await import('../src/acquisition/daemon-preferences.service.js');
+    (app as any).preferencesService = new DaemonPreferencesService();
+
+    // 1. Initial GET
+    const resGet = await app.inject({
+      method: 'GET',
+      url: '/api/v2/preferences',
+    });
+    expect(resGet.statusCode).toBe(200);
+    const bodyGet = JSON.parse(resGet.body);
+    expect(bodyGet.schemaVersion).toBe('2.0');
+    expect(bodyGet.data).toBeDefined();
+    expect(Array.isArray(bodyGet.data.followedCompetitions)).toBe(true);
+
+    // 2. POST dynamic preferences
+    const resPost = await app.inject({
+      method: 'POST',
+      url: '/api/v2/preferences',
+      payload: {
+        competitionIds: ['39', '140', 'comp_233'],
+        teamIds: ['33', 'team_40'],
+      },
+    });
+    expect(resPost.statusCode).toBe(200);
+    const bodyPost = JSON.parse(resPost.body);
+    expect(bodyPost.schemaVersion).toBe('2.0');
+    expect(bodyPost.data.effectiveCompetitionNumericIds).toEqual(expect.arrayContaining([39, 140, 233]));
+    expect(bodyPost.data.effectiveTeamNumericIds).toEqual(expect.arrayContaining([33, 40]));
+  });
 });

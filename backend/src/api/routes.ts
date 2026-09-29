@@ -260,12 +260,47 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     }
 
     try {
-      const fixture = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
+      let fixture = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
 
       if (!fixture) {
         return reply.status(404).send(
           createErrorEnvelope('MATCH_NOT_FOUND', `No match found with ID '${id}'.`, undefined, { schemaVersion: '2.0' })
         );
+      }
+
+      // --- Tier 3: Cache-Aside On-Demand Resolver ---
+      // Check if lineups or statistics are absent and match is approaching (<45m), live, or finished
+      const syncService = (fastify as any).syncService;
+      if (syncService) {
+        const now = new Date();
+        const kickoff = new Date(fixture.kickoffTime);
+        const minutesToKickoff = (kickoff.getTime() - now.getTime()) / (60 * 1000);
+        const stateUpper = (fixture.state || '').toUpperCase().trim();
+        const isLive = ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY'].includes(stateUpper);
+        const isFinished = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH'].includes(stateUpper);
+        const isApproaching = minutesToKickoff <= 45 && !isFinished;
+
+        const hasLineups = fixture.lineups && fixture.lineups.length > 0;
+        const hasStatistics = fixture.statistics && fixture.statistics.length > 0;
+        const lastPolled = fixture.lastPolledAt ? new Date(fixture.lastPolledAt).getTime() : 0;
+        const secondsSinceLastPoll = (now.getTime() - lastPolled) / 1000;
+
+        const needsLineups = (isApproaching || isLive || isFinished) && !hasLineups;
+        const needsStatistics = (isLive || isFinished) && !hasStatistics;
+        const isLiveRefreshDue = isLive && secondsSinceLastPoll >= 180;
+
+        if ((needsLineups || needsStatistics || isLiveRefreshDue) && secondsSinceLastPoll >= 30) {
+          try {
+            await syncService.syncFixtureDetails(fixture.id);
+            // Reload populated fixture from PostgreSQL
+            const reloaded = await fixturesRepo.getByCanonicalOrLegacyId(fixture.id);
+            if (reloaded) {
+              fixture = reloaded;
+            }
+          } catch (err: any) {
+            request.log.warn(`On-demand fixture sync failed for ${fixture.id}: ${err?.message}`);
+          }
+        }
       }
 
       const formatted = formatV2MatchDetail(fixture);
@@ -313,6 +348,42 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       request.log.error(err, 'Failed to search competitions catalog');
       return reply.status(500).send(
         createErrorEnvelope('INTERNAL_ERROR', 'Failed to search competitions catalog', { details: err?.message }, { schemaVersion: '2.0' })
+      );
+    }
+  });
+
+  // ----------------------------------------------------
+  // Delivery API v2: User Preferences Sync
+  // ----------------------------------------------------
+  fastify.get('/api/v2/preferences', async (request, reply) => {
+    const prefService = (fastify as any).preferencesService;
+    if (!prefService) {
+      return reply.status(503).send(createErrorEnvelope('SERVICE_UNAVAILABLE', 'Preferences service is unavailable.'));
+    }
+    const data = prefService.getPreferences();
+    return reply.send(createResponseEnvelope(data, { schemaVersion: '2.0', version: 2 }));
+  });
+
+  fastify.post<{
+    Body: {
+      competitionIds?: Array<string | number>;
+      followedCompetitions?: Array<{ id: string; name?: string; code?: string }>;
+      teamIds?: Array<string | number>;
+      followedTeams?: Array<{ id: string; name?: string; code?: string }>;
+    };
+  }>('/api/v2/preferences', async (request, reply) => {
+    const prefService = (fastify as any).preferencesService;
+    if (!prefService) {
+      return reply.status(503).send(createErrorEnvelope('SERVICE_UNAVAILABLE', 'Preferences service is unavailable.'));
+    }
+
+    try {
+      const updated = await prefService.updatePreferences(request.body || {});
+      return reply.status(200).send(createResponseEnvelope(updated, { schemaVersion: '2.0', version: 2 }));
+    } catch (err: any) {
+      request.log.error(err, 'Failed to update daemon preferences');
+      return reply.status(500).send(
+        createErrorEnvelope('INTERNAL_ERROR', 'Failed to update preferences', { details: err?.message }, { schemaVersion: '2.0' })
       );
     }
   });

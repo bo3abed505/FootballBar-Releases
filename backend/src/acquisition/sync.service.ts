@@ -1,6 +1,6 @@
 import { inArray, eq, and, gte, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import { FootballProvider, FixtureFilter, ProviderFixtureDetail } from '../providers/football-provider.js';
+import { FootballProvider, FixtureFilter, ProviderFixtureDetail, ProviderLineup, ProviderTeamStatistics } from '../providers/football-provider.js';
 import { AcquisitionService, NormalizedAcquisitionBatch } from './acquisition.service.js';
 import { normalizeEvent } from '../normalization/event.js';
 import { AcquisitionPolicyEngine } from './acquisition-policy.js';
@@ -449,6 +449,13 @@ export class SyncService {
                   }
                 }
 
+                if (details.lineups && details.lineups.length > 0) {
+                  await this.upsertLineups(localFix.id, details.lineups);
+                }
+                if (details.statistics && details.statistics.length > 0) {
+                  await this.upsertFixtureStatistics(localFix.id, details.statistics);
+                }
+
                 summary.fixturesUpdated++;
                 summary.hasChanges = true;
                 continue;
@@ -693,6 +700,13 @@ export class SyncService {
                 summary.hasChanges = true;
               }
             }
+
+            if (details.lineups && details.lineups.length > 0) {
+              await this.upsertLineups(fix.id, details.lineups);
+            }
+            if (details.statistics && details.statistics.length > 0) {
+              await this.upsertFixtureStatistics(fix.id, details.statistics);
+            }
           } else {
             // Missing from batch response: touch lastPolledAt and log warning so it doesn't loop forever
             Logger.warn('SyncService', 'MissingBatchFixture', `Fixture ${fix.id} candidate for finalization was not returned in provider batch details response`, cycleId);
@@ -778,6 +792,207 @@ export class SyncService {
       default:
         return null;
     }
+  }
+
+  /**
+   * Persists match lineups and lineup players into PostgreSQL.
+   */
+  async upsertLineups(fixtureId: string, lineupsList: ProviderLineup[]): Promise<void> {
+    if (!lineupsList || lineupsList.length === 0) return;
+
+    for (const l of lineupsList) {
+      if (!l.teamId) continue;
+      const lineupId = `lineup_${fixtureId}_${l.teamId}`;
+
+      await db.transaction(async (tx) => {
+        // Ensure referenced team exists to satisfy foreign key constraint
+        const teamExists = await tx.query.teams.findFirst({
+          where: eq(schema.teams.id, l.teamId),
+        });
+        if (!teamExists) {
+          await tx
+            .insert(schema.teams)
+            .values({
+              id: l.teamId,
+              canonicalId: generateCanonicalId('team'),
+              name: `Team ${l.teamId}`,
+              shortName: l.teamId.slice(0, 4).toUpperCase(),
+            })
+            .onConflictDoNothing();
+        }
+
+        // Upsert lineup header
+        await tx
+          .insert(schema.lineups)
+          .values({
+            id: lineupId,
+            fixtureId,
+            teamId: l.teamId,
+            formation: l.formation ?? null,
+            coachName: l.coachName ?? null,
+            coachId: l.coachId ?? null,
+          })
+          .onConflictDoUpdate({
+            target: [schema.lineups.fixtureId, schema.lineups.teamId],
+            set: {
+              formation: l.formation ?? null,
+              coachName: l.coachName ?? null,
+              coachId: l.coachId ?? null,
+            },
+          });
+
+        // Refresh player rosters cleanly
+        await tx.delete(schema.lineupPlayers).where(eq(schema.lineupPlayers.lineupId, lineupId));
+
+        const allPlayers = [
+          ...(l.startXi || []).map((p) => ({ ...p, isStarter: true })),
+          ...(l.substitutes || []).map((p) => ({ ...p, isStarter: false })),
+        ];
+
+        if (allPlayers.length > 0) {
+          const playerRows = allPlayers.map((p, idx) => ({
+            id: `lp_${lineupId}_${p.id}_${idx}`,
+            lineupId,
+            playerId: p.id,
+            name: p.name,
+            number: p.number ?? null,
+            position: p.position ?? null,
+            grid: p.grid ?? null,
+            isStarter: p.isStarter,
+          }));
+
+          await tx.insert(schema.lineupPlayers).values(playerRows);
+        }
+      });
+    }
+  }
+
+  /**
+   * Persists match statistics into PostgreSQL.
+   */
+  async upsertFixtureStatistics(fixtureId: string, statsList: ProviderTeamStatistics[]): Promise<void> {
+    if (!statsList || statsList.length === 0) return;
+
+    const now = new Date();
+    for (const s of statsList) {
+      if (!s.teamId) continue;
+      const statId = `stat_${fixtureId}_${s.teamId}`;
+
+      await db.transaction(async (tx) => {
+        const teamExists = await tx.query.teams.findFirst({
+          where: eq(schema.teams.id, s.teamId),
+        });
+        if (!teamExists) {
+          await tx
+            .insert(schema.teams)
+            .values({
+              id: s.teamId,
+              canonicalId: generateCanonicalId('team'),
+              name: `Team ${s.teamId}`,
+              shortName: s.teamId.slice(0, 4).toUpperCase(),
+            })
+            .onConflictDoNothing();
+        }
+
+        await tx
+          .insert(schema.fixtureStatistics)
+          .values({
+            id: statId,
+            fixtureId,
+            teamId: s.teamId,
+            shotsOnGoal: s.shotsOnGoal ?? null,
+            shotsOffGoal: s.shotsOffGoal ?? null,
+            totalShots: s.totalShots ?? null,
+            possessionPercent: s.possessionPercent ?? null,
+            fouls: s.fouls ?? null,
+            cornerKicks: s.cornerKicks ?? null,
+            offsides: s.offsides ?? null,
+            yellowCards: s.yellowCards ?? null,
+            redCards: s.redCards ?? null,
+            goalkeeperSaves: s.goalkeeperSaves ?? null,
+            totalPasses: s.totalPasses ?? null,
+            passesAccurate: s.passesAccurate ?? null,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [schema.fixtureStatistics.fixtureId, schema.fixtureStatistics.teamId],
+            set: {
+              shotsOnGoal: s.shotsOnGoal ?? null,
+              shotsOffGoal: s.shotsOffGoal ?? null,
+              totalShots: s.totalShots ?? null,
+              possessionPercent: s.possessionPercent ?? null,
+              fouls: s.fouls ?? null,
+              cornerKicks: s.cornerKicks ?? null,
+              offsides: s.offsides ?? null,
+              yellowCards: s.yellowCards ?? null,
+              redCards: s.redCards ?? null,
+              goalkeeperSaves: s.goalkeeperSaves ?? null,
+              totalPasses: s.totalPasses ?? null,
+              passesAccurate: s.passesAccurate ?? null,
+              updatedAt: now,
+            },
+          });
+      });
+    }
+  }
+
+  /**
+   * Fetches bundled deep match details for a single fixture from the provider
+   * and persists scores, events, lineups, and statistics into PostgreSQL.
+   */
+  async syncFixtureDetails(fixtureId: string, cycleId?: string): Promise<boolean> {
+    const details = await this.provider.getFixtureDetails(fixtureId, cycleId);
+    if (!details) return false;
+
+    const now = new Date();
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.fixtures)
+        .set({
+          state: details.state,
+          elapsedMinute: details.elapsedMinute,
+          extraMinute: details.extraMinute,
+          homeScore: details.score.home,
+          awayScore: details.score.away,
+          homeScoreHt: details.score.homeHt,
+          awayScoreHt: details.score.awayHt,
+          homeScoreEt: details.score.homeEt,
+          awayScoreEt: details.score.awayEt,
+          homeScorePen: details.score.homePen,
+          awayScorePen: details.score.awayPen,
+          venue: details.venue,
+          referee: details.referee,
+          lastPolledAt: now,
+          updatedAt: now,
+        })
+        .where(eq(schema.fixtures.id, fixtureId));
+
+      if (details.events && details.events.length > 0) {
+        const incomingUids = details.events.map((e) => e.eventUid);
+        const existingEvents = await tx
+          .select({ eventUid: schema.events.eventUid })
+          .from(schema.events)
+          .where(inArray(schema.events.eventUid, incomingUids));
+
+        const existingUidSet = new Set(existingEvents.map((e) => e.eventUid));
+        const newEvents = details.events
+          .filter((e) => !existingUidSet.has(e.eventUid))
+          .map(normalizeEvent);
+
+        if (newEvents.length > 0) {
+          await tx.insert(schema.events).values(newEvents).onConflictDoNothing();
+        }
+      }
+    });
+
+    if (details.lineups && details.lineups.length > 0) {
+      await this.upsertLineups(fixtureId, details.lineups);
+    }
+    if (details.statistics && details.statistics.length > 0) {
+      await this.upsertFixtureStatistics(fixtureId, details.statistics);
+    }
+
+    return true;
   }
 }
 
