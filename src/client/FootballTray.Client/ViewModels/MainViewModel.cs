@@ -99,6 +99,43 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string DiagnosticsTaskbarText => _diagnosticsService.GetCurrentSnapshot().TaskbarHostStatus;
     public string DiagnosticsReportText => _diagnosticsService.GetSanitizedReportText();
 
+    public bool Use24HourFormat
+    {
+        get => _preferencesService.Current.Use24HourFormat;
+        set
+        {
+            if (_preferencesService.Current.Use24HourFormat != value)
+            {
+                _ = SetUse24HourFormatAsync(value);
+            }
+        }
+    }
+
+    public async Task SetUse24HourFormatAsync(bool use24Hour)
+    {
+        await _preferencesService.SetUse24HourFormatAsync(use24Hour);
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Use24HourFormat)));
+        ApplyCurrentFilter();
+    }
+
+    public bool EnableTickerCarousel
+    {
+        get => _preferencesService.Current.EnableTickerCarousel;
+        set
+        {
+            if (_preferencesService.Current.EnableTickerCarousel != value)
+            {
+                _ = SetEnableTickerCarouselAsync(value);
+            }
+        }
+    }
+
+    public async Task SetEnableTickerCarouselAsync(bool enableCarousel)
+    {
+        await _preferencesService.SetEnableTickerCarouselAsync(enableCarousel);
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EnableTickerCarousel)));
+    }
+
     public UpdateCheckState UpdateCheckState
     {
         get => _updateCheckState;
@@ -809,7 +846,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
             bool isActive = match.Id == ActiveMatchId;
-            viewModels.Add(MatchItemViewModel.FromDto(match, relevance, isActive));
+            viewModels.Add(MatchItemViewModel.FromDto(match, relevance, isActive, prefs?.Use24HourFormat ?? true));
         }
 
         // Apply selected filter

@@ -722,6 +722,46 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- ======================================================== -->
+                        <!-- SECTION E: TASKBAR & DISPLAY SETTINGS                    -->
+                        <!-- ======================================================== -->
+                        <Border
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="12">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock
+                                            Text="Taskbar &amp; Display"
+                                            FontWeight="SemiBold"
+                                            FontSize="14" />
+                                        <TextBlock
+                                            Text="Configure carousel rotation and global time display format."
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Ticker Carousel Toggle -->
+                                <ToggleSwitch
+                                    x:Name="TickerCarouselSwitch"
+                                    Header="Auto-Rotate Ticker (Carousel Mode)"
+                                    IsOn="True"
+                                    Toggled="OnTickerCarouselToggled" />
+
+                                <!-- 24-Hour Time Format Toggle -->
+                                <ToggleSwitch
+                                    x:Name="TimeFormat24HourSwitch"
+                                    Header="24-Hour Time Format (e.g. 18:30 vs 6:30 PM)"
+                                    IsOn="True"
+                                    Toggled="OnTimeFormat24HourToggled" />
+                            </StackPanel>
+                        </Border>
+
                         <!-- Software Updates Card -->
                         <Border
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

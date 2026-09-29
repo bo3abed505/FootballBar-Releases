@@ -179,7 +179,8 @@ public sealed partial class TaskbarTicker : UserControl
                     }
                     else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
                     {
-                        status = match.KickoffTime.ToLocalTime().ToString("HH:mm");
+                        var use24h = App.CurrentMainViewModel?.PreferencesService?.Current.Use24HourFormat ?? true;
+                        status = match.KickoffTime.ToLocalTime().ToString(use24h ? "HH:mm" : "h:mm tt");
                     }
                     else if (string.Equals(match.State, "FINISHED", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(match.State, "POSTMATCH", StringComparison.OrdinalIgnoreCase))
@@ -271,7 +272,8 @@ public sealed partial class TaskbarTicker : UserControl
             }
             else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
             {
-                FlyoutStatusText.Text = match.KickoffTime.ToLocalTime().ToString("HH:mm");
+                var use24h = App.CurrentMainViewModel?.PreferencesService?.Current.Use24HourFormat ?? true;
+                FlyoutStatusText.Text = match.KickoffTime.ToLocalTime().ToString(use24h ? "HH:mm" : "h:mm tt");
             }
             else if (string.Equals(match.State, "FINISHED", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(match.State, "POSTMATCH", StringComparison.OrdinalIgnoreCase))

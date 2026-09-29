@@ -280,6 +280,13 @@ public partial class App : Application
                     _trayIcon.Icon = new System.Drawing.Icon(iconPath);
                 }
                 _trayIcon.DoubleClick += (s, e) => OpenMainWindow();
+                _trayIcon.MouseClick += (s, e) =>
+                {
+                    if (e.Button == System.Windows.Forms.MouseButtons.Left)
+                    {
+                        OpenMainWindow();
+                    }
+                };
 
                 var trayMenu = new System.Windows.Forms.ContextMenuStrip();
                 trayMenu.Items.Add("Open Footballtray", null, (s, e) => OpenMainWindow());

@@ -123,6 +123,18 @@ public sealed partial class MainPage : Page
             GlobalNotificationsSwitch.IsOn = _viewModel.IsGlobalNotificationsEnabled;
         }
 
+        // Ticker Carousel switch
+        if (TickerCarouselSwitch != null && TickerCarouselSwitch.IsOn != _viewModel.EnableTickerCarousel)
+        {
+            TickerCarouselSwitch.IsOn = _viewModel.EnableTickerCarousel;
+        }
+
+        // 24-Hour Time Format switch
+        if (TimeFormat24HourSwitch != null && TimeFormat24HourSwitch.IsOn != _viewModel.Use24HourFormat)
+        {
+            TimeFormat24HourSwitch.IsOn = _viewModel.Use24HourFormat;
+        }
+
         // Empty state visibility
         if (_viewModel.IsEmpty)
         {
@@ -596,5 +608,23 @@ public sealed partial class MainPage : Page
     private void OnTestSoundClicked(object sender, RoutedEventArgs e)
     {
         AudioPlaybackService.Instance.PlayTestSound();
+    }
+
+    private async void OnTickerCarouselToggled(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel == null || sender is not ToggleSwitch toggle) return;
+        if (toggle.IsOn != _viewModel.EnableTickerCarousel)
+        {
+            await _viewModel.SetEnableTickerCarouselAsync(toggle.IsOn);
+        }
+    }
+
+    private async void OnTimeFormat24HourToggled(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel == null || sender is not ToggleSwitch toggle) return;
+        if (toggle.IsOn != _viewModel.Use24HourFormat)
+        {
+            await _viewModel.SetUse24HourFormatAsync(toggle.IsOn);
+        }
     }
 }

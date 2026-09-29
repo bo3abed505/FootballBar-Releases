@@ -62,11 +62,22 @@ public static class FixtureRelevanceEngine
         }
 
         bool homeFollowed = (!string.IsNullOrWhiteSpace(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
-            || (!string.IsNullOrWhiteSpace(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId));
+            || (!string.IsNullOrWhiteSpace(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId))
+            || (!string.IsNullOrWhiteSpace(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name))
+            || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.Id, out var homeCanon) && followedTeamIds.Contains(homeCanon))
+            || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.LegacyId, out var homeLegCanon) && followedTeamIds.Contains(homeLegCanon));
+
         bool awayFollowed = (!string.IsNullOrWhiteSpace(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id))
-            || (!string.IsNullOrWhiteSpace(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId));
+            || (!string.IsNullOrWhiteSpace(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId))
+            || (!string.IsNullOrWhiteSpace(match.AwayTeam?.Name) && followedTeamIds.Contains(match.AwayTeam.Name))
+            || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.Id, out var awayCanon) && followedTeamIds.Contains(awayCanon))
+            || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.LegacyId, out var awayLegCanon) && followedTeamIds.Contains(awayLegCanon));
+
         bool compFollowed = (!string.IsNullOrWhiteSpace(match.Competition?.Id) && followedCompetitionIds.Contains(match.Competition.Id))
-            || (!string.IsNullOrWhiteSpace(match.Competition?.LegacyId) && followedCompetitionIds.Contains(match.Competition.LegacyId));
+            || (!string.IsNullOrWhiteSpace(match.Competition?.LegacyId) && followedCompetitionIds.Contains(match.Competition.LegacyId))
+            || (!string.IsNullOrWhiteSpace(match.Competition?.Name) && followedCompetitionIds.Contains(match.Competition.Name))
+            || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.Id, out var compCanon) && followedCompetitionIds.Contains(compCanon))
+            || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.LegacyId, out var compLegCanon) && followedCompetitionIds.Contains(compLegCanon));
 
         bool followedByTeam = homeFollowed || awayFollowed;
         var reasons = new List<string>();

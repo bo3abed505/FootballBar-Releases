@@ -148,9 +148,9 @@ public sealed class TickerRotationState
         return CurrentCandidate;
     }
 
-    public TickerDisplayState GetDisplayState(TickerConnectionState connectionState, bool isPinned = false)
+    public TickerDisplayState GetDisplayState(TickerConnectionState connectionState, bool isPinned = false, UserPreferences? preferences = null)
     {
-        var text = TrayTickerFormatter.FormatMatchTicker(CurrentCandidate, connectionState);
+        var text = TrayTickerFormatter.FormatMatchTicker(CurrentCandidate, connectionState, preferences);
         return new TickerDisplayState(
             CurrentCandidate?.Id,
             text,
@@ -172,11 +172,12 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     private readonly Action<string?, string, string?, string?, TrayMatchDto?, bool>? _fullDisplayCallback;
     private readonly TickerRotationState _state = new();
     private TickerConnectionState _currentConnectionState = TickerConnectionState.OnlineFresh;
+    private UserPreferences? _currentPreferences;
     private string? _pinnedMatchId;
     private bool _isDisposed;
     private MatchCenterWindow? _matchCenterWindow;
 
-    public static readonly TimeSpan RotationInterval = TimeSpan.FromSeconds(7);
+    public static readonly TimeSpan RotationInterval = TimeSpan.FromSeconds(10);
 
     public TickerRotationState State => _state;
     public bool IsCycling => _timer.IsRunning;
@@ -302,20 +303,71 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         if (_isDisposed) return;
 
         _currentConnectionState = connectionState;
+        _currentPreferences = preferences;
 
         IReadOnlyList<TrayMatchDto> candidates;
         if (connectionState == TickerConnectionState.NoCacheOffline)
         {
             candidates = Array.Empty<TrayMatchDto>();
         }
+        else if (preferences == null)
+        {
+            candidates = TrayTickerFormatter.GetTickerCandidates(trayData, null);
+        }
         else
         {
-            candidates = TrayTickerFormatter.GetTickerCandidates(trayData, preferences);
+            // If carousel rotation is disabled by user preference, do not cycle candidates
+            if (!preferences.EnableTickerCarousel)
+            {
+                candidates = Array.Empty<TrayMatchDto>();
+            }
+            else
+            {
+                var teamIds = preferences.GetFollowedTeamIdSet();
+                var compIds = preferences.GetFollowedCompetitionIdSet();
+                bool hasFollowed = teamIds.Count > 0 || compIds.Count > 0;
+
+                if (!hasFollowed)
+                {
+                    candidates = Array.Empty<TrayMatchDto>();
+                }
+                else
+                {
+                    var followedMatches = trayData?.Matches?
+                        .Where(m => FixtureRelevanceEngine.EvaluateRelevance(m, teamIds, compIds).IsRelevant)
+                        .ToList() ?? new List<TrayMatchDto>();
+
+                    if (followedMatches.Count == 0)
+                    {
+                        candidates = Array.Empty<TrayMatchDto>();
+                    }
+                    else
+                    {
+                        var live = FixtureRelevanceEngine.PrioritizeMatches(followedMatches.Where(FixtureRelevanceEngine.IsLive), preferences);
+                        if (live.Count > 0)
+                        {
+                            candidates = live;
+                        }
+                        else
+                        {
+                            var upcoming = FixtureRelevanceEngine.PrioritizeMatches(followedMatches.Where(FixtureRelevanceEngine.IsPrematch), preferences);
+                            if (upcoming.Count > 0)
+                            {
+                                candidates = upcoming;
+                            }
+                            else
+                            {
+                                candidates = FixtureRelevanceEngine.PrioritizeMatches(followedMatches, preferences);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         _state.ApplyCandidates(candidates);
 
-        // If a match was pinned, retain it if still in candidates, otherwise drop the pin
+        // If a match was pinned, retain it if still in candidates, or keep from trayData if still valid
         if (!string.IsNullOrEmpty(_pinnedMatchId))
         {
             bool matchStillPresent = _state.Candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
@@ -325,7 +377,16 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             }
             else
             {
-                _pinnedMatchId = null;
+                var pinnedInTray = trayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
+                if (pinnedInTray != null)
+                {
+                    _state.ApplyCandidates(new List<TrayMatchDto> { pinnedInTray });
+                    _state.SetCurrentMatch(_pinnedMatchId);
+                }
+                else
+                {
+                    _pinnedMatchId = null;
+                }
             }
         }
 
@@ -370,7 +431,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
     private void EmitCurrentDisplay()
     {
-        var displayState = _state.GetDisplayState(_currentConnectionState, IsPinned);
+        var displayState = _state.GetDisplayState(_currentConnectionState, IsPinned, _currentPreferences);
         if (_fullDisplayCallback != null)
         {
             _fullDisplayCallback(displayState.FixtureId, displayState.FormattedText, displayState.HomeTeamLogoUrl, displayState.AwayTeamLogoUrl, displayState.Match, displayState.IsPinned);

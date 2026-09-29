@@ -102,7 +102,11 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         }
     }
 
-    public static MatchItemViewModel FromDto(TrayMatchDto match, FixtureRelevanceResult relevance, bool isActiveTaskbar)
+    public static MatchItemViewModel FromDto(
+        TrayMatchDto match,
+        FixtureRelevanceResult relevance,
+        bool isActiveTaskbar,
+        bool use24HourFormat = true)
     {
         ArgumentNullException.ThrowIfNull(match);
 
@@ -115,6 +119,8 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         bool isLive = upperState is "LIVE" or "1H" or "2H" or "HT" or "ET" or "P";
         bool isFinished = upperState is "FT" or "AET" or "PEN" or "FINISHED";
         bool isPrematch = upperState is "PREMATCH" or "NS" or "TBD";
+
+        string timeFormat = use24HourFormat ? "HH:mm" : "h:mm tt";
 
         string stateDisplay;
         if (upperState == "HT")
@@ -141,7 +147,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         }
         else
         {
-            stateDisplay = match.KickoffTime.ToLocalTime().ToString("HH:mm");
+            stateDisplay = match.KickoffTime.ToLocalTime().ToString(timeFormat);
         }
 
         string scoreDisplay;
@@ -154,7 +160,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
             scoreDisplay = $"{match.Score?.Home ?? 0} – {match.Score?.Away ?? 0}";
         }
 
-        string kickoffDisplay = match.KickoffTime.ToLocalTime().ToString("ddd, MMM d • HH:mm");
+        string kickoffDisplay = match.KickoffTime.ToLocalTime().ToString($"ddd, MMM d • {timeFormat}");
 
         var vm = new MatchItemViewModel
         {

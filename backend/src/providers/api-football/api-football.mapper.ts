@@ -92,12 +92,19 @@ export class ApiFootballMapper {
     }));
   }
 
-  static mapTeam(teamObj: { id: number; name: string; logo: string }): ProviderTeam {
+  static mapTeam(
+    teamObj: { id: number; name: string; logo: string },
+    countryHint?: string
+  ): ProviderTeam {
+    const isGenericRegion = countryHint && ['World', 'Europe', 'Africa', 'South-America', 'Asia', 'North-America'].includes(countryHint);
+    const country = countryHint && !isGenericRegion ? countryHint : undefined;
+
     return {
       id: `team_${teamObj.id}`,
       name: teamObj.name,
       shortName: teamObj.name.length <= 4 ? teamObj.name : teamObj.name.substring(0, 3).toUpperCase(),
       code: teamObj.name.substring(0, 3).toUpperCase(),
+      country,
       logoUrl: teamObj.logo,
       provider: 'api_football',
       providerId: String(teamObj.id),
@@ -105,8 +112,13 @@ export class ApiFootballMapper {
   }
 
   static mapFixture(item: ApiFootballFixtureItem): ProviderFixture {
-    const homeTeam = this.mapTeam(item.teams.home);
-    const awayTeam = this.mapTeam(item.teams.away);
+    const leagueCountry = item.league.country;
+    const isGenericRegion = leagueCountry && ['World', 'Europe', 'Africa', 'South-America', 'Asia', 'North-America'].includes(leagueCountry);
+    const homeCountry = (!isGenericRegion && leagueCountry) ? leagueCountry : item.teams.home.name;
+    const awayCountry = (!isGenericRegion && leagueCountry) ? leagueCountry : item.teams.away.name;
+
+    const homeTeam = this.mapTeam(item.teams.home, homeCountry);
+    const awayTeam = this.mapTeam(item.teams.away, awayCountry);
     const comp: ProviderCompetition = {
       id: `comp_${item.league.id}`,
       name: item.league.name,

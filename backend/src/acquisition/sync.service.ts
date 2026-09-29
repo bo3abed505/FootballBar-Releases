@@ -178,7 +178,7 @@ export class SyncService {
           const updatedName = team.name || existing.name;
           const updatedShortName = team.shortName || existing.shortName;
           const updatedCode = team.code ?? existing.code;
-          const updatedCountry = team.country ?? existing.country;
+          const updatedCountry = existing.country || team.country || null;
           const updatedLogoUrl = team.logoUrl ?? existing.logoUrl;
           const updatedVenue = team.venueName ?? existing.venueName;
 

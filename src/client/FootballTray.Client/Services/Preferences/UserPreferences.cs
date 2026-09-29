@@ -47,6 +47,12 @@ public sealed record UserPreferences
     [JsonPropertyName("targetScreenDeviceName")]
     public string? TargetScreenDeviceName { get; init; } = null;
 
+    [JsonPropertyName("enableTickerCarousel")]
+    public bool EnableTickerCarousel { get; init; } = true;
+
+    [JsonPropertyName("use24HourFormat")]
+    public bool Use24HourFormat { get; init; } = true;
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 
@@ -63,6 +69,11 @@ public sealed record UserPreferences
             if (string.IsNullOrWhiteSpace(team.Id)) continue;
             var id = team.Id.Trim();
             set.Add(id);
+
+            if (!string.IsNullOrWhiteSpace(team.Name))
+            {
+                set.Add(team.Name.Trim());
+            }
 
             if (id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
             {
@@ -101,6 +112,20 @@ public sealed record UserPreferences
                 set.Add(CanonicalEntityIds.AlAhlyNumericId.ToString());
                 set.Add("1577");
                 set.Add("team_1577");
+            }
+            else if (id.Equals(CanonicalEntityIds.Egypt, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.LegacyEgypt, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.EgyptMockAlias, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.EgyptNumericId.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.LegacyMockEgyptCanonical, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals("Egypt", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CanonicalEntityIds.Egypt);
+                set.Add(CanonicalEntityIds.LegacyEgypt);
+                set.Add(CanonicalEntityIds.EgyptMockAlias);
+                set.Add(CanonicalEntityIds.EgyptNumericId.ToString());
+                set.Add(CanonicalEntityIds.LegacyMockEgyptCanonical);
+                set.Add("Egypt");
             }
             else if (id.StartsWith("team_", StringComparison.OrdinalIgnoreCase) && int.TryParse(id[5..], out int num))
             {

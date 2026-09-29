@@ -25,6 +25,13 @@ public static class CanonicalEntityIds
     public const int AlAhlyNumericId = 1029;
     public const string AlAhlyMockAlias = "team_alahly";
 
+    /// <summary>Egypt National Team canonical ID</summary>
+    public const string Egypt = "ft_team_01M3N490H4XSMWQA84ANXFYHB6";
+    public const string LegacyEgypt = "team_32";
+    public const int EgyptNumericId = 32;
+    public const string EgyptMockAlias = "team_egypt";
+    public const string LegacyMockEgyptCanonical = "ft_team_E09F776574F182A24F2540B66D";
+
     // ==========================================
     // Competitions (Canonical ft_comp_ IDs from Gate C backfill)
     // ==========================================
@@ -75,11 +82,17 @@ public static class CanonicalEntityIds
         { "team_529", Barcelona },
         { "529", Barcelona },
         { "team_barcelona", Barcelona },
+        { "ft_team_18C2D60CA786219E2526652BC8", Barcelona },
         { "team_1029", AlAhly },
         { "1029", AlAhly },
         { "team_1577", AlAhly },
         { "1577", AlAhly },
         { "team_alahly", AlAhly },
+        { "ft_team_6C60757CB48CCE0E897AF02B71", AlAhly },
+        { "team_32", Egypt },
+        { "32", Egypt },
+        { "team_egypt", Egypt },
+        { "ft_team_E09F776574F182A24F2540B66D", Egypt },
 
         // Competitions
         { "comp_39", PremierLeague },

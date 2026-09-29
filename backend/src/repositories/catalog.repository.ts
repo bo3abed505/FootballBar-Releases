@@ -45,12 +45,51 @@ export class CatalogRepository {
         or(
           ilike(schema.teams.name, searchPattern),
           ilike(schema.teams.shortName, searchPattern),
-          ilike(schema.teams.code, searchPattern)
+          ilike(schema.teams.code, searchPattern),
+          ilike(schema.teams.country, searchPattern)
         )
       )
-      .limit(clampedLimit);
+      .limit(clampedLimit * 2);
 
-    return rows.map(formatV2CatalogTeam);
+    // Deduplicate by normalized name (lowercased trimmed name)
+    // Prioritize provider teams (id starting with team_\d+) and merge missing country/logo metadata
+    const deduplicatedMap = new Map<string, typeof rows[0]>();
+
+    for (const row of rows) {
+      const normKey = row.name.trim().toLowerCase();
+      const existing = deduplicatedMap.get(normKey);
+
+      if (!existing) {
+        deduplicatedMap.set(normKey, { ...row });
+        continue;
+      }
+
+      const isCurrentProvider = /^team_\d+$/.test(row.id);
+      const isExistingProvider = /^team_\d+$/.test(existing.id);
+
+      if (isCurrentProvider && !isExistingProvider) {
+        deduplicatedMap.set(normKey, {
+          ...row,
+          country: row.country || existing.country,
+          logoUrl: row.logoUrl || existing.logoUrl,
+          code: row.code || existing.code,
+        });
+      } else if (!isCurrentProvider && isExistingProvider) {
+        if (!existing.country && row.country) existing.country = row.country;
+        if (!existing.logoUrl && row.logoUrl) existing.logoUrl = row.logoUrl;
+        if (!existing.code && row.code) existing.code = row.code;
+      } else {
+        if (!existing.country && row.country) {
+          existing.country = row.country;
+        }
+        if (!existing.logoUrl && row.logoUrl) {
+          existing.logoUrl = row.logoUrl;
+        }
+      }
+    }
+
+    const deduplicatedRows = Array.from(deduplicatedMap.values()).slice(0, clampedLimit);
+    return deduplicatedRows.map(formatV2CatalogTeam);
   }
 
   /**
@@ -80,7 +119,8 @@ export class CatalogRepository {
       .where(
         or(
           ilike(schema.competitions.name, searchPattern),
-          ilike(schema.competitions.code, searchPattern)
+          ilike(schema.competitions.code, searchPattern),
+          ilike(schema.competitions.country, searchPattern)
         )
       )
       .limit(clampedLimit);

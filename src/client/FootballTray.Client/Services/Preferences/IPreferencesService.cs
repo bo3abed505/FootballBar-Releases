@@ -31,4 +31,6 @@ public interface IPreferencesService
     Task SetTickerVisibleAsync(bool visible, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task SetTickerOffsetXAsync(int offset, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task SetTargetScreenDeviceNameAsync(string? deviceName, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetEnableTickerCarouselAsync(bool enable, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetUse24HourFormatAsync(bool use24Hour, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

@@ -430,6 +430,50 @@ public sealed class PreferencesService : IPreferencesService
         PreferencesChanged?.Invoke(this, _currentPreferences);
     }
 
+    public async Task SetEnableTickerCarouselAsync(bool enable, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.EnableTickerCarousel != enable)
+            {
+                var updated = _currentPreferences with { EnableTickerCarousel = enable };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetUse24HourFormatAsync(bool use24Hour, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.Use24HourFormat != use24Hour)
+            {
+                var updated = _currentPreferences with { Use24HourFormat = use24Hour };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
     private async Task<UserPreferences> LoadFromDiskAsync(CancellationToken cancellationToken)
     {
         UserPreferences? primary = null;
@@ -747,6 +791,8 @@ public sealed class PreferencesService : IPreferencesService
             IsTickerVisible = raw.IsTickerVisible,
             TickerOffsetX = raw.TickerOffsetX,
             TargetScreenDeviceName = raw.TargetScreenDeviceName,
+            EnableTickerCarousel = raw.EnableTickerCarousel,
+            Use24HourFormat = raw.Use24HourFormat,
             ExtensionData = raw.ExtensionData
         };
     }

@@ -77,6 +77,7 @@ public static class TrayTickerFormatter
         };
 
     /// <summary>
+    /// <summary>
     /// Evaluates candidate matches for ticker presentation and cycling.
     /// If >= 1 LIVE match exists:
     ///   candidate set = ALL LIVE matches in existing FixtureRelevanceEngine priority order.
@@ -108,16 +109,16 @@ public static class TrayTickerFormatter
     /// <summary>
     /// Formats a single selected match into a compact ticker string based on data freshness state.
     /// </summary>
-    public static string FormatMatchTicker(TrayMatchDto? match, DataFreshnessState freshnessState)
+    public static string FormatMatchTicker(TrayMatchDto? match, DataFreshnessState freshnessState, UserPreferences? preferences = null)
     {
-        return FormatMatchTicker(match, MapConnectionState(freshnessState));
+        return FormatMatchTicker(match, MapConnectionState(freshnessState), preferences);
     }
 
     /// <summary>
     /// Formats a single selected match into a compact ticker string based on connection state.
     /// Preserves existing fallback and offline indication behavior.
     /// </summary>
-    public static string FormatMatchTicker(TrayMatchDto? match, TickerConnectionState connectionState)
+    public static string FormatMatchTicker(TrayMatchDto? match, TickerConnectionState connectionState, UserPreferences? preferences = null)
     {
         if (connectionState == TickerConnectionState.NoCacheOffline)
         {
@@ -131,7 +132,7 @@ public static class TrayTickerFormatter
                 : "FootballTray";
         }
 
-        return FormatMatch(match, connectionState);
+        return FormatMatch(match, connectionState, preferences);
     }
 
     /// <summary>
@@ -148,10 +149,10 @@ public static class TrayTickerFormatter
     public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState, UserPreferences? preferences = null)
     {
         var activeMatch = GetActiveMatch(trayData, preferences);
-        return FormatMatchTicker(activeMatch, connectionState);
+        return FormatMatchTicker(activeMatch, connectionState, preferences);
     }
 
-    private static string FormatMatch(TrayMatchDto match, TickerConnectionState connectionState)
+    private static string FormatMatch(TrayMatchDto match, TickerConnectionState connectionState, UserPreferences? preferences = null)
     {
         var homeCode = GetTeamCode(match.HomeTeam);
         var awayCode = GetTeamCode(match.AwayTeam);
@@ -171,7 +172,8 @@ public static class TrayTickerFormatter
         }
         else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
         {
-            var localTime = match.KickoffTime.ToLocalTime().ToString("HH:mm");
+            var timeFormat = (preferences?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
+            var localTime = match.KickoffTime.ToLocalTime().ToString(timeFormat);
             mainText = $"{homeCode} vs {awayCode} · {localTime}";
         }
         else if (string.Equals(match.State, "FINISHED", StringComparison.OrdinalIgnoreCase) ||
