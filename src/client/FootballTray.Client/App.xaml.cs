@@ -43,6 +43,7 @@ public partial class App : Application
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
     private volatile bool _updateHandoffExitRequested;
     private static System.Windows.Forms.NotifyIcon? _trayIcon;
+    private static bool _isInitialColdStart = true;
 
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
@@ -154,7 +155,30 @@ public partial class App : Application
                 if (ClassifyActivation(activatedArgs.Kind) == ActivationDispatchAction.ProcessNotification &&
                     activatedArgs.Data is AppNotificationActivatedEventArgs notificationArgs)
                 {
+                    _isInitialColdStart = false;
                     HandleAppNotificationActivation(notificationArgs, activationWindow);
+                }
+                else if (_isInitialColdStart)
+                {
+                    // Silent Startup: Normal cold boot launch keeps MainWindow dormant
+                    _isInitialColdStart = false;
+                    AppLogger.Info("App", "SilentStartup", "Cold boot launch: keeping MainWindow dormant in system tray.");
+                    try
+                    {
+                        if (activationWindow != null)
+                        {
+                            IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(activationWindow);
+                            if (hwnd != IntPtr.Zero)
+                            {
+                                ShowWindow(hwnd, SW_HIDE);
+                            }
+                            activationWindow.AppWindow?.Hide();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Warn("App", "SilentStartupHideFailed", $"Failed to ensure window hide on cold boot: {ex.Message}");
+                    }
                 }
                 else
                 {
@@ -451,6 +475,7 @@ public partial class App : Application
         BringMainWindowToForeground(window);
     }
 
+    private const int SW_HIDE = 0;
     private const int SW_RESTORE = 9;
     private const int SW_SHOW = 5;
 

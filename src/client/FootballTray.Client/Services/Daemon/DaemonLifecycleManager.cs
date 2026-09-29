@@ -147,25 +147,91 @@ public sealed class DaemonLifecycleManager : IDisposable
             return false;
         }
 
-        string serverJsPath = Path.Combine(backendDir, "dist", "server.js");
+        string absoluteBackendDir = Path.GetFullPath(backendDir);
+        string serverJsPath = Path.Combine(absoluteBackendDir, "dist", "server.js");
         if (!File.Exists(serverJsPath))
         {
             AppLogger.Warn("Daemon", "EntryNotFound", $"Backend entry point not found at '{serverJsPath}'. Ensure 'npm run build' has been executed.");
             return false;
         }
 
+        // Locate .env file in backend directory or parent directories
+        string? envFilePath = null;
+        string defaultEnvPath = Path.Combine(absoluteBackendDir, ".env");
+        if (File.Exists(defaultEnvPath))
+        {
+            envFilePath = defaultEnvPath;
+        }
+        else
+        {
+            var searchDir = Directory.GetParent(absoluteBackendDir);
+            while (searchDir != null)
+            {
+                var cand = Path.Combine(searchDir.FullName, ".env");
+                if (File.Exists(cand))
+                {
+                    envFilePath = cand;
+                    break;
+                }
+                var candBackend = Path.Combine(searchDir.FullName, "backend", ".env");
+                if (File.Exists(candBackend))
+                {
+                    envFilePath = candBackend;
+                    break;
+                }
+                searchDir = searchDir.Parent;
+            }
+        }
+
         // 3. Configure hidden background process
+        string nodeExe = "node.exe";
+        if (File.Exists(@"C:\Program Files\nodejs\node.exe"))
+        {
+            nodeExe = @"C:\Program Files\nodejs\node.exe";
+        }
+
+        string arguments = !string.IsNullOrEmpty(envFilePath)
+            ? $"--env-file=\"{envFilePath}\" \"{serverJsPath}\""
+            : $"\"{serverJsPath}\"";
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = "node.exe",
-            Arguments = "dist/server.js",
-            WorkingDirectory = backendDir,
+            FileName = nodeExe,
+            Arguments = arguments,
+            WorkingDirectory = absoluteBackendDir,
             CreateNoWindow = true,
             UseShellExecute = false,
             WindowStyle = ProcessWindowStyle.Hidden,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+
+        if (!string.IsNullOrEmpty(envFilePath))
+        {
+            startInfo.EnvironmentVariables["DOTENV_CONFIG_PATH"] = envFilePath;
+            try
+            {
+                foreach (var line in File.ReadAllLines(envFilePath))
+                {
+                    var trimmed = line.Trim();
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#")) continue;
+                    int eqIndex = trimmed.IndexOf('=');
+                    if (eqIndex > 0)
+                    {
+                        string key = trimmed.Substring(0, eqIndex).Trim();
+                        string val = trimmed.Substring(eqIndex + 1).Trim().Trim('"', '\'');
+                        if (!string.IsNullOrEmpty(key))
+                        {
+                            startInfo.EnvironmentVariables[key] = val;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn("Daemon", "EnvParseFailed", $"Could not parse .env file at '{envFilePath}': {ex.Message}");
+            }
+        }
 
         try
         {

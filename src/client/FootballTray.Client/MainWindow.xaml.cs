@@ -60,6 +60,7 @@ public sealed partial class MainWindow : Window
         RootFrame.Navigate(typeof(MainPage));
 
         // Silent Startup: Ensure MainWindow starts hidden until opened via tray or card
+        ShowWindow(hWnd, 0);
         AppWindow.Hide();
     }
 
