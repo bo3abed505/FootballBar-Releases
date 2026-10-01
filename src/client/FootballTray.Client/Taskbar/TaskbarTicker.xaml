@@ -127,20 +127,52 @@
                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                         </Grid>
 
-                        <!-- Recent Goalscorers / Events -->
-                        <StackPanel x:Name="FlyoutEventsPanel" Spacing="2" Visibility="Collapsed">
+                        <!-- Team-Divided Match Incidents (Multi-column Grid) -->
+                        <StackPanel x:Name="FlyoutEventsPanel" Spacing="4" Visibility="Collapsed">
                             <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,2,0,4" />
-                            <TextBlock
-                                Text="Recent Goals:"
-                                FontSize="10"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                            <TextBlock
-                                x:Name="FlyoutGoalscorersText"
-                                Text=""
-                                FontSize="11"
-                                TextWrapping="Wrap"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Grid ColumnDefinitions="*,12,*">
+                                <!-- Home Team Incidents (Column 0, right-aligned) -->
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock
+                                        x:Name="FlyoutHomeEventsHeader"
+                                        Text="Home"
+                                        FontSize="10"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        TextAlignment="Right"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        x:Name="FlyoutHomeEventsText"
+                                        Text=""
+                                        FontSize="11"
+                                        TextWrapping="Wrap"
+                                        TextAlignment="Right"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+
+                                <!-- Divider (Column 1) -->
+                                <Border Grid.Column="1" Width="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Stretch" HorizontalAlignment="Center" />
+
+                                <!-- Away Team Incidents (Column 2, left-aligned) -->
+                                <StackPanel Grid.Column="2" Spacing="2">
+                                    <TextBlock
+                                        x:Name="FlyoutAwayEventsHeader"
+                                        Text="Away"
+                                        FontSize="10"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        TextAlignment="Left"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        x:Name="FlyoutAwayEventsText"
+                                        Text=""
+                                        FontSize="11"
+                                        TextWrapping="Wrap"
+                                        TextAlignment="Left"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock x:Name="FlyoutGoalscorersText" Text="" Visibility="Collapsed" />
                         </StackPanel>
 
                         <!-- Pin Hint -->

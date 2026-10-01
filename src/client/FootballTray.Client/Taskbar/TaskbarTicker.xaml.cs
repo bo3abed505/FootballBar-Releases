@@ -285,31 +285,22 @@ public sealed partial class TaskbarTicker : UserControl
                 FlyoutStatusText.Text = match.State;
             }
 
-            // Full team names
-            FlyoutHomeTeamText.Text = !string.IsNullOrWhiteSpace(match.HomeTeam?.Name)
-                ? match.HomeTeam.Name
-                : match.HomeTeam?.ShortName ?? "Home";
+            var peekData = PeekViewFormatter.Format(match);
 
-            FlyoutAwayTeamText.Text = !string.IsNullOrWhiteSpace(match.AwayTeam?.Name)
-                ? match.AwayTeam.Name
-                : match.AwayTeam?.ShortName ?? "Away";
+            // Red card indicators in score row (e.g. Egypt 🟥 1 - 0)
+            FlyoutHomeTeamText.Text = peekData.HomeScoreDisplay;
+            FlyoutAwayTeamText.Text = peekData.AwayScoreDisplay;
+            FlyoutScoreText.Text = peekData.ScoreDisplay;
 
-            // Score
-            if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
-            {
-                FlyoutScoreText.Text = "vs";
-            }
-            else
-            {
-                FlyoutScoreText.Text = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0}";
-            }
-
-            // Recent Goalscorers
-            var scorers = match.FormattedGoalscorers;
-            if (scorers != null && scorers.Count > 0)
+            // Team-divided Incidents (Multi-column Grid, excluding missed penalties)
+            if (peekData.HasEvents)
             {
                 FlyoutEventsPanel.Visibility = Visibility.Visible;
-                FlyoutGoalscorersText.Text = string.Join("  •  ", scorers);
+                if (FlyoutHomeEventsHeader != null) FlyoutHomeEventsHeader.Text = peekData.HomeHeader;
+                if (FlyoutHomeEventsText != null) FlyoutHomeEventsText.Text = peekData.HomeEventsText;
+                if (FlyoutAwayEventsHeader != null) FlyoutAwayEventsHeader.Text = peekData.AwayHeader;
+                if (FlyoutAwayEventsText != null) FlyoutAwayEventsText.Text = peekData.AwayEventsText;
+                if (FlyoutGoalscorersText != null) FlyoutGoalscorersText.Text = peekData.FormattedToolTipText;
             }
             else
             {

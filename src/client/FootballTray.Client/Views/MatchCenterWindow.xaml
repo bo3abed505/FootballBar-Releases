@@ -27,12 +27,29 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock
-                    x:Name="CompetitionText"
-                    Text="{Binding CompetitionName}"
-                    FontSize="13"
-                    FontWeight="SemiBold"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="CompetitionText"
+                        Text="{Binding CompetitionName}"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button
+                        x:Name="CompetitionStarButton"
+                        Style="{ThemeResource SubtleButtonStyle}"
+                        Padding="4,2"
+                        MinHeight="0"
+                        MinWidth="0"
+                        Click="OnToggleCompetitionStarClicked"
+                        ToolTipService.ToolTip="Follow Competition">
+                        <FontIcon
+                            x:Name="CompetitionStarIcon"
+                            Glyph="{x:Bind ViewModel.CompetitionStarGlyph, Mode=OneWay}"
+                            FontSize="12"
+                            Opacity="{x:Bind ViewModel.CompetitionStarOpacity, Mode=OneWay}"
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    </Button>
+                </StackPanel>
                 <TextBlock
                     x:Name="VenueText"
                     Text="{Binding Venue}"
@@ -41,20 +58,35 @@
                     Visibility="{Binding Venue, ConverterParameter=NotEmpty, Mode=OneWay}" />
             </StackPanel>
 
-            <Border
-                Grid.Column="1"
-                x:Name="StatusBadge"
-                Background="{ThemeResource AccentFillColorDefaultBrush}"
-                CornerRadius="6"
-                Padding="10,4,10,4"
-                VerticalAlignment="Center">
-                <TextBlock
-                    x:Name="StatusText"
-                    Text="{Binding StatusText}"
-                    FontSize="12"
-                    FontWeight="Bold"
-                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-            </Border>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button
+                    x:Name="PinButton"
+                    Style="{ThemeResource SubtleButtonStyle}"
+                    Padding="6,4"
+                    Click="OnTogglePinClicked"
+                    ToolTipService.ToolTip="Pin to taskbar">
+                    <FontIcon
+                        x:Name="PinIcon"
+                        Glyph="{x:Bind ViewModel.PinGlyph, Mode=OneWay}"
+                        FontSize="14"
+                        Opacity="{x:Bind ViewModel.PinGlyphOpacity, Mode=OneWay}"
+                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                </Button>
+
+                <Border
+                    x:Name="StatusBadge"
+                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                    CornerRadius="6"
+                    Padding="10,4,10,4"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="StatusText"
+                        Text="{Binding StatusText}"
+                        FontSize="12"
+                        FontWeight="Bold"
+                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                </Border>
+            </StackPanel>
         </Grid>
 
         <!-- Score Board Card -->
@@ -74,7 +106,7 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- Home Team -->
-                <StackPanel Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                <StackPanel Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
                     <Image
                         x:Name="HomeTeamLogo"
                         Width="56"
@@ -82,26 +114,59 @@
                         Stretch="Uniform"
                         HorizontalAlignment="Center"
                         Visibility="Collapsed" />
-                    <TextBlock
-                        x:Name="HomeTeamName"
-                        Text="{Binding HomeTeamName}"
-                        FontSize="18"
-                        FontWeight="Bold"
+                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                        <TextBlock
+                            x:Name="HomeTeamName"
+                            Text="{x:Bind ViewModel.HomeTeamName, Mode=OneWay}"
+                            FontSize="18"
+                            FontWeight="Bold"
+                            HorizontalAlignment="Center"
+                            TextAlignment="Center" />
+                        <Button
+                            x:Name="HomeStarButton"
+                            Style="{ThemeResource SubtleButtonStyle}"
+                            Padding="4,2"
+                            MinHeight="0"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            Click="OnToggleHomeStarClicked"
+                            ToolTipService.ToolTip="Follow Team">
+                            <FontIcon
+                                x:Name="HomeStarIcon"
+                                Glyph="{x:Bind ViewModel.HomeStarGlyph, Mode=OneWay}"
+                                FontSize="13"
+                                Opacity="{x:Bind ViewModel.HomeStarOpacity, Mode=OneWay}"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        </Button>
+                    </StackPanel>
+                    <!-- Home Goal Scorers & Red Cards -->
+                    <ItemsControl
+                        x:Name="HomeIncidentsList"
+                        ItemsSource="{x:Bind ViewModel.HomeIncidents, Mode=OneWay}"
                         HorizontalAlignment="Center"
-                        TextAlignment="Center" />
+                        Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:MatchHeaderIncidentViewModel">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,1,0,1">
+                                    <TextBlock Text="{x:Bind Icon}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind Text}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
 
                 <!-- Score and Halftime -->
                 <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,0,24,0">
                     <TextBlock
                         x:Name="ScoreText"
-                        Text="{Binding ScoreText}"
+                        Text="{x:Bind ViewModel.ScoreText, Mode=OneWay}"
                         FontSize="36"
                         FontWeight="Bold"
                         HorizontalAlignment="Center" />
                     <TextBlock
                         x:Name="HalfTimeText"
-                        Text="{Binding HalfTimeText}"
+                        Text="{x:Bind ViewModel.HalfTimeText, Mode=OneWay}"
                         FontSize="12"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         HorizontalAlignment="Center"
@@ -118,7 +183,7 @@
                         Visibility="Collapsed">
                         <TextBlock
                             x:Name="AggregateText"
-                            Text="{Binding AggregateText}"
+                            Text="{x:Bind ViewModel.AggregateText, Mode=OneWay}"
                             FontSize="11"
                             FontWeight="SemiBold"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -126,7 +191,7 @@
                 </StackPanel>
 
                 <!-- Away Team -->
-                <StackPanel Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                <StackPanel Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
                     <Image
                         x:Name="AwayTeamLogo"
                         Width="56"
@@ -134,24 +199,59 @@
                         Stretch="Uniform"
                         HorizontalAlignment="Center"
                         Visibility="Collapsed" />
-                    <TextBlock
-                        x:Name="AwayTeamName"
-                        Text="{Binding AwayTeamName}"
-                        FontSize="18"
-                        FontWeight="Bold"
+                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                        <TextBlock
+                            x:Name="AwayTeamName"
+                            Text="{x:Bind ViewModel.AwayTeamName, Mode=OneWay}"
+                            FontSize="18"
+                            FontWeight="Bold"
+                            HorizontalAlignment="Center"
+                            TextAlignment="Center" />
+                        <Button
+                            x:Name="AwayStarButton"
+                            Style="{ThemeResource SubtleButtonStyle}"
+                            Padding="4,2"
+                            MinHeight="0"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            Click="OnToggleAwayStarClicked"
+                            ToolTipService.ToolTip="Follow Team">
+                            <FontIcon
+                                x:Name="AwayStarIcon"
+                                Glyph="{x:Bind ViewModel.AwayStarGlyph, Mode=OneWay}"
+                                FontSize="13"
+                                Opacity="{x:Bind ViewModel.AwayStarOpacity, Mode=OneWay}"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        </Button>
+                    </StackPanel>
+                    <!-- Away Goal Scorers & Red Cards -->
+                    <ItemsControl
+                        x:Name="AwayIncidentsList"
+                        ItemsSource="{x:Bind ViewModel.AwayIncidents, Mode=OneWay}"
                         HorizontalAlignment="Center"
-                        TextAlignment="Center" />
+                        Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:MatchHeaderIncidentViewModel">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,1,0,1">
+                                    <TextBlock Text="{x:Bind Icon}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind Text}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Main Content Area: Timeline (Left) + Details/Lineups/Stats (Right) -->
-        <Grid Grid.Row="2" ColumnSpacing="16">
+        <!-- Main Content Area: Timeline (Left) + Interactive Draggable Splitter + Details/Lineups/Stats (Right) -->
+        <Grid Grid.Row="2" x:Name="MainContentGrid">
             <Grid.ColumnDefinitions>
-                <!-- Left Pane: Timeline Events -->
-                <ColumnDefinition Width="360" MinWidth="300" />
-                <!-- Right Pane: Statistics & Lineups (Utilizes empty right-side space) -->
-                <ColumnDefinition Width="*" MinWidth="380" />
+                <!-- Column 0: Match Events Timeline (Left) -->
+                <ColumnDefinition x:Name="LeftColumnDefinition" Width="430" MinWidth="320" />
+                <!-- Column 1: Interactive Draggable Splitter -->
+                <ColumnDefinition Width="16" />
+                <!-- Column 2: Statistics & Lineups (Right) -->
+                <ColumnDefinition x:Name="RightColumnDefinition" Width="*" MinWidth="340" />
             </Grid.ColumnDefinitions>
 
             <!-- ========================================== -->
@@ -183,37 +283,128 @@
                         SelectionMode="None">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="vm:MatchTimelineItem">
-                                <Grid Padding="2,6,2,6">
+                                <Grid Padding="2,4,2,4">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="42" />
-                                        <ColumnDefinition Width="28" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="52" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
 
-                                    <TextBlock
+                                    <!-- 1. Home Team Event (Left Side: text right-aligned + icon) -->
+                                    <Grid
                                         Grid.Column="0"
-                                        Text="{x:Bind MinuteDisplay}"
-                                        FontWeight="Bold"
-                                        FontSize="12"
-                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                        VerticalAlignment="Center" />
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind HomeVisibility, Mode=OneTime}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Right"
+                                            Margin="0,0,6,0">
+                                            <TextBlock
+                                                Text="{x:Bind EventTitle, Mode=OneTime}"
+                                                FontWeight="SemiBold"
+                                                FontSize="12"
+                                                TextAlignment="Right"
+                                                HorizontalAlignment="Right"
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                Text="{x:Bind EventSubtitle, Mode=OneTime}"
+                                                FontSize="10"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                TextAlignment="Right"
+                                                HorizontalAlignment="Right"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind SubtitleVisibility, Mode=OneTime}" />
+                                        </StackPanel>
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Text="{x:Bind IconGlyph, Mode=OneTime}"
+                                            FontSize="14"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Center" />
+                                    </Grid>
 
-                                    <TextBlock
+                                    <!-- 2. Center Minute Node (Visible for all non-neutral events) -->
+                                    <Border
                                         Grid.Column="1"
-                                        Text="{x:Bind IconGlyph}"
-                                        FontSize="14"
-                                        VerticalAlignment="Center" />
-
-                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
+                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="4,2,4,2"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind NonNeutralVisibility, Mode=OneTime}">
                                         <TextBlock
-                                            Text="{x:Bind Description}"
-                                            FontSize="12"
-                                            TextWrapping="Wrap" />
-                                        <TextBlock
-                                            Text="{x:Bind PlayerInfo}"
+                                            Text="{x:Bind MinuteDisplay, Mode=OneTime}"
+                                            FontWeight="Bold"
                                             FontSize="11"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    </StackPanel>
+                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                            HorizontalAlignment="Center" />
+                                    </Border>
+
+                                    <!-- 3. Away Team Event (Right Side: icon + text left-aligned) -->
+                                    <Grid
+                                        Grid.Column="2"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind AwayVisibility, Mode=OneTime}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            Text="{x:Bind IconGlyph, Mode=OneTime}"
+                                            FontSize="14"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Center" />
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left"
+                                            Margin="6,0,0,0">
+                                            <TextBlock
+                                                Text="{x:Bind EventTitle, Mode=OneTime}"
+                                                FontWeight="SemiBold"
+                                                FontSize="12"
+                                                TextAlignment="Left"
+                                                HorizontalAlignment="Left"
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                Text="{x:Bind EventSubtitle, Mode=OneTime}"
+                                                FontSize="10"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                TextAlignment="Left"
+                                                HorizontalAlignment="Left"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind SubtitleVisibility, Mode=OneTime}" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- 4. Neutral Match Event (Period Start/End, Half Time, Full Time: Spans all 3 columns) -->
+                                    <Border
+                                        Grid.Column="0"
+                                        Grid.ColumnSpan="3"
+                                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="12,3,12,3"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind NeutralVisibility, Mode=OneTime}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind IconGlyph, Mode=OneTime}" FontSize="12" VerticalAlignment="Center" />
+                                            <TextBlock Text="{x:Bind EventTitle, Mode=OneTime}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{x:Bind MinuteDisplay, Mode=OneTime}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Border>
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -233,10 +424,48 @@
             </Border>
 
             <!-- ========================================== -->
+            <!-- SECTION MIDDLE: Interactive Splitter        -->
+            <!-- ========================================== -->
+            <Border
+                x:Name="TimelineSplitter"
+                Grid.Column="1"
+                Background="Transparent"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                PointerEntered="OnSplitterPointerEntered"
+                PointerExited="OnSplitterPointerExited"
+                PointerPressed="OnSplitterPointerPressed"
+                PointerMoved="OnSplitterPointerMoved"
+                PointerReleased="OnSplitterPointerReleased"
+                PointerCanceled="OnSplitterPointerCanceled"
+                ToolTipService.ToolTip="Drag to resize panels">
+                <!-- Visual Divider Bar and Centered Grip Pill -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Stretch">
+                    <!-- Subtle vertical dividing guide -->
+                    <Border
+                        x:Name="SplitterLine"
+                        Width="2"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Stretch"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        CornerRadius="1" />
+                    <!-- Drag handle pill indicator -->
+                    <Border
+                        x:Name="SplitterGrip"
+                        Width="4"
+                        Height="36"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource TextFillColorTertiaryBrush}"
+                        CornerRadius="2" />
+                </Grid>
+            </Border>
+
+            <!-- ========================================== -->
             <!-- SECTION RIGHT: Statistics & Lineups Pane   -->
             <!-- ========================================== -->
             <Border
-                Grid.Column="1"
+                Grid.Column="2"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"

@@ -4,10 +4,35 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
+using System.Windows.Input;
 using Microsoft.UI.Xaml;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.ViewModels;
+
+public class RelayCommand : ICommand
+{
+    private readonly Action _execute;
+    private readonly Func<bool>? _canExecute;
+
+    public RelayCommand(Action execute, Func<bool>? canExecute = null)
+    {
+        _execute = execute ?? throw new ArgumentNullException(nameof(execute));
+        _canExecute = canExecute;
+    }
+
+    public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
+    public void Execute(object? parameter) => _execute();
+    public event EventHandler? CanExecuteChanged;
+    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+}
+
+public class MatchHeaderIncidentViewModel
+{
+    public string Icon { get; set; } = string.Empty;
+    public string Text { get; set; } = string.Empty;
+}
 
 public class MatchTimelineItem
 {
@@ -16,6 +41,21 @@ public class MatchTimelineItem
     public string Description { get; set; } = string.Empty;
     public string? PlayerInfo { get; set; }
     public bool HasPlayerInfo => !string.IsNullOrWhiteSpace(PlayerInfo);
+
+    public bool IsHomeTeam { get; set; }
+    public bool IsAwayTeam { get; set; }
+    public bool IsNeutral => !IsHomeTeam && !IsAwayTeam;
+
+    public string EventTitle { get; set; } = string.Empty;
+    public string EventSubtitle { get; set; } = string.Empty;
+    public bool HasSubtitle => !string.IsNullOrWhiteSpace(EventSubtitle);
+
+    // Direct Visibility properties for clean WinUI 3 XAML bindings without converters
+    public Visibility HomeVisibility => IsHomeTeam ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AwayVisibility => IsAwayTeam ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NonNeutralVisibility => !IsNeutral ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NeutralVisibility => IsNeutral ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SubtitleVisibility => HasSubtitle ? Visibility.Visible : Visibility.Collapsed;
 }
 
 public class LineupPlayerItemViewModel
@@ -269,6 +309,167 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private string? _historicalLeg;
     private string _aggregateText = string.Empty;
     private bool _hasAggregateScore;
+    private bool _isHomeTeamFollowed;
+    private bool _isAwayTeamFollowed;
+    private bool _isCompetitionFollowed;
+    private bool _isPinned;
+
+    public string HomeTeamId { get; private set; } = string.Empty;
+    public string HomeTeamLegacyId { get; private set; } = string.Empty;
+    public string AwayTeamId { get; private set; } = string.Empty;
+    public string AwayTeamLegacyId { get; private set; } = string.Empty;
+    public string CompetitionId { get; private set; } = string.Empty;
+    public string CompetitionLegacyId { get; private set; } = string.Empty;
+    public string? CompetitionCode { get; private set; }
+
+    public bool IsHomeTeamFollowed
+    {
+        get => _isHomeTeamFollowed;
+        set
+        {
+            if (SetProperty(ref _isHomeTeamFollowed, value))
+            {
+                OnPropertyChanged(nameof(HomeStarGlyph));
+                OnPropertyChanged(nameof(HomeStarOpacity));
+            }
+        }
+    }
+
+    public bool IsAwayTeamFollowed
+    {
+        get => _isAwayTeamFollowed;
+        set
+        {
+            if (SetProperty(ref _isAwayTeamFollowed, value))
+            {
+                OnPropertyChanged(nameof(AwayStarGlyph));
+                OnPropertyChanged(nameof(AwayStarOpacity));
+            }
+        }
+    }
+
+    public bool IsCompetitionFollowed
+    {
+        get => _isCompetitionFollowed;
+        set
+        {
+            if (SetProperty(ref _isCompetitionFollowed, value))
+            {
+                OnPropertyChanged(nameof(CompetitionStarGlyph));
+                OnPropertyChanged(nameof(CompetitionStarOpacity));
+            }
+        }
+    }
+
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set
+        {
+            if (SetProperty(ref _isPinned, value))
+            {
+                OnPropertyChanged(nameof(PinGlyph));
+                OnPropertyChanged(nameof(PinGlyphOpacity));
+            }
+        }
+    }
+
+    public string HomeStarGlyph => _isHomeTeamFollowed ? "\uE735" : "\uE734";
+    public string AwayStarGlyph => _isAwayTeamFollowed ? "\uE735" : "\uE734";
+    public string CompetitionStarGlyph => _isCompetitionFollowed ? "\uE735" : "\uE734";
+    public string PinGlyph => _isPinned ? "\uE840" : "\uE718";
+
+    public double HomeStarOpacity => _isHomeTeamFollowed ? 1.0 : 0.45;
+    public double AwayStarOpacity => _isAwayTeamFollowed ? 1.0 : 0.45;
+    public double CompetitionStarOpacity => _isCompetitionFollowed ? 1.0 : 0.45;
+    public double PinGlyphOpacity => _isPinned ? 1.0 : 0.6;
+
+    public ICommand ToggleHomeStarCommand { get; }
+    public ICommand ToggleAwayStarCommand { get; }
+    public ICommand ToggleCompetitionStarCommand { get; }
+    public ICommand TogglePinCommand { get; }
+
+    public ICommand ToggleFollowHomeTeamCommand => ToggleHomeStarCommand;
+    public ICommand ToggleFollowAwayTeamCommand => ToggleAwayStarCommand;
+    public ICommand ToggleFollowCompetitionCommand => ToggleCompetitionStarCommand;
+
+    public MatchCenterViewModel()
+    {
+        ToggleHomeStarCommand = new RelayCommand(async () => await ToggleFollowHomeTeamAsync());
+        ToggleAwayStarCommand = new RelayCommand(async () => await ToggleFollowAwayTeamAsync());
+        ToggleCompetitionStarCommand = new RelayCommand(async () => await ToggleFollowCompetitionAsync());
+        TogglePinCommand = new RelayCommand(() => TogglePin());
+    }
+
+    public async Task ToggleFollowHomeTeamAsync()
+    {
+        if (string.IsNullOrWhiteSpace(HomeTeamId)) return;
+        var mainVm = App.CurrentMainViewModel;
+        if (mainVm != null)
+        {
+            await mainVm.ToggleTeamFollowAsync(HomeTeamId, HomeTeamName, HomeTeamLogoUrl);
+            RefreshFollowAndPinStates();
+        }
+    }
+
+    public async Task ToggleFollowAwayTeamAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AwayTeamId)) return;
+        var mainVm = App.CurrentMainViewModel;
+        if (mainVm != null)
+        {
+            await mainVm.ToggleTeamFollowAsync(AwayTeamId, AwayTeamName, AwayTeamLogoUrl);
+            RefreshFollowAndPinStates();
+        }
+    }
+
+    public async Task ToggleFollowCompetitionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(CompetitionId)) return;
+        var mainVm = App.CurrentMainViewModel;
+        if (mainVm != null)
+        {
+            await mainVm.ToggleCompetitionFollowAsync(CompetitionId, CompetitionName, CompetitionCode);
+            RefreshFollowAndPinStates();
+        }
+    }
+
+    public void TogglePin()
+    {
+        if (string.IsNullOrWhiteSpace(MatchId)) return;
+        var mainVm = App.CurrentMainViewModel;
+        if (mainVm != null)
+        {
+            mainVm.TogglePinMatch(MatchId);
+            RefreshFollowAndPinStates();
+        }
+    }
+
+    public void RefreshFollowAndPinStates()
+    {
+        var mainVm = App.CurrentMainViewModel;
+        if (mainVm != null)
+        {
+            var prefs = mainVm.PreferencesService?.GetPreferences();
+            if (prefs != null)
+            {
+                var followedTeams = prefs.GetFollowedTeamIdSet();
+                var followedComps = prefs.GetFollowedCompetitionIdSet();
+
+                IsHomeTeamFollowed = (!string.IsNullOrEmpty(HomeTeamId) && followedTeams.Contains(HomeTeamId)) ||
+                                     (!string.IsNullOrEmpty(HomeTeamLegacyId) && followedTeams.Contains(HomeTeamLegacyId));
+
+                IsAwayTeamFollowed = (!string.IsNullOrEmpty(AwayTeamId) && followedTeams.Contains(AwayTeamId)) ||
+                                     (!string.IsNullOrEmpty(AwayTeamLegacyId) && followedTeams.Contains(AwayTeamLegacyId));
+
+                IsCompetitionFollowed = (!string.IsNullOrEmpty(CompetitionId) && followedComps.Contains(CompetitionId)) ||
+                                        (!string.IsNullOrEmpty(CompetitionLegacyId) && followedComps.Contains(CompetitionLegacyId));
+            }
+
+            string? pinnedId = App.CurrentTickerCoordinator?.PinnedMatchId ?? mainVm.ManualPinnedMatchId;
+            IsPinned = !string.IsNullOrEmpty(MatchId) && string.Equals(MatchId, pinnedId, StringComparison.Ordinal);
+        }
+    }
 
     public string MatchId
     {
@@ -407,6 +608,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         _activeLineupTeam == "Away" ? AwayLineup : HomeLineup;
 
     public ObservableCollection<MatchTimelineItem> TimelineItems { get; } = new();
+    public ObservableCollection<MatchHeaderIncidentViewModel> HomeIncidents { get; } = new();
+    public ObservableCollection<MatchHeaderIncidentViewModel> AwayIncidents { get; } = new();
     public ObservableCollection<StatComparisonViewModel> MatchStats { get; } = new();
 
     public LineupPresentationViewModel HomeLineup { get; } = new();
@@ -446,8 +649,17 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         AwayTeamName = !string.IsNullOrWhiteSpace(match.AwayTeam?.Name) ? match.AwayTeam.Name : "Away Team";
         HomeTeamLogoUrl = match.HomeTeam?.LogoUrl;
         AwayTeamLogoUrl = match.AwayTeam?.LogoUrl;
+        HomeTeamId = match.HomeTeam?.Id ?? match.HomeTeamId ?? string.Empty;
+        HomeTeamLegacyId = match.HomeTeam?.LegacyId ?? string.Empty;
+        AwayTeamId = match.AwayTeam?.Id ?? match.AwayTeamId ?? string.Empty;
+        AwayTeamLegacyId = match.AwayTeam?.LegacyId ?? string.Empty;
+        CompetitionId = match.Competition?.Id ?? string.Empty;
+        CompetitionLegacyId = match.Competition?.LegacyId ?? string.Empty;
+        CompetitionCode = match.Competition?.Code;
         Title = $"{HomeTeamName} vs {AwayTeamName} - Match Center";
         CompetitionName = match.Competition?.Name ?? "Football";
+
+        RefreshFollowAndPinStates();
 
         // Status badge
         string state = (match.State ?? "PREMATCH").ToUpperInvariant();
@@ -515,29 +727,431 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             HasAggregateScore = false;
         }
 
-        // 1. Populate Timeline
+        // 1. Populate Timeline and Header Incidents (Goal Scorers & Red Cards)
         TimelineItems.Clear();
-        if (match.Events != null)
+        HomeIncidents.Clear();
+        AwayIncidents.Clear();
+
+        if (match.Events != null && match.Events.Count > 0)
         {
-            foreach (var ev in match.Events.OrderBy(e => e.Minute))
+            // Helper to determine if an event belongs to a team, supporting canonical IDs, legacy IDs, prefix stripping, and integer comparison
+            bool IsTeamMatch(string? eventTeamId, TeamSummaryDto? team, string? fallbackTeamId = null)
             {
-                string icon = ev.Type switch
+                if (string.IsNullOrWhiteSpace(eventTeamId)) return false;
+
+                string evId = eventTeamId.Trim();
+                var candidates = new List<string>();
+
+                if (team != null)
                 {
-                    "Goal" => "⚽",
-                    "YellowCard" => "🟨",
-                    "RedCard" => "🟥",
-                    "Substitution" => "🔄",
-                    "PeriodStart" => "⏱️",
-                    "PeriodEnd" => "🏁",
-                    _ => "📌",
+                    if (!string.IsNullOrWhiteSpace(team.Id)) candidates.Add(team.Id.Trim());
+                    if (!string.IsNullOrWhiteSpace(team.LegacyId)) candidates.Add(team.LegacyId.Trim());
+                }
+                if (!string.IsNullOrWhiteSpace(fallbackTeamId))
+                {
+                    candidates.Add(fallbackTeamId.Trim());
+                }
+
+                if (candidates.Count == 0) return false;
+
+                foreach (var c in candidates)
+                {
+                    if (string.Equals(evId, c, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+
+                static string StripPrefix(string val)
+                {
+                    if (val.StartsWith("ft_team_", StringComparison.OrdinalIgnoreCase))
+                        return val.Substring(8);
+                    if (val.StartsWith("team_", StringComparison.OrdinalIgnoreCase))
+                        return val.Substring(5);
+                    return val;
+                }
+
+                string evStripped = StripPrefix(evId);
+                foreach (var c in candidates)
+                {
+                    string cStripped = StripPrefix(c);
+                    if (string.Equals(evStripped, cStripped, StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+                    if (long.TryParse(evStripped, out long evNum) && long.TryParse(cStripped, out long cNum))
+                    {
+                        if (evNum == cNum)
+                            return true;
+                    }
+                }
+
+                return false;
+            }
+
+            bool IsEventForTeam(TrayEventDto e, TeamSummaryDto? team, string? fallbackTeamId = null)
+            {
+                if (team == null) return false;
+                if (IsTeamMatch(e.TeamId, team, fallbackTeamId)) return true;
+
+                if (!string.IsNullOrWhiteSpace(e.Description))
+                {
+                    if (!string.IsNullOrWhiteSpace(team.Name) && e.Description.Contains(team.Name, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                    if (!string.IsNullOrWhiteSpace(team.ShortName) && team.ShortName.Length >= 2 && e.Description.Contains(team.ShortName, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+
+                return false;
+            }
+
+            static string CleanDescription(string? rawDesc, string? type)
+            {
+                if (string.IsNullOrWhiteSpace(rawDesc)) return string.Empty;
+                string desc = rawDesc.Trim();
+                if (!string.IsNullOrEmpty(type) && desc.StartsWith($"[{type}]", StringComparison.OrdinalIgnoreCase))
+                {
+                    desc = desc.Substring(type.Length + 2).Trim();
+                }
+                else if (desc.StartsWith("[") && desc.Contains("]"))
+                {
+                    int closeIdx = desc.IndexOf(']');
+                    if (closeIdx > 0 && closeIdx < desc.Length - 1)
+                    {
+                        desc = desc.Substring(closeIdx + 1).Trim();
+                    }
+                }
+                return desc;
+            }
+
+            bool IsMissedPenalty(TrayEventDto e)
+            {
+                string t = (e.Type ?? string.Empty).ToLowerInvariant();
+                string d = (e.Detail ?? string.Empty).ToLowerInvariant();
+                string desc = (e.Description ?? string.Empty).ToLowerInvariant();
+
+                if (t.Contains("missed") && t.Contains("pen")) return true;
+                if (t is "missed_penalty" or "missedpenalty" or "penalty_missed") return true;
+                if ((t is "penalty" || t.Contains("pen")) && (d.Contains("missed") || desc.Contains("missed"))) return true;
+                if (d.Contains("missed penalty") || d.Contains("penalty missed") || desc.Contains("missed penalty") || desc.Contains("penalty missed")) return true;
+
+                return false;
+            }
+
+            string FormatPlayerWithLineup(string? playerName, List<LineupDto>? lineups, string? playerId = null)
+            {
+                if (string.IsNullOrWhiteSpace(playerName))
+                    return string.Empty;
+
+                string trimmedName = playerName.Trim();
+                if (lineups == null || lineups.Count == 0)
+                    return trimmedName;
+
+                LineupPlayerDto? matchedPlayer = null;
+
+                foreach (var lineup in lineups)
+                {
+                    if (lineup == null) continue;
+
+                    var starters = lineup.GetStartingXI();
+                    var subs = lineup.GetSubstitutes();
+                    if (starters != null)
+                    {
+                        matchedPlayer = starters.FirstOrDefault(p =>
+                            p != null && (
+                                (!string.IsNullOrEmpty(playerId) && (string.Equals(p.PlayerId, playerId, StringComparison.OrdinalIgnoreCase) || string.Equals(p.Id, playerId, StringComparison.OrdinalIgnoreCase))) ||
+                                string.Equals(p.Name, trimmedName, StringComparison.OrdinalIgnoreCase)
+                            ));
+                    }
+
+                    if (matchedPlayer == null && subs != null)
+                    {
+                        matchedPlayer = subs.FirstOrDefault(p =>
+                            p != null && (
+                                (!string.IsNullOrEmpty(playerId) && (string.Equals(p.PlayerId, playerId, StringComparison.OrdinalIgnoreCase) || string.Equals(p.Id, playerId, StringComparison.OrdinalIgnoreCase))) ||
+                                string.Equals(p.Name, trimmedName, StringComparison.OrdinalIgnoreCase)
+                            ));
+                    }
+
+                    // Fallback to substring matching if name is long enough and not yet matched
+                    if (matchedPlayer == null && trimmedName.Length >= 4)
+                    {
+                        if (starters != null)
+                        {
+                            matchedPlayer = starters.FirstOrDefault(p =>
+                                p != null && !string.IsNullOrWhiteSpace(p.Name) &&
+                                (p.Name.Contains(trimmedName, StringComparison.OrdinalIgnoreCase) || trimmedName.Contains(p.Name, StringComparison.OrdinalIgnoreCase)));
+                        }
+                        if (matchedPlayer == null && subs != null)
+                        {
+                            matchedPlayer = subs.FirstOrDefault(p =>
+                                p != null && !string.IsNullOrWhiteSpace(p.Name) &&
+                                (p.Name.Contains(trimmedName, StringComparison.OrdinalIgnoreCase) || trimmedName.Contains(p.Name, StringComparison.OrdinalIgnoreCase)));
+                        }
+                    }
+
+                    if (matchedPlayer != null)
+                        break;
+                }
+
+                if (matchedPlayer == null)
+                    return trimmedName;
+
+                string? numPart = matchedPlayer.Number.HasValue ? $"#{matchedPlayer.Number.Value}" : null;
+                string? posPart = null;
+                if (!string.IsNullOrWhiteSpace(matchedPlayer.Position))
+                {
+                    string rawPos = matchedPlayer.Position.Trim().ToUpperInvariant();
+                    string badge = rawPos switch
+                    {
+                        "G" or "GK" => "GK",
+                        "D" or "DEF" or "DF" => "DEF",
+                        "M" or "MID" or "MF" => "MID",
+                        "F" or "FWD" or "FW" or "ATT" => "ATT",
+                        _ => rawPos
+                    };
+                    posPart = $"({badge})";
+                }
+
+                var parts = new List<string>();
+                if (numPart != null) parts.Add(numPart);
+                if (posPart != null) parts.Add(posPart);
+
+                if (parts.Count > 0)
+                {
+                    return $"{string.Join(" ", parts)} {trimmedName}";
+                }
+
+                return trimmedName;
+            }
+
+            // Home Goals
+            var homeGoals = match.Events
+                .Where(e => (e.Type?.ToLowerInvariant().Contains("goal") == true || e.Type?.ToLowerInvariant() == "penalty") &&
+                            e.Type?.ToLowerInvariant().Contains("missed") != true &&
+                            !IsMissedPenalty(e) &&
+                            IsEventForTeam(e, match.HomeTeam, match.HomeTeamId))
+                .OrderBy(e => e.Minute)
+                .GroupBy(e => !string.IsNullOrWhiteSpace(e.PlayerName)
+                    ? e.PlayerName.Trim()
+                    : (!string.IsNullOrWhiteSpace(CleanDescription(e.Description, e.Type)) ? CleanDescription(e.Description, e.Type) : "Goal"));
+
+            foreach (var g in homeGoals)
+            {
+                var minutes = string.Join(", ", g.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                HomeIncidents.Add(new MatchHeaderIncidentViewModel
+                {
+                    Icon = "⚽",
+                    Text = $"{g.Key} {minutes}"
+                });
+            }
+
+            // Home Missed Penalties
+            var homeMissedPens = match.Events
+                .Where(e => IsMissedPenalty(e) &&
+                            IsEventForTeam(e, match.HomeTeam, match.HomeTeamId))
+                .OrderBy(e => e.Minute)
+                .GroupBy(e => !string.IsNullOrWhiteSpace(e.PlayerName)
+                    ? e.PlayerName.Trim()
+                    : (!string.IsNullOrWhiteSpace(CleanDescription(e.Description, e.Type)) ? CleanDescription(e.Description, e.Type) : "Missed Penalty"));
+
+            foreach (var mp in homeMissedPens)
+            {
+                var minutes = string.Join(", ", mp.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                HomeIncidents.Add(new MatchHeaderIncidentViewModel
+                {
+                    Icon = "❌",
+                    Text = $"{mp.Key} {minutes}"
+                });
+            }
+
+            // Home Red Cards
+            var homeReds = match.Events
+                .Where(e => (e.Type?.ToLowerInvariant().Contains("red") == true) &&
+                            IsEventForTeam(e, match.HomeTeam, match.HomeTeamId))
+                .OrderBy(e => e.Minute)
+                .GroupBy(e => !string.IsNullOrWhiteSpace(e.PlayerName) ? e.PlayerName.Trim() : "Red Card");
+
+            foreach (var r in homeReds)
+            {
+                var minutes = string.Join(", ", r.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                HomeIncidents.Add(new MatchHeaderIncidentViewModel
+                {
+                    Icon = "🟥",
+                    Text = $"{r.Key} {minutes}"
+                });
+            }
+
+            // Away Goals
+            var awayGoals = match.Events
+                .Where(e => (e.Type?.ToLowerInvariant().Contains("goal") == true || e.Type?.ToLowerInvariant() == "penalty") &&
+                            e.Type?.ToLowerInvariant().Contains("missed") != true &&
+                            !IsMissedPenalty(e) &&
+                            IsEventForTeam(e, match.AwayTeam, match.AwayTeamId))
+                .OrderBy(e => e.Minute)
+                .GroupBy(e => !string.IsNullOrWhiteSpace(e.PlayerName)
+                    ? e.PlayerName.Trim()
+                    : (!string.IsNullOrWhiteSpace(CleanDescription(e.Description, e.Type)) ? CleanDescription(e.Description, e.Type) : "Goal"));
+
+            foreach (var g in awayGoals)
+            {
+                var minutes = string.Join(", ", g.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                AwayIncidents.Add(new MatchHeaderIncidentViewModel
+                {
+                    Icon = "⚽",
+                    Text = $"{g.Key} {minutes}"
+                });
+            }
+
+            // Away Missed Penalties
+            var awayMissedPens = match.Events
+                .Where(e => IsMissedPenalty(e) &&
+                            IsEventForTeam(e, match.AwayTeam, match.AwayTeamId))
+                .OrderBy(e => e.Minute)
+                .GroupBy(e => !string.IsNullOrWhiteSpace(e.PlayerName)
+                    ? e.PlayerName.Trim()
+                    : (!string.IsNullOrWhiteSpace(CleanDescription(e.Description, e.Type)) ? CleanDescription(e.Description, e.Type) : "Missed Penalty"));
+
+            foreach (var mp in awayMissedPens)
+            {
+                var minutes = string.Join(", ", mp.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                AwayIncidents.Add(new MatchHeaderIncidentViewModel
+                {
+                    Icon = "❌",
+                    Text = $"{mp.Key} {minutes}"
+                });
+            }
+
+            // Away Red Cards
+            var awayReds = match.Events
+                .Where(e => (e.Type?.ToLowerInvariant().Contains("red") == true) &&
+                            IsEventForTeam(e, match.AwayTeam, match.AwayTeamId))
+                .OrderBy(e => e.Minute)
+                .GroupBy(e => !string.IsNullOrWhiteSpace(e.PlayerName) ? e.PlayerName.Trim() : "Red Card");
+
+            foreach (var r in awayReds)
+            {
+                var minutes = string.Join(", ", r.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                AwayIncidents.Add(new MatchHeaderIncidentViewModel
+                {
+                    Icon = "🟥",
+                    Text = $"{r.Key} {minutes}"
+                });
+            }
+
+            // Reverse chronological Timeline items (descending: 90+2' down to 1')
+            foreach (var ev in match.Events.OrderByDescending(e => e.Minute).ThenByDescending(e => e.ExtraMinute))
+            {
+                string typeLower = (ev.Type ?? string.Empty).ToLowerInvariant();
+                bool isMissedPen = IsMissedPenalty(ev);
+                string icon = isMissedPen ? "❌" : typeLower switch
+                {
+                    "goal" => "⚽",
+                    "penalty" => "⚽",
+                    "owngoal" => "⚽",
+                    "yellowcard" or "yellow_card" => "🟨",
+                    "redcard" or "red_card" => "🟥",
+                    "secondyellow" or "yellowred" => "🟨🟥",
+                    "substitution" or "sub" => "🔄",
+                    "var" => "🖥️",
+                    "periodstart" or "kickoff" => "⏱️",
+                    "periodend" or "halftime" or "fulltime" => "🏁",
+                    "missed_penalty" or "missedpenalty" => "❌",
+                    _ => "📌"
                 };
+
+                bool isNeutralType = typeLower is "periodstart" or "periodend" or "halftime" or "fulltime" or "kickoff";
+                bool isHome = false;
+                bool isAway = false;
+
+                if (!isNeutralType)
+                {
+                    isHome = IsEventForTeam(ev, match.HomeTeam, match.HomeTeamId);
+                    isAway = !isHome && IsEventForTeam(ev, match.AwayTeam, match.AwayTeamId);
+
+                    // If neither matched by TeamId or description, try matching via lineups
+                    if (!isHome && !isAway && !string.IsNullOrWhiteSpace(ev.PlayerName) && match.Lineups != null)
+                    {
+                        foreach (var lineup in match.Lineups)
+                        {
+                            var startingXi = lineup.GetStartingXI();
+                            bool playerInLineup = (startingXi != null && startingXi.Any(p => string.Equals(p.Name, ev.PlayerName, StringComparison.OrdinalIgnoreCase))) ||
+                                                  (lineup.Substitutes != null && lineup.Substitutes.Any(p => string.Equals(p.Name, ev.PlayerName, StringComparison.OrdinalIgnoreCase)));
+                            if (playerInLineup)
+                            {
+                                if (IsTeamMatch(lineup.TeamId, match.HomeTeam, match.HomeTeamId))
+                                {
+                                    isHome = true;
+                                    break;
+                                }
+                                else if (IsTeamMatch(lineup.TeamId, match.AwayTeam, match.AwayTeamId))
+                                {
+                                    isAway = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                string minuteDisplay = ev.ExtraMinute > 0 ? $"{ev.Minute}+{ev.ExtraMinute}'" : $"{ev.Minute}'";
+                string cleanedDesc = CleanDescription(ev.Description, ev.Type);
+                string eventTitle;
+                string eventSubtitle;
+
+                bool isSub = typeLower is "substitution" or "sub";
+
+                if (isSub)
+                {
+                    string inPlayer = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
+                    string outPlayer = FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups);
+
+                    eventTitle = !string.IsNullOrWhiteSpace(inPlayer)
+                        ? $"In: {inPlayer}"
+                        : (!string.IsNullOrWhiteSpace(cleanedDesc) ? cleanedDesc : "Substitution");
+
+                    eventSubtitle = !string.IsNullOrWhiteSpace(outPlayer)
+                        ? $"Out: {outPlayer}"
+                        : (!string.Equals(cleanedDesc, eventTitle, StringComparison.OrdinalIgnoreCase) ? cleanedDesc : string.Empty);
+                }
+                else if (isMissedPen)
+                {
+                    string player = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
+                    eventTitle = !string.IsNullOrWhiteSpace(player)
+                        ? player
+                        : (!string.IsNullOrWhiteSpace(cleanedDesc) ? cleanedDesc : "Missed Penalty");
+                    eventSubtitle = "Missed Penalty";
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(ev.PlayerName))
+                    {
+                        eventTitle = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
+                        eventSubtitle = !string.IsNullOrWhiteSpace(ev.AssistPlayerName)
+                            ? $"Assist: {FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups)}"
+                            : cleanedDesc;
+                    }
+                    else
+                    {
+                        eventTitle = !string.IsNullOrWhiteSpace(cleanedDesc) ? cleanedDesc : (ev.Type ?? "Event");
+                        eventSubtitle = !string.IsNullOrWhiteSpace(ev.AssistPlayerName)
+                            ? $"Assist: {FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups)}"
+                            : string.Empty;
+                    }
+                }
+
+                if (string.Equals(eventTitle, eventSubtitle, StringComparison.OrdinalIgnoreCase))
+                {
+                    eventSubtitle = string.Empty;
+                }
 
                 TimelineItems.Add(new MatchTimelineItem
                 {
-                    MinuteDisplay = $"{ev.Minute}'",
+                    MinuteDisplay = minuteDisplay,
                     IconGlyph = icon,
-                    Description = ev.Description ?? ev.Type,
-                    PlayerInfo = !string.IsNullOrWhiteSpace(ev.PlayerName) ? ev.PlayerName : null,
+                    Description = !string.IsNullOrWhiteSpace(cleanedDesc) ? cleanedDesc : (ev.Description ?? ev.Type ?? "Event"),
+                    PlayerInfo = !string.IsNullOrWhiteSpace(ev.PlayerName) ? ev.PlayerName.Trim() : null,
+                    IsHomeTeam = isHome,
+                    IsAwayTeam = isAway,
+                    EventTitle = eventTitle,
+                    EventSubtitle = eventSubtitle
                 });
             }
         }

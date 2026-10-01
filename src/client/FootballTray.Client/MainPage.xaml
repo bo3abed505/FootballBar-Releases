@@ -15,7 +15,10 @@
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="14"
-                Margin="0,0,0,8">
+                Margin="0,0,0,8"
+                Tag="{x:Bind}"
+                Tapped="OnMatchCardTapped"
+                IsHitTestVisible="True">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -23,48 +26,75 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <!-- Top Row: Competition, State Badge, Taskbar Indicator -->
+                    <!-- Top Row: Competition, Follow Competition Star, State Badge, Taskbar Indicator -->
                     <Grid Grid.Row="0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <!-- Competition Follow Star Toggle Button -->
+                            <Button
+                                x:Name="FollowCompetitionButton"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="2"
+                                MinHeight="0"
+                                MinWidth="0"
+                                Tag="{x:Bind}"
+                                Click="OnToggleFollowCompetitionClicked"
+                                ToolTipService.ToolTip="Toggle follow competition">
+                                <FontIcon
+                                    Glyph="{x:Bind CompetitionStarGlyph, Mode=OneWay}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource SystemFillColorAttentionBrush}"
+                                    Opacity="{x:Bind CompetitionStarOpacity, Mode=OneWay}" />
+                            </Button>
                             <TextBlock
                                 Text="{x:Bind CompetitionName}"
                                 FontSize="12"
                                 FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                VerticalAlignment="Center" />
                             <TextBlock
                                 Text="•"
                                 FontSize="12"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                VerticalAlignment="Center" />
                             <TextBlock
                                 Text="{x:Bind KickoffDisplay}"
                                 FontSize="11"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                VerticalAlignment="Center" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                            <!-- Active Taskbar Badge / Unpin Action -->
+                            <!-- Universal Persistent Taskbar Pin Toggle Button -->
                             <Button
-                                x:Name="UnpinMatchButton"
-                                Visibility="{x:Bind IsActiveTaskbarMatch, Mode=OneWay}"
-                                Background="{ThemeResource SystemFillColorAttentionBackgroundBrush}"
-                                BorderThickness="0"
+                                x:Name="PinMatchButton"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
                                 CornerRadius="4"
                                 Padding="6,2,6,2"
                                 MinHeight="0"
                                 MinWidth="0"
                                 Tag="{x:Bind}"
-                                Click="OnUnpinMatchClicked"
-                                ToolTipService.ToolTip="Pinned to taskbar. Click to unpin and resume match rotation.">
-                                <TextBlock
-                                    Text="📌 On Taskbar ✕"
-                                    FontSize="10"
-                                    FontWeight="Bold"
-                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                Click="OnTogglePinClicked"
+                                Opacity="{x:Bind PinButtonOpacity, Mode=OneWay}"
+                                ToolTipService.ToolTip="{x:Bind PinToolTipText, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <FontIcon
+                                        Glyph="{x:Bind PinGlyph, Mode=OneWay}"
+                                        FontSize="11"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                    <TextBlock
+                                        Text="{x:Bind PinText, Mode=OneWay}"
+                                        FontSize="10"
+                                        FontWeight="Bold"
+                                        Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                </StackPanel>
                             </Button>
 
                             <!-- State Badge -->
@@ -89,15 +119,32 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <!-- Home Team -->
-                        <TextBlock
-                            Grid.Column="0"
-                            Text="{x:Bind HomeTeamName}"
-                            FontSize="15"
-                            FontWeight="Bold"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            TextTrimming="CharacterEllipsis" />
+                        <!-- Home Team with Follow Star -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <Button
+                                x:Name="FollowHomeTeamButton"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="2"
+                                MinHeight="0"
+                                MinWidth="0"
+                                Tag="{x:Bind}"
+                                Click="OnToggleFollowHomeTeamClicked"
+                                ToolTipService.ToolTip="Toggle follow home team">
+                                <FontIcon
+                                    Glyph="{x:Bind HomeStarGlyph, Mode=OneWay}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource SystemFillColorAttentionBrush}"
+                                    Opacity="{x:Bind HomeStarOpacity, Mode=OneWay}" />
+                            </Button>
+                            <TextBlock
+                                Text="{x:Bind HomeTeamName}"
+                                FontSize="15"
+                                FontWeight="Bold"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
 
                         <!-- Score -->
                         <Border
@@ -113,15 +160,32 @@
                                 HorizontalAlignment="Center" />
                         </Border>
 
-                        <!-- Away Team -->
-                        <TextBlock
-                            Grid.Column="2"
-                            Text="{x:Bind AwayTeamName}"
-                            FontSize="15"
-                            FontWeight="Bold"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            TextTrimming="CharacterEllipsis" />
+                        <!-- Away Team with Follow Star -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock
+                                Text="{x:Bind AwayTeamName}"
+                                FontSize="15"
+                                FontWeight="Bold"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis" />
+                            <Button
+                                x:Name="FollowAwayTeamButton"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="2"
+                                MinHeight="0"
+                                MinWidth="0"
+                                Tag="{x:Bind}"
+                                Click="OnToggleFollowAwayTeamClicked"
+                                ToolTipService.ToolTip="Toggle follow away team">
+                                <FontIcon
+                                    Glyph="{x:Bind AwayStarGlyph, Mode=OneWay}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource SystemFillColorAttentionBrush}"
+                                    Opacity="{x:Bind AwayStarOpacity, Mode=OneWay}" />
+                            </Button>
+                        </StackPanel>
                     </Grid>
 
                     <!-- Bottom Row: Relevance Reasoning (if relevant) -->
@@ -245,6 +309,8 @@
                         <RowDefinition Height="Auto" />
                         <!-- Row 2: Match List / Empty State -->
                         <RowDefinition Height="*" />
+                        <!-- Row 3: Footer Schedule Sync Info -->
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <!-- Filter Bar -->
@@ -404,6 +470,23 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
+
+                    <!-- Footer Info Text: Active Schedule Sync Window -->
+                    <Border
+                        Grid.Row="3"
+                        Margin="0,4,0,0"
+                        Padding="4,8,4,0"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="0,1,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" Opacity="0.75">
+                            <FontIcon Glyph="&#xE72C;" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
+                            <TextBlock
+                                Text="Syncing active calendar day &amp; followed team fixtures"
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Border>
 

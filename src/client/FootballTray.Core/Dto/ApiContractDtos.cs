@@ -87,6 +87,13 @@ public class TrayMatchDto
     [JsonPropertyName("recentEvents")]
     public List<TrayEventDto> RecentEvents { get; set; } = new();
 
+    [JsonPropertyName("events")]
+    public List<TrayEventDto>? Events
+    {
+        get => RecentEvents;
+        set { if (value != null) RecentEvents = value; }
+    }
+
     [JsonIgnore]
     public IReadOnlyList<string> FormattedGoalscorers
     {
@@ -225,11 +232,48 @@ public class TrayEventDto
     [JsonPropertyName("teamId")]
     public string TeamId { get; set; } = string.Empty;
 
+    [JsonPropertyName("team_id")]
+    public string? TeamIdAlias
+    {
+        get => null;
+        set { if (string.IsNullOrEmpty(TeamId) && !string.IsNullOrEmpty(value)) TeamId = value; }
+    }
+
+    [JsonPropertyName("playerId")]
+    public string? PlayerId { get; set; }
+
+    [JsonPropertyName("player_id")]
+    public string? PlayerIdAlias
+    {
+        get => null;
+        set { if (string.IsNullOrEmpty(PlayerId) && !string.IsNullOrEmpty(value)) PlayerId = value; }
+    }
+
     [JsonPropertyName("playerName")]
     public string? PlayerName { get; set; }
 
+    [JsonPropertyName("player_name")]
+    public string? PlayerNameAlias
+    {
+        get => null;
+        set { if (string.IsNullOrEmpty(PlayerName) && !string.IsNullOrEmpty(value)) PlayerName = value; }
+    }
+
+    [JsonPropertyName("assistPlayerName")]
+    public string? AssistPlayerName { get; set; }
+
+    [JsonPropertyName("assist_player_name")]
+    public string? AssistPlayerNameAlias
+    {
+        get => null;
+        set { if (string.IsNullOrEmpty(AssistPlayerName) && !string.IsNullOrEmpty(value)) AssistPlayerName = value; }
+    }
+
     [JsonPropertyName("description")]
     public string? Description { get; set; }
+
+    [JsonPropertyName("detail")]
+    public string? Detail { get; set; }
 }
 
 public class MatchDetailDto
@@ -246,8 +290,14 @@ public class MatchDetailDto
     [JsonPropertyName("homeTeam")]
     public TeamSummaryDto HomeTeam { get; set; } = new();
 
+    [JsonPropertyName("homeTeamId")]
+    public string? HomeTeamId { get; set; }
+
     [JsonPropertyName("awayTeam")]
     public TeamSummaryDto AwayTeam { get; set; } = new();
+
+    [JsonPropertyName("awayTeamId")]
+    public string? AwayTeamId { get; set; }
 
     [JsonPropertyName("state")]
     public string State { get; set; } = "PREMATCH";

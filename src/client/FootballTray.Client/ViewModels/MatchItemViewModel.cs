@@ -17,6 +17,9 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     private bool _isRelevant;
     private bool _followedByTeam;
     private bool _followedByCompetition;
+    private bool _isHomeTeamFollowed;
+    private bool _isAwayTeamFollowed;
+    private bool _isCompetitionFollowed;
     private IReadOnlyList<string> _relevanceReasons = Array.Empty<string>();
     private string _relevanceDisplay = string.Empty;
 
@@ -49,8 +52,69 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     public bool IsActiveTaskbarMatch
     {
         get => _isActiveTaskbarMatch;
-        set => SetProperty(ref _isActiveTaskbarMatch, value);
+        set
+        {
+            if (SetProperty(ref _isActiveTaskbarMatch, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinGlyph)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinToolTipText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinButtonOpacity)));
+            }
+        }
     }
+
+    public string PinGlyph => _isActiveTaskbarMatch ? "\uE840" : "\uE718";
+    public string PinText => _isActiveTaskbarMatch ? "Pinned" : "Pin";
+    public string PinToolTipText => _isActiveTaskbarMatch ? "Pinned to taskbar. Click to unpin." : "Pin this match to the taskbar.";
+    public double PinButtonOpacity => _isActiveTaskbarMatch ? 1.0 : 0.7;
+
+    public bool IsHomeTeamFollowed
+    {
+        get => _isHomeTeamFollowed;
+        set
+        {
+            if (SetProperty(ref _isHomeTeamFollowed, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HomeStarGlyph)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HomeStarOpacity)));
+            }
+        }
+    }
+
+    public bool IsAwayTeamFollowed
+    {
+        get => _isAwayTeamFollowed;
+        set
+        {
+            if (SetProperty(ref _isAwayTeamFollowed, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AwayStarGlyph)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AwayStarOpacity)));
+            }
+        }
+    }
+
+    public bool IsCompetitionFollowed
+    {
+        get => _isCompetitionFollowed;
+        set
+        {
+            if (SetProperty(ref _isCompetitionFollowed, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompetitionStarGlyph)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompetitionStarOpacity)));
+            }
+        }
+    }
+
+    public string HomeStarGlyph => _isHomeTeamFollowed ? "\uE735" : "\uE734";
+    public string AwayStarGlyph => _isAwayTeamFollowed ? "\uE735" : "\uE734";
+    public string CompetitionStarGlyph => _isCompetitionFollowed ? "\uE735" : "\uE734";
+
+    public double HomeStarOpacity => _isHomeTeamFollowed ? 1.0 : 0.45;
+    public double AwayStarOpacity => _isAwayTeamFollowed ? 1.0 : 0.45;
+    public double CompetitionStarOpacity => _isCompetitionFollowed ? 1.0 : 0.45;
 
     public bool IsRelevant
     {
@@ -102,11 +166,21 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         }
     }
 
+    public void UpdateFollowStates(bool homeFollowed, bool awayFollowed, bool compFollowed)
+    {
+        IsHomeTeamFollowed = homeFollowed;
+        IsAwayTeamFollowed = awayFollowed;
+        IsCompetitionFollowed = compFollowed;
+    }
+
     public static MatchItemViewModel FromDto(
         TrayMatchDto match,
         FixtureRelevanceResult relevance,
         bool isActiveTaskbar,
-        bool use24HourFormat = true)
+        bool use24HourFormat = true,
+        bool homeFollowed = false,
+        bool awayFollowed = false,
+        bool compFollowed = false)
     {
         ArgumentNullException.ThrowIfNull(match);
 
@@ -192,15 +266,18 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         };
 
         vm.UpdateRelevance(relevance, isActiveTaskbar);
+        vm.UpdateFollowStates(homeFollowed, awayFollowed, compFollowed);
         return vm;
     }
 
-    private void SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
     {
         if (!EqualityComparer<T>.Default.Equals(storage, value))
         {
             storage = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            return true;
         }
+        return false;
     }
 }

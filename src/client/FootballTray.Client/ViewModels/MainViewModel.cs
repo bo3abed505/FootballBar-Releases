@@ -351,6 +351,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (SetProperty(ref _activeFilter, value))
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCalendarVisible)));
+                if (value == MatchFilterType.Upcoming)
+                {
+                    _syncService?.TriggerImmediateSync();
+                }
                 ApplyCurrentFilter();
             }
         }
@@ -381,6 +385,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _activeMatchId;
         private set => SetProperty(ref _activeMatchId, value);
     }
+
+    public string? ManualPinnedMatchId { get; private set; }
+    public bool IsExplicitlyUnpinned { get; private set; }
 
     public bool IsGlobalNotificationsEnabled
     {
@@ -438,6 +445,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (_selectedCalendarDate.Date != value.Date)
             {
                 _selectedCalendarDate = value.Date;
+                if (_syncService != null)
+                {
+                    _syncService.TargetDate = value.Date;
+                    _syncService.TriggerImmediateSync();
+                }
                 UpdateCalendarSelection();
                 ApplyCurrentFilter();
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
@@ -679,26 +691,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public async Task ToggleTeamFollowAsync(string teamId)
+    public async Task ToggleTeamFollowAsync(string teamId, string? teamName = null, string? logoUrl = null)
     {
         if (string.IsNullOrWhiteSpace(teamId)) return;
 
-        var teamVm = AvailableTeams.FirstOrDefault(t => t.Id.Equals(teamId, StringComparison.OrdinalIgnoreCase));
-        if (teamVm == null) return;
+        var prefs = _preferencesService.GetPreferences();
+        bool isCurrentlyFollowed = prefs.GetFollowedTeamIdSet().Contains(teamId);
 
-        bool targetFollow = !teamVm.IsFollowed;
         try
         {
-            if (targetFollow)
+            if (isCurrentlyFollowed)
             {
-                await _preferencesService.FollowTeamAsync(teamVm.ToDomain());
+                await _preferencesService.UnfollowTeamAsync(teamId);
+                var existing = AvailableTeams.FirstOrDefault(t => t.Id.Equals(teamId, StringComparison.OrdinalIgnoreCase));
+                if (existing != null) existing.IsFollowed = false;
             }
             else
             {
-                await _preferencesService.UnfollowTeamAsync(teamId);
+                var teamVm = AvailableTeams.FirstOrDefault(t => t.Id.Equals(teamId, StringComparison.OrdinalIgnoreCase));
+                var domainTeam = teamVm?.ToDomain() ?? new FollowedTeam
+                {
+                    Id = teamId,
+                    Name = !string.IsNullOrWhiteSpace(teamName) ? teamName : teamId,
+                    LogoUrl = logoUrl
+                };
+
+                await _preferencesService.FollowTeamAsync(domainTeam);
+                if (teamVm != null)
+                {
+                    teamVm.IsFollowed = true;
+                }
+                else
+                {
+                    AvailableTeams.Add(FollowedTeamItemViewModel.FromDomain(domainTeam, true));
+                }
             }
 
-            teamVm.IsFollowed = targetFollow;
             StatusMessage = null;
             ReapplyRelevanceAndFilters();
         }
@@ -708,26 +736,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public async Task ToggleCompetitionFollowAsync(string compId)
+    public async Task ToggleCompetitionFollowAsync(string compId, string? compName = null, string? compCode = null)
     {
         if (string.IsNullOrWhiteSpace(compId)) return;
 
-        var compVm = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase));
-        if (compVm == null) return;
+        var prefs = _preferencesService.GetPreferences();
+        bool isCurrentlyFollowed = prefs.GetFollowedCompetitionIdSet().Contains(compId);
 
-        bool targetFollow = !compVm.IsFollowed;
         try
         {
-            if (targetFollow)
+            if (isCurrentlyFollowed)
             {
-                await _preferencesService.FollowCompetitionAsync(compVm.ToDomain());
+                await _preferencesService.UnfollowCompetitionAsync(compId);
+                var existing = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase));
+                if (existing != null) existing.IsFollowed = false;
             }
             else
             {
-                await _preferencesService.UnfollowCompetitionAsync(compId);
+                var compVm = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase));
+                var domainComp = compVm?.ToDomain() ?? new FollowedCompetition
+                {
+                    Id = compId,
+                    Name = !string.IsNullOrWhiteSpace(compName) ? compName : compId,
+                    Code = compCode ?? "COMP"
+                };
+
+                await _preferencesService.FollowCompetitionAsync(domainComp);
+                if (compVm != null)
+                {
+                    compVm.IsFollowed = true;
+                }
+                else
+                {
+                    AvailableCompetitions.Add(FollowedCompetitionItemViewModel.FromDomain(domainComp, true));
+                }
             }
 
-            compVm.IsFollowed = targetFollow;
             StatusMessage = null;
             ReapplyRelevanceAndFilters();
         }
@@ -787,6 +831,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public void SetFilter(MatchFilterType filter)
     {
         ActiveFilter = filter;
+        if (filter == MatchFilterType.Upcoming)
+        {
+            _syncService?.TriggerImmediateSync();
+        }
     }
 
     private void RunOnUiSafe(Action action, string actionName)
@@ -861,9 +909,56 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ApplyCurrentFilter();
     }
 
+    public void TogglePinMatch(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+
+        if (string.Equals(ManualPinnedMatchId, matchId, StringComparison.Ordinal))
+        {
+            UnpinMatch(matchId);
+        }
+        else
+        {
+            PinMatch(matchId);
+        }
+    }
+
+    public void PinMatch(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+
+        ManualPinnedMatchId = matchId;
+        IsExplicitlyUnpinned = false;
+        ActiveMatchId = matchId;
+
+        App.CurrentTickerCoordinator?.PinMatch(matchId);
+
+        foreach (var match in FilteredMatches)
+        {
+            match.IsActiveTaskbarMatch = string.Equals(match.Id, matchId, StringComparison.Ordinal);
+        }
+
+        var allMatches = _latestTrayData?.Matches;
+        var pinnedMatch = allMatches?.FirstOrDefault(m => string.Equals(m.Id, matchId, StringComparison.Ordinal));
+        if (pinnedMatch != null)
+        {
+            string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
+            string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
+            string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
+            string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : pinnedMatch.State);
+            ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+        }
+        else
+        {
+            ActiveTickerText = "📌 Match pinned to taskbar";
+        }
+    }
+
     public void UnpinMatch(string? matchId = null)
     {
         App.CurrentTickerCoordinator?.UnpinMatch();
+        ManualPinnedMatchId = null;
+        IsExplicitlyUnpinned = true;
         ActiveMatchId = null;
         ActiveTickerText = "Taskbar match unpinned";
 
@@ -878,11 +973,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void OnTaskbarPinChanged(string? pinnedMatchId)
     {
+        ManualPinnedMatchId = pinnedMatchId;
+        IsExplicitlyUnpinned = string.IsNullOrEmpty(pinnedMatchId);
+        ActiveMatchId = pinnedMatchId;
+
         foreach (var match in FilteredMatches)
         {
-            match.IsActiveTaskbarMatch = !string.IsNullOrEmpty(pinnedMatchId)
-                ? string.Equals(match.Id, pinnedMatchId, StringComparison.Ordinal)
-                : string.Equals(match.Id, ActiveMatchId, StringComparison.Ordinal);
+            match.IsActiveTaskbarMatch = !string.IsNullOrEmpty(pinnedMatchId) && string.Equals(match.Id, pinnedMatchId, StringComparison.Ordinal);
+        }
+
+        if (!string.IsNullOrEmpty(pinnedMatchId))
+        {
+            var pinnedMatch = _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, pinnedMatchId, StringComparison.Ordinal));
+            if (pinnedMatch != null)
+            {
+                string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
+                string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
+                string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
+                string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : pinnedMatch.State);
+                ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+            }
+        }
+        else
+        {
+            ActiveTickerText = "Taskbar match unpinned";
         }
     }
 
@@ -909,7 +1023,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 var matchDate = m.KickoffTime.ToLocalTime().Date;
                 if (matchDate == targetDate) return true;
-                if (isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
+                if (isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m) || m.KickoffTime.UtcDateTime.Date == DateTime.UtcNow.Date)) return true;
                 return false;
             });
 
@@ -995,21 +1109,46 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Rebuild/update calendar days match counts
         RebuildCalendarDays();
 
-        // Prioritize and determine active taskbar match
-        var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
-        ActiveMatchId = activeMatch?.Id;
-
-        if (activeMatch != null)
+        // Prioritize and determine active taskbar match: respect explicit user pin or explicit unpin
+        if (!string.IsNullOrEmpty(ManualPinnedMatchId))
         {
-            string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
-            string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
-            string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
-            string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : activeMatch.State);
-            ActiveTickerText = $"Taskbar Active: {home} {score} {away} ({time})";
+            ActiveMatchId = ManualPinnedMatchId;
+            var pinnedMatch = allMatches.FirstOrDefault(m => string.Equals(m.Id, ManualPinnedMatchId, StringComparison.Ordinal));
+            if (pinnedMatch != null)
+            {
+                string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
+                string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
+                string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
+                string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : pinnedMatch.State);
+                ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+            }
+            else
+            {
+                ActiveTickerText = "📌 Pinned match";
+            }
+        }
+        else if (IsExplicitlyUnpinned)
+        {
+            ActiveMatchId = null;
+            ActiveTickerText = "Taskbar match unpinned";
         }
         else
         {
-            ActiveTickerText = allMatches.Count > 0 ? "No prioritized match for taskbar" : "No matches synchronized";
+            var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
+            ActiveMatchId = activeMatch?.Id;
+
+            if (activeMatch != null)
+            {
+                string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
+                string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
+                string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
+                string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : activeMatch.State);
+                ActiveTickerText = $"Taskbar Active: {home} {score} {away} ({time})";
+            }
+            else
+            {
+                ActiveTickerText = allMatches.Count > 0 ? "No prioritized match for taskbar" : "No matches synchronized";
+            }
         }
 
         // 1. Filter by Selected Calendar Date
@@ -1024,9 +1163,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             var matchDate = m.KickoffTime.ToLocalTime().Date;
             if (matchDate == targetDate) return true;
-            if (targetDate == DateTime.Today && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
+            if (targetDate == DateTime.Today && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m) || m.KickoffTime.UtcDateTime.Date == DateTime.UtcNow.Date)) return true;
             return false;
         }).ToList();
+
+        var followedTeamIds = prefs.GetFollowedTeamIdSet();
+        var followedCompIds = prefs.GetFollowedCompetitionIdSet();
 
         // 2. Evaluate relevance and build view models
         var viewModels = new List<MatchItemViewModel>();
@@ -1034,7 +1176,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
             bool isActive = match.Id == ActiveMatchId;
-            viewModels.Add(MatchItemViewModel.FromDto(match, relevance, isActive, prefs?.Use24HourFormat ?? true));
+            bool homeFollowed = !string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id);
+            bool awayFollowed = !string.IsNullOrEmpty(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id);
+            bool compFollowed = !string.IsNullOrEmpty(match.Competition?.Id) && followedCompIds.Contains(match.Competition.Id);
+
+            viewModels.Add(MatchItemViewModel.FromDto(
+                match,
+                relevance,
+                isActive,
+                prefs?.Use24HourFormat ?? true,
+                homeFollowed,
+                awayFollowed,
+                compFollowed));
         }
 
         // 3. Partition into the 3 strict buckets:
@@ -1219,7 +1372,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             else if (_activeFilter == MatchFilterType.Upcoming)
             {
                 EmptyStateTitle = "No Upcoming Matches";
-                EmptyStateMessage = "There are no upcoming prematch fixtures scheduled for today.";
+                EmptyStateMessage = "There are no upcoming prematch fixtures scheduled for your followed teams or competitions.";
             }
             else if (_activeFilter == MatchFilterType.Finished)
             {

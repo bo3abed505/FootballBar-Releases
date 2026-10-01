@@ -101,13 +101,34 @@ public class FootballApiClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches the tray match collection from /api/v2/tray with optional ETag 304 validation.
+    /// Fetches the tray match collection from /api/v2/tray with optional date, followed teams, and ETag 304 validation.
     /// </summary>
-    public async Task<TrayApiResponse> GetTrayAsync(string? ifNoneMatch = null, CancellationToken cancellationToken = default)
+    public Task<TrayApiResponse> GetTrayAsync(string? ifNoneMatch, CancellationToken cancellationToken) =>
+        GetTrayAsync(ifNoneMatch, null, null, cancellationToken);
+
+    public async Task<TrayApiResponse> GetTrayAsync(
+        string? ifNoneMatch = null,
+        DateTime? date = null,
+        IEnumerable<string>? teams = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v2/tray");
+            var uriBuilder = new System.Text.StringBuilder("/api/v2/tray?");
+            if (date.HasValue)
+            {
+                uriBuilder.Append($"date={date.Value:yyyy-MM-dd}&");
+            }
+            if (teams != null)
+            {
+                var teamList = teams.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+                if (teamList.Count > 0)
+                {
+                    uriBuilder.Append($"teams={Uri.EscapeDataString(string.Join(",", teamList))}&");
+                }
+            }
+            string uri = uriBuilder.ToString().TrimEnd('?', '&');
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
 
             if (!string.IsNullOrWhiteSpace(ifNoneMatch))
             {

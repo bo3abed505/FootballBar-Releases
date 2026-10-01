@@ -58,6 +58,36 @@ public class SyncService : ISyncService
     public NotificationService? NotificationService => _notificationService;
     public IPreferencesService? PreferencesService => _preferencesService;
 
+    private DateTime _targetDate = DateTime.Today;
+
+    public DateTime TargetDate
+    {
+        get => _targetDate;
+        set
+        {
+            if (_targetDate.Date != value.Date)
+            {
+                _targetDate = value.Date;
+                _lastKnownEtag = null; // Invalidate previous date ETag to force fresh fetch
+            }
+        }
+    }
+
+    public void TriggerImmediateSync()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await PollOnceAsync(_cts?.Token ?? CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn("Sync", "TriggerImmediateSyncFailed", $"Out-of-band sync failed: {ex.Message}");
+            }
+        });
+    }
+
     public SyncService(
         FootballApiClient apiClient,
         LocalCacheService cacheService,
@@ -106,6 +136,9 @@ public class SyncService : ISyncService
 
         // Push updated followed competitions and teams to the daemon
         _ = PushPreferencesToDaemonAsync(preferences, _cts?.Token ?? CancellationToken.None);
+
+        // Trigger immediate out-of-band poll with newly followed teams
+        TriggerImmediateSync();
     }
 
     /// <summary>
@@ -182,8 +215,52 @@ public class SyncService : ISyncService
         _lastRefreshAttempt = DateTimeOffset.UtcNow;
         try
         {
-            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (ETag: '{_lastKnownEtag ?? "none"}')...");
-            var response = await _apiClient.GetTrayAsync(_lastKnownEtag, cancellationToken);
+            var prefs = _preferencesService?.Current ?? _preferencesService?.GetPreferences();
+            var targetIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (prefs != null)
+            {
+                // Followed teams: canonical IDs, legacy IDs, names, numeric IDs
+                foreach (var id in prefs.GetFollowedTeamIdSet())
+                {
+                    if (!string.IsNullOrWhiteSpace(id) && !id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetIds.Add(id.Trim());
+                    }
+                }
+                if (prefs.FollowedTeams != null)
+                {
+                    foreach (var t in prefs.FollowedTeams)
+                    {
+                        if (!string.IsNullOrWhiteSpace(t.Id)) targetIds.Add(t.Id.Trim());
+                    }
+                }
+
+                // Followed competitions: canonical IDs, legacy IDs, codes
+                foreach (var id in prefs.GetFollowedCompetitionIdSet())
+                {
+                    if (!string.IsNullOrWhiteSpace(id) && !id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetIds.Add(id.Trim());
+                    }
+                }
+                if (prefs.FollowedCompetitions != null)
+                {
+                    foreach (var c in prefs.FollowedCompetitions)
+                    {
+                        if (!string.IsNullOrWhiteSpace(c.Id)) targetIds.Add(c.Id.Trim());
+                    }
+                }
+            }
+
+            var targetIdList = targetIds.ToList();
+
+            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {_targetDate:yyyy-MM-dd}, Targets: {targetIdList.Count}, ETag: '{_lastKnownEtag ?? "none"}')...");
+            var response = await _apiClient.GetTrayAsync(
+                _lastKnownEtag,
+                _targetDate,
+                targetIdList,
+                cancellationToken);
             sw.Stop();
             _lastRefreshDurationMs = sw.ElapsedMilliseconds;
 

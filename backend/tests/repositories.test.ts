@@ -63,6 +63,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
     'fix_repo_finished_old',
     'fix_repo_postponed',
     'fix_repo_cancelled',
+    'fix_repo_prematch_followed_far',
   ];
 
   const insertFixtures = async (fixtures: (Omit<typeof schema.fixtures.$inferInsert, 'canonicalId'> & { canonicalId?: string })[]) => {
@@ -226,7 +227,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
         state: 'PREMATCH',
         kickoffTime: new Date(fixedNow.getTime() + 365 * 24 * 60 * 60 * 1000),
       },
-      // FINISHED older than 4h window (-5h)
+      // FINISHED older than active day window (yesterday, -15h)
       {
         id: 'fix_repo_finished_old',
         competitionId: testCompId,
@@ -234,7 +235,7 @@ describe('FixturesRepository.getTrayMatches()', () => {
         homeTeamId: testTeamA,
         awayTeamId: testTeamB,
         state: 'FINISHED',
-        kickoffTime: new Date(fixedNow.getTime() - 5 * 60 * 60 * 1000),
+        kickoffTime: new Date(fixedNow.getTime() - 15 * 60 * 60 * 1000),
       },
       // Terminal: POSTPONED (+2h)
       {
@@ -350,5 +351,48 @@ describe('FixturesRepository.getTrayMatches()', () => {
       'fix_repo_live_tie_a',
       'fix_repo_live_tie_b',
     ]);
+  });
+
+  it('returns matches for a specific target date beyond today', async () => {
+    const targetDate = '2026-10-05';
+    const targetKickoff = new Date(Date.UTC(2026, 9, 5, 14, 0, 0, 0));
+    await insertFixtures([
+      {
+        id: 'fix_repo_prematch_mock2027',
+        competitionId: testCompId,
+        seasonId: testSeasonId,
+        homeTeamId: testTeamA,
+        awayTeamId: testTeamB,
+        state: 'PREMATCH',
+        kickoffTime: targetKickoff,
+      },
+    ]);
+
+    const results = await fixturesRepo.getTrayMatches({ date: targetDate }, fixedNow);
+    const targetMatch = results.find((m) => m.id === 'fix_repo_prematch_mock2027');
+    expect(targetMatch).toBeDefined();
+  });
+
+  it('includes far-future upcoming matches for followed teams regardless of date window', async () => {
+    const farFutureKickoff = new Date(fixedNow.getTime() + 14 * 24 * 60 * 60 * 1000); // 14 days later
+    await insertFixtures([
+      {
+        id: 'fix_repo_prematch_followed_far',
+        competitionId: testCompId,
+        seasonId: testSeasonId,
+        homeTeamId: testTeamA,
+        awayTeamId: testTeamB,
+        state: 'PREMATCH',
+        kickoffTime: farFutureKickoff,
+      },
+    ]);
+
+    // When team is not followed: excluded because kickoff is 14 days in the future
+    const withoutTeams = await fixturesRepo.getTrayMatches({ date: '2026-06-01' }, fixedNow);
+    expect(withoutTeams.find((m) => m.id === 'fix_repo_prematch_followed_far')).toBeUndefined();
+
+    // When team is followed: included regardless of how far in the future
+    const withFollowedTeam = await fixturesRepo.getTrayMatches({ date: '2026-06-01', teams: [testTeamA] }, fixedNow);
+    expect(withFollowedTeam.find((m) => m.id === 'fix_repo_prematch_followed_far')).toBeDefined();
   });
 });

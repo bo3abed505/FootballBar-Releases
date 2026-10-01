@@ -31,6 +31,7 @@ public sealed partial class MatchCenterWindow : Window
         }
 
         Closed += OnWindowClosed;
+        SetupSplitterCursor();
     }
 
     public void Populate(MatchDetailDto match)
@@ -45,6 +46,11 @@ public sealed partial class MatchCenterWindow : Window
         HomeTeamName.Text = ViewModel.HomeTeamName;
         AwayTeamName.Text = ViewModel.AwayTeamName;
         ScoreText.Text = ViewModel.ScoreText;
+
+        // Explicitly refresh incident and timeline collections on UI
+        HomeIncidentsList.ItemsSource = ViewModel.HomeIncidents;
+        AwayIncidentsList.ItemsSource = ViewModel.AwayIncidents;
+        EventsList.ItemsSource = ViewModel.TimelineItems;
 
         if (ViewModel.HasHalfTime)
         {
@@ -73,8 +79,58 @@ public sealed partial class MatchCenterWindow : Window
         StatisticsControl?.Update(ViewModel);
         LineupControl?.Update(ViewModel);
 
+        UpdateStarAndPinVisuals();
+
         // Asynchronously load team crests on background thread without blocking UI
         _ = LoadLogosAsync(match);
+    }
+
+    private async void OnToggleHomeStarClicked(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.ToggleFollowHomeTeamAsync();
+        UpdateStarAndPinVisuals();
+    }
+
+    private async void OnToggleAwayStarClicked(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.ToggleFollowAwayTeamAsync();
+        UpdateStarAndPinVisuals();
+    }
+
+    private async void OnToggleCompetitionStarClicked(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.ToggleFollowCompetitionAsync();
+        UpdateStarAndPinVisuals();
+    }
+
+    private void OnTogglePinClicked(object sender, RoutedEventArgs e)
+    {
+        ViewModel.TogglePin();
+        UpdateStarAndPinVisuals();
+    }
+
+    private void UpdateStarAndPinVisuals()
+    {
+        if (CompetitionStarIcon != null)
+        {
+            CompetitionStarIcon.Glyph = ViewModel.CompetitionStarGlyph;
+            CompetitionStarIcon.Opacity = ViewModel.CompetitionStarOpacity;
+        }
+        if (HomeStarIcon != null)
+        {
+            HomeStarIcon.Glyph = ViewModel.HomeStarGlyph;
+            HomeStarIcon.Opacity = ViewModel.HomeStarOpacity;
+        }
+        if (AwayStarIcon != null)
+        {
+            AwayStarIcon.Glyph = ViewModel.AwayStarGlyph;
+            AwayStarIcon.Opacity = ViewModel.AwayStarOpacity;
+        }
+        if (PinIcon != null)
+        {
+            PinIcon.Glyph = ViewModel.PinGlyph;
+            PinIcon.Opacity = ViewModel.PinGlyphOpacity;
+        }
     }
 
     private async Task LoadLogosAsync(MatchDetailDto match)
@@ -169,11 +225,117 @@ public sealed partial class MatchCenterWindow : Window
         }
 
         TimelineItems.Clear();
+        ViewModel.HomeIncidents.Clear();
+        ViewModel.AwayIncidents.Clear();
         ViewModel.PitchPlayers.Clear();
         ViewModel.HomeLineup.StartingXI.Clear();
         ViewModel.HomeLineup.Substitutes.Clear();
         ViewModel.AwayLineup.StartingXI.Clear();
         ViewModel.AwayLineup.Substitutes.Clear();
         ViewModel.MatchStats.Clear();
+    }
+
+    private bool _isDraggingSplitter;
+    private double _dragStartPointerX;
+    private double _dragStartLeftColumnWidth;
+
+    private void SetupSplitterCursor()
+    {
+        try
+        {
+            var cursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeWestEast);
+            typeof(UIElement).GetProperty("ProtectedCursor", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
+                ?.SetValue(TimelineSplitter, cursor);
+        }
+        catch
+        {
+            // Defensive fallback for runtimes without InputSystemCursor support
+        }
+    }
+
+    private void OnSplitterPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingSplitter)
+        {
+            SplitterGrip.Background = Application.Current.Resources["AccentTextFillColorPrimaryBrush"] as Microsoft.UI.Xaml.Media.Brush
+                ?? SplitterGrip.Background;
+            SplitterLine.Background = Application.Current.Resources["AccentTextFillColorPrimaryBrush"] as Microsoft.UI.Xaml.Media.Brush
+                ?? SplitterLine.Background;
+        }
+    }
+
+    private void OnSplitterPointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingSplitter)
+        {
+            SplitterGrip.Background = Application.Current.Resources["TextFillColorTertiaryBrush"] as Microsoft.UI.Xaml.Media.Brush
+                ?? SplitterGrip.Background;
+            SplitterLine.Background = Application.Current.Resources["DividerStrokeColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
+                ?? SplitterLine.Background;
+        }
+    }
+
+    private void OnSplitterPointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        _isDraggingSplitter = true;
+        TimelineSplitter.CapturePointer(e.Pointer);
+
+        var pt = e.GetCurrentPoint(MainContentGrid);
+        _dragStartPointerX = pt.Position.X;
+        _dragStartLeftColumnWidth = LeftColumnDefinition.ActualWidth;
+
+        SplitterGrip.Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
+            ?? SplitterGrip.Background;
+        SplitterLine.Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
+            ?? SplitterLine.Background;
+
+        e.Handled = true;
+    }
+
+    private void OnSplitterPointerMoved(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingSplitter) return;
+
+        var pt = e.GetCurrentPoint(MainContentGrid);
+        double deltaX = pt.Position.X - _dragStartPointerX;
+        double proposedWidth = _dragStartLeftColumnWidth + deltaX;
+
+        double minLeft = LeftColumnDefinition.MinWidth;
+        double minRight = RightColumnDefinition.MinWidth;
+        double totalAvailable = MainContentGrid.ActualWidth - 16; // 16px is splitter column width
+
+        if (totalAvailable > minLeft + minRight)
+        {
+            double maxLeft = totalAvailable - minRight;
+            proposedWidth = Math.Clamp(proposedWidth, minLeft, maxLeft);
+        }
+        else
+        {
+            proposedWidth = Math.Max(minLeft, proposedWidth);
+        }
+
+        LeftColumnDefinition.Width = new GridLength(proposedWidth, GridUnitType.Pixel);
+        e.Handled = true;
+    }
+
+    private void OnSplitterPointerReleased(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_isDraggingSplitter)
+        {
+            _isDraggingSplitter = false;
+            TimelineSplitter.ReleasePointerCapture(e.Pointer);
+
+            SplitterGrip.Background = Application.Current.Resources["TextFillColorTertiaryBrush"] as Microsoft.UI.Xaml.Media.Brush
+                ?? SplitterGrip.Background;
+            SplitterLine.Background = Application.Current.Resources["DividerStrokeColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
+                ?? SplitterLine.Background;
+
+            e.Handled = true;
+        }
+    }
+
+    private void OnSplitterPointerCanceled(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        OnSplitterPointerReleased(sender, e);
     }
 }

@@ -174,6 +174,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     private TickerConnectionState _currentConnectionState = TickerConnectionState.OnlineFresh;
     private UserPreferences? _currentPreferences;
     private string? _pinnedMatchId;
+    private TrayDataDto? _latestTrayData;
     private bool _isDisposed;
     private MatchCenterWindow? _matchCenterWindow;
 
@@ -249,10 +250,19 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         var targetId = matchId ?? _state.CurrentCandidate?.Id;
         if (string.IsNullOrEmpty(targetId)) return false;
 
-        bool exists = _state.Candidates.Any(m => string.Equals(m.Id, targetId, StringComparison.Ordinal));
-        if (exists)
+        // Check active candidates first, then fall back to latest tray data (allows pinning unfollowed matches)
+        TrayMatchDto? match = _state.Candidates.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.Ordinal))
+            ?? _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.Ordinal));
+
+        if (match != null)
         {
             _pinnedMatchId = targetId;
+            if (!_state.Candidates.Any(m => string.Equals(m.Id, targetId, StringComparison.Ordinal)))
+            {
+                var combined = new List<TrayMatchDto>(_state.Candidates);
+                combined.Insert(0, match);
+                _state.ApplyCandidates(combined);
+            }
             _state.SetCurrentMatch(targetId);
             EmitCurrentDisplay();
             return true;
@@ -304,6 +314,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
         _currentConnectionState = connectionState;
         _currentPreferences = preferences;
+        _latestTrayData = trayData;
 
         IReadOnlyList<TrayMatchDto> candidates;
         if (connectionState == TickerConnectionState.NoCacheOffline)
@@ -365,6 +376,18 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             }
         }
 
+        // If a match was explicitly pinned, guarantee it is present in candidates even if unfollowed
+        if (!string.IsNullOrEmpty(_pinnedMatchId))
+        {
+            var pinnedInTray = trayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
+            if (pinnedInTray != null && !candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal)))
+            {
+                var combined = new List<TrayMatchDto>(candidates);
+                combined.Insert(0, pinnedInTray);
+                candidates = combined;
+            }
+        }
+
         _state.ApplyCandidates(candidates);
 
         // If a match was pinned, retain it if still in candidates, or keep from trayData if still valid
@@ -377,16 +400,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             }
             else
             {
-                var pinnedInTray = trayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
-                if (pinnedInTray != null)
-                {
-                    _state.ApplyCandidates(new List<TrayMatchDto> { pinnedInTray });
-                    _state.SetCurrentMatch(_pinnedMatchId);
-                }
-                else
-                {
-                    _pinnedMatchId = null;
-                }
+                _pinnedMatchId = null;
             }
         }
 

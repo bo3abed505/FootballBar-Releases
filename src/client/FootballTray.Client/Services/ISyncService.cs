@@ -21,5 +21,7 @@ public interface ISyncService : IDisposable
     DateTimeOffset? LastValidatedAt { get; }
     Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default);
     Task StartAsync(CancellationToken cancellationToken = default);
+    DateTime TargetDate { get; set; }
+    void TriggerImmediateSync();
     void RefreshTickerOnPreferenceChange();
 }

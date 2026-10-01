@@ -1027,6 +1027,307 @@ public class MainViewModelAndUiTests
         FootballTray.Client.Services.Daemon.DaemonLifecycleManager.FreePortIfOccupied(65534);
     }
 
+    [TestMethod]
+    public async Task Test41_Strike3_UniversalPinning_PreservesManualPinAcrossFilterChanges()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var match1 = CreateMatch("m_1", "team_1", "team_2", "comp_1", state: "LIVE", elapsed: 35);
+        var match2 = CreateMatch("m_2", "team_3", "team_4", "comp_2", state: "PREMATCH");
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { match1, match2 } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        // Pin match2 (which is prematch and unfollowed)
+        vm.PinMatch("m_2");
+
+        Assert.AreEqual("m_2", vm.ManualPinnedMatchId);
+        Assert.AreEqual("m_2", vm.ActiveMatchId);
+        Assert.IsFalse(vm.IsExplicitlyUnpinned);
+        Assert.IsTrue(vm.ActiveTickerText.Contains("Pinned"), "ActiveTickerText must indicate pinned match.");
+
+        var item = vm.FilteredMatches.FirstOrDefault(m => m.Id == "m_2");
+        Assert.IsNotNull(item);
+        Assert.IsTrue(item.IsActiveTaskbarMatch);
+        Assert.AreEqual("\uE840", item.PinGlyph);
+
+        // Switch to Live filter (m_2 is prematch, so it won't be in Live filtered list)
+        vm.SetFilter(MatchFilterType.Live);
+        Assert.AreEqual("m_2", vm.ManualPinnedMatchId, "ManualPinnedMatchId must be preserved across filter change.");
+        Assert.AreEqual("m_2", vm.ActiveMatchId, "ActiveMatchId must remain the pinned match.");
+        Assert.IsTrue(vm.ActiveTickerText.Contains("Pinned"));
+
+        // Switch back to All filter
+        vm.SetFilter(MatchFilterType.All);
+        Assert.AreEqual("m_2", vm.ManualPinnedMatchId);
+        Assert.AreEqual("m_2", vm.ActiveMatchId);
+        item = vm.FilteredMatches.FirstOrDefault(m => m.Id == "m_2");
+        Assert.IsNotNull(item);
+        Assert.IsTrue(item.IsActiveTaskbarMatch);
+    }
+
+    [TestMethod]
+    public async Task Test42_Strike3_UniversalPinning_ExplicitUnpin_PreservesUnpinnedAcrossFilterChanges()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var match1 = CreateMatch("m_1", "team_1", "team_2", "comp_1", state: "LIVE", elapsed: 40);
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { match1 } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        Assert.AreEqual("m_1", vm.ActiveMatchId, "ActiveMatchId should initially default to active match.");
+
+        // Unpin
+        vm.UnpinMatch("m_1");
+
+        Assert.IsNull(vm.ManualPinnedMatchId);
+        Assert.IsNull(vm.ActiveMatchId);
+        Assert.IsTrue(vm.IsExplicitlyUnpinned);
+        Assert.AreEqual("Taskbar match unpinned", vm.ActiveTickerText);
+
+        // Switch filter - must not auto-repin m_1
+        vm.SetFilter(MatchFilterType.Live);
+        Assert.IsNull(vm.ActiveMatchId);
+        Assert.IsTrue(vm.IsExplicitlyUnpinned);
+        Assert.AreEqual("Taskbar match unpinned", vm.ActiveTickerText);
+    }
+
+    [TestMethod]
+    public async Task Test43_Strike3_FollowStarToggles_UpdatesUserPreferencesAndMatchViewModel()
+    {
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var match1 = CreateMatch("m_1", "team_roma", "team_lazio", "comp_seriea", homeName: "AS Roma", awayName: "SS Lazio", compName: "Serie A");
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { match1 } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        var item = vm.FilteredMatches.First(m => m.Id == "m_1");
+        Assert.IsFalse(item.IsHomeTeamFollowed);
+        Assert.IsFalse(item.IsAwayTeamFollowed);
+        Assert.IsFalse(item.IsCompetitionFollowed);
+
+        // Toggle Home Team follow
+        await vm.ToggleTeamFollowAsync("team_roma", "AS Roma", "ROM");
+        item = vm.FilteredMatches.First(m => m.Id == "m_1");
+        Assert.IsTrue(item.IsHomeTeamFollowed);
+        Assert.AreEqual("\uE735", item.HomeStarGlyph);
+
+        // Toggle Competition follow
+        await vm.ToggleCompetitionFollowAsync("comp_seriea", "Serie A", "SA");
+        item = vm.FilteredMatches.First(m => m.Id == "m_1");
+        Assert.IsTrue(item.IsCompetitionFollowed);
+        Assert.AreEqual("\uE735", item.CompetitionStarGlyph);
+
+        // Toggle Home Team unfollow
+        await vm.ToggleTeamFollowAsync("team_roma", "AS Roma", "ROM");
+        item = vm.FilteredMatches.First(m => m.Id == "m_1");
+        Assert.IsFalse(item.IsHomeTeamFollowed);
+        Assert.AreEqual("\uE734", item.HomeStarGlyph);
+    }
+
+    [TestMethod]
+    public void Test44_Strike3_MatchCenter_HeaderIncidentsAndTimelineSplit_GracefulFallback()
+    {
+        var vm = new MatchCenterViewModel();
+
+        // 1. Verify graceful handling of null / empty events
+        var emptyDetail = new MatchDetailDto
+        {
+            Id = "m_empty",
+            HomeTeam = new TeamSummaryDto { Id = "h1", Name = "Home FC" },
+            AwayTeam = new TeamSummaryDto { Id = "a1", Name = "Away FC" },
+            Events = null!
+        };
+
+        vm.Load(emptyDetail);
+        Assert.AreEqual(0, vm.HomeIncidents.Count);
+        Assert.AreEqual(0, vm.AwayIncidents.Count);
+        Assert.AreEqual(0, vm.TimelineItems.Count);
+
+        // 2. Populate with goals, red cards, substitutions, and neutral events
+        var richDetail = new MatchDetailDto
+        {
+            Id = "m_rich",
+            HomeTeam = new TeamSummaryDto { Id = "h1", Name = "Barcelona", ShortName = "BAR" },
+            AwayTeam = new TeamSummaryDto { Id = "a1", Name = "Real Madrid", ShortName = "RMA" },
+            Score = new ScoreDto { Home = 2, Away = 1 },
+            Events = new List<TrayEventDto>
+            {
+                new() { Type = "PeriodStart", Minute = 1, Description = "First Half begins" },
+                new() { Type = "Goal", Minute = 14, PlayerName = "Messi", TeamId = "h1" },
+                new() { Type = "Goal", Minute = 42, PlayerName = "Benzema", TeamId = "a1" },
+                new() { Type = "HalfTime", Minute = 45, Description = "Half Time" },
+                new() { Type = "Goal", Minute = 89, PlayerName = "Messi", TeamId = "h1" },
+                new() { Type = "RedCard", Minute = 90, ExtraMinute = 2, PlayerName = "Ramos", TeamId = "a1" }
+            }
+        };
+
+        vm.Load(richDetail);
+
+        // Header incidents
+        Assert.AreEqual(1, vm.HomeIncidents.Count);
+        Assert.AreEqual("Messi 14', 89'", vm.HomeIncidents[0].Text);
+        Assert.AreEqual("⚽", vm.HomeIncidents[0].Icon);
+
+        Assert.AreEqual(2, vm.AwayIncidents.Count);
+        Assert.IsTrue(vm.AwayIncidents.Any(i => i.Text.Contains("Benzema 42'") && i.Icon == "⚽"));
+        Assert.IsTrue(vm.AwayIncidents.Any(i => i.Text.Contains("Ramos 90+2'") && i.Icon == "🟥"));
+
+        // Timeline items split (Reverse chronological: newest on top)
+        Assert.AreEqual(6, vm.TimelineItems.Count);
+
+        var firstHalfStart = vm.TimelineItems[5];
+        Assert.IsTrue(firstHalfStart.IsNeutral);
+        Assert.IsFalse(firstHalfStart.IsHomeTeam);
+        Assert.IsFalse(firstHalfStart.IsAwayTeam);
+
+        var messiGoal1 = vm.TimelineItems[4];
+        Assert.IsTrue(messiGoal1.IsHomeTeam);
+        Assert.IsFalse(messiGoal1.IsAwayTeam);
+        Assert.AreEqual("Messi", messiGoal1.EventTitle);
+
+        var benzemaGoal = vm.TimelineItems[3];
+        Assert.IsTrue(benzemaGoal.IsAwayTeam);
+        Assert.IsFalse(benzemaGoal.IsHomeTeam);
+        Assert.AreEqual("Benzema", benzemaGoal.EventTitle);
+
+        var halfTime = vm.TimelineItems[2];
+        Assert.IsTrue(halfTime.IsNeutral);
+
+        var ramosRed = vm.TimelineItems[0];
+        Assert.IsTrue(ramosRed.IsAwayTeam);
+        Assert.AreEqual("90+2'", ramosRed.MinuteDisplay);
+    }
+
+    [TestMethod]
+    public void Test45_Strike31_MatchCenter_HandlesPrefixMismatchAndPlayerExtraction()
+    {
+        var vm = new MatchCenterViewModel();
+
+        var detail = new MatchDetailDto
+        {
+            Id = "m_mismatch",
+            HomeTeam = new TeamSummaryDto
+            {
+                Id = "ft_team_0e3a479b1836",
+                LegacyId = "team_40",
+                Name = "Liverpool FC",
+                ShortName = "LIV"
+            },
+            AwayTeam = new TeamSummaryDto
+            {
+                Id = "ft_team_b82cf711d9a2",
+                LegacyId = "team_50",
+                Name = "Manchester City",
+                ShortName = "MCI"
+            },
+            Score = new ScoreDto { Home = 2, Away = 1 },
+            Events = new List<TrayEventDto>
+            {
+                // Raw numeric string "40" without "team_" prefix vs LegacyId "team_40"
+                new()
+                {
+                    Type = "Goal",
+                    Minute = 9,
+                    TeamId = "40",
+                    PlayerName = "M. Salah",
+                    AssistPlayerName = "C. Gakpo",
+                    Description = "[Goal] Normal Goal"
+                },
+                // "team_50" matching AwayTeam.LegacyId
+                new()
+                {
+                    Type = "Goal",
+                    Minute = 33,
+                    TeamId = "team_50",
+                    PlayerName = "E. Haaland",
+                    Description = "[Goal] Normal Goal"
+                },
+                // Raw numeric string "40" matching HomeTeam
+                new()
+                {
+                    Type = "Goal",
+                    Minute = 67,
+                    TeamId = "40",
+                    PlayerName = "M. Salah",
+                    Description = "[Goal] Penalty"
+                },
+                // PeriodEnd neutral
+                new()
+                {
+                    Type = "PeriodEnd",
+                    Minute = 90,
+                    ExtraMinute = 4,
+                    Description = "Full Time"
+                }
+            }
+        };
+
+        vm.Load(detail);
+
+        // Header Incidents
+        Assert.AreEqual(1, vm.HomeIncidents.Count, "HomeIncidents must find the 2 Salah goals grouped");
+        Assert.AreEqual("M. Salah 9', 67'", vm.HomeIncidents[0].Text);
+        Assert.AreEqual("⚽", vm.HomeIncidents[0].Icon);
+
+        Assert.AreEqual(1, vm.AwayIncidents.Count, "AwayIncidents must find Haaland goal");
+        Assert.AreEqual("E. Haaland 33'", vm.AwayIncidents[0].Text);
+
+        // Timeline items (Reverse chronological: newest on top)
+        Assert.AreEqual(4, vm.TimelineItems.Count);
+
+        var ft = vm.TimelineItems[0];
+        Assert.IsTrue(ft.IsNeutral);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Visible, ft.NeutralVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, ft.NonNeutralVisibility);
+
+        var haalandGoal = vm.TimelineItems[2];
+        Assert.IsTrue(haalandGoal.IsAwayTeam, "Must identify 'team_50' as AwayTeam");
+        Assert.IsFalse(haalandGoal.IsHomeTeam);
+        Assert.AreEqual("E. Haaland", haalandGoal.EventTitle);
+        Assert.AreEqual("Normal Goal", haalandGoal.EventSubtitle, "EventSubtitle must strip [Goal] prefix");
+
+        var salahGoal1 = vm.TimelineItems[3];
+        Assert.IsTrue(salahGoal1.IsHomeTeam, "Must identify '40' as HomeTeam despite ft_team_ canonical ID");
+        Assert.IsFalse(salahGoal1.IsAwayTeam);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Visible, salahGoal1.HomeVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, salahGoal1.AwayVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Visible, salahGoal1.NonNeutralVisibility);
+        Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, salahGoal1.NeutralVisibility);
+        Assert.AreEqual("M. Salah", salahGoal1.EventTitle, "EventTitle must be player name");
+        Assert.AreEqual("Assist: C. Gakpo", salahGoal1.EventSubtitle, "EventSubtitle must show assist");
+    }
+
+    [TestMethod]
+    public void Test46_Strike4_CalendarDateChange_UpdatesSyncServiceTargetDateAndTriggersImmediateSync()
+    {
+        var mockSync = new MockSyncService();
+        var vm = new MainViewModel(_prefService, syncService: mockSync);
+
+        var targetDate = DateTime.Today.AddDays(2);
+
+        Assert.AreEqual(0, mockSync.ImmediateSyncTriggerCount);
+        Assert.AreEqual(DateTime.Today.Date, mockSync.TargetDate.Date);
+
+        // Act: SelectCalendarDate
+        vm.SelectCalendarDate(targetDate);
+
+        // Assert: sync service TargetDate was updated and TriggerImmediateSync was called
+        Assert.AreEqual(targetDate.Date, mockSync.TargetDate.Date);
+        Assert.AreEqual(1, mockSync.ImmediateSyncTriggerCount);
+        Assert.AreEqual(targetDate.Date, vm.SelectedCalendarDate.Date);
+
+        // Act: Direct SelectedCalendarDate property setter
+        var previousDay = DateTime.Today.AddDays(-1);
+        vm.SelectedCalendarDate = previousDay;
+
+        // Assert: sync service updated again and triggered sync
+        Assert.AreEqual(previousDay.Date, mockSync.TargetDate.Date);
+        Assert.AreEqual(2, mockSync.ImmediateSyncTriggerCount);
+    }
+
     // ============================================================
     // Helpers & Test Doubles
     // ============================================================
@@ -1124,5 +1425,36 @@ public class MainViewModelAndUiTests
         public Task SetAudioVolumeAsync(double volume, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
 
         public Task SetPreferencesAsync(UserPreferences preferences, CancellationToken cancellationToken = default) => throw new IOException("Disk error");
+    }
+
+    private sealed class MockSyncService : ISyncService
+    {
+#pragma warning disable CS0067
+        public event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
+#pragma warning restore CS0067
+        public TrayDataDto? CurrentTrayData { get; set; }
+        public DataFreshnessState FreshnessState { get; set; } = DataFreshnessState.Fresh;
+        public TickerConnectionState CurrentState { get; set; } = TickerConnectionState.OnlineFresh;
+        public DateTimeOffset? LastSuccessfulServerResponseTime { get; set; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset? LastRefreshAttempt { get; set; } = DateTimeOffset.UtcNow;
+        public string? LastKnownETag { get; set; }
+        public DateTimeOffset? LastValidatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+        public DateTime TargetDate { get; set; } = DateTime.Today;
+        public int ImmediateSyncTriggerCount { get; private set; }
+
+        public void TriggerImmediateSync()
+        {
+            ImmediateSyncTriggerCount++;
+        }
+
+        public Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(FreshnessState);
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public void RefreshTickerOnPreferenceChange() { }
+
+        public void Dispose() { }
     }
 }

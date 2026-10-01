@@ -99,9 +99,18 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // ----------------------------------------------------
   // Tray Matches Endpoint (supports ETag / 304)
   // ----------------------------------------------------
-  fastify.get('/api/tray', async (request, reply) => {
+  fastify.get<{ Querystring: { date?: string; teams?: string } }>('/api/tray', async (request, reply) => {
     try {
-      const matches = await fixturesRepo.getTrayMatches(10);
+      const dateParam = request.query.date;
+      const teamsParam = request.query.teams;
+      const teams = teamsParam
+        ? teamsParam.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+        : undefined;
+
+      const matches = await fixturesRepo.getTrayMatches({
+        date: dateParam,
+        teams,
+      });
 
       const formattedMatches = matches.map((m) => ({
         id: m.id,
@@ -217,13 +226,23 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // ----------------------------------------------------
   // Delivery API v2: Tray Matches (Canonical & Per-Fixture Freshness)
   // ----------------------------------------------------
-  fastify.get('/api/v2/tray', async (request, reply) => {
+  fastify.get<{ Querystring: { date?: string; teams?: string } }>('/api/v2/tray', async (request, reply) => {
     try {
-      const matches = await fixturesRepo.getTrayMatches(10);
+      const dateParam = request.query.date;
+      const teamsParam = request.query.teams;
+      const teams = teamsParam
+        ? teamsParam.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+        : undefined;
+
+      const matches = await fixturesRepo.getTrayMatches({
+        date: dateParam,
+        teams,
+      });
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
-      // Compute deterministic ETag based on v2 match data
-      const dataHash = createHash('md5').update(JSON.stringify(formattedMatches)).digest('hex');
+      // Compute deterministic ETag based on v2 match data and query parameters
+      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${JSON.stringify(formattedMatches)}`;
+      const dataHash = createHash('md5').update(cacheKey).digest('hex');
       const etag = `"${dataHash}"`;
 
       const ifNoneMatch = request.headers['if-none-match'];

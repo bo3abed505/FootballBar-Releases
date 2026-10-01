@@ -17,18 +17,30 @@ public static class TrayTickerFormatter
 {
     /// <summary>
     /// Identifies the single active/primary fixture represented by the taskbar ticker.
+    /// When an explicit pinnedMatchId is provided, it is returned unconditionally if present in tray data.
     /// When user preferences are provided, prioritizes followed live/upcoming matches.
     /// Priority order without preferences:
+    /// 0. Explicitly pinned match (regardless of follow status or state).
     /// 1. First LIVE / HALFTIME / in-play match.
     /// 2. Nearest upcoming PREMATCH match by kickoff time.
     /// 3. First available match (e.g. FINISHED).
     /// 4. Null if empty.
     /// </summary>
-    public static TrayMatchDto? GetActiveMatch(TrayDataDto? trayData, UserPreferences? preferences = null)
+    public static TrayMatchDto? GetActiveMatch(TrayDataDto? trayData, UserPreferences? preferences = null, string? pinnedMatchId = null)
     {
         if (trayData == null || trayData.Matches == null || trayData.Matches.Count == 0)
         {
             return null;
+        }
+
+        // 0. Explicitly pinned match takes absolute precedence
+        if (!string.IsNullOrEmpty(pinnedMatchId))
+        {
+            var pinned = trayData.Matches.FirstOrDefault(m => string.Equals(m.Id, pinnedMatchId, StringComparison.Ordinal));
+            if (pinned != null)
+            {
+                return pinned;
+            }
         }
 
         if (preferences != null)
@@ -77,18 +89,28 @@ public static class TrayTickerFormatter
         };
 
     /// <summary>
-    /// <summary>
     /// Evaluates candidate matches for ticker presentation and cycling.
+    /// If an explicit pinnedMatchId is provided, candidate set contains only the pinned match.
     /// If >= 1 LIVE match exists:
     ///   candidate set = ALL LIVE matches in existing FixtureRelevanceEngine priority order.
     /// If 0 LIVE matches exist:
     ///   candidate set = ONLY the single top-priority match (or empty if no matches exist).
     /// </summary>
-    public static IReadOnlyList<TrayMatchDto> GetTickerCandidates(TrayDataDto? trayData, UserPreferences? preferences = null)
+    public static IReadOnlyList<TrayMatchDto> GetTickerCandidates(TrayDataDto? trayData, UserPreferences? preferences = null, string? pinnedMatchId = null)
     {
         if (trayData?.Matches == null || trayData.Matches.Count == 0)
         {
             return Array.Empty<TrayMatchDto>();
+        }
+
+        // Explicitly pinned match is the sole candidate when set
+        if (!string.IsNullOrEmpty(pinnedMatchId))
+        {
+            var pinned = trayData.Matches.FirstOrDefault(m => string.Equals(m.Id, pinnedMatchId, StringComparison.Ordinal));
+            if (pinned != null)
+            {
+                return new List<TrayMatchDto> { pinned };
+            }
         }
 
         var prioritized = FixtureRelevanceEngine.PrioritizeMatches(trayData.Matches, preferences);
@@ -138,17 +160,17 @@ public static class TrayTickerFormatter
     /// <summary>
     /// Formats the current TrayDataDto into a compact taskbar ticker string based on data freshness state and user preferences.
     /// </summary>
-    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState, UserPreferences? preferences = null)
+    public static string FormatTicker(TrayDataDto? trayData, DataFreshnessState freshnessState, UserPreferences? preferences = null, string? pinnedMatchId = null)
     {
-        return FormatTicker(trayData, MapConnectionState(freshnessState), preferences);
+        return FormatTicker(trayData, MapConnectionState(freshnessState), preferences, pinnedMatchId);
     }
 
     /// <summary>
     /// Formats the current TrayDataDto into a compact taskbar ticker string.
     /// </summary>
-    public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState, UserPreferences? preferences = null)
+    public static string FormatTicker(TrayDataDto? trayData, TickerConnectionState connectionState, UserPreferences? preferences = null, string? pinnedMatchId = null)
     {
-        var activeMatch = GetActiveMatch(trayData, preferences);
+        var activeMatch = GetActiveMatch(trayData, preferences, pinnedMatchId);
         return FormatMatchTicker(activeMatch, connectionState, preferences);
     }
 

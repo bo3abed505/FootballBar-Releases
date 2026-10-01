@@ -114,6 +114,8 @@ public class UpdateIntegrationAndUxTests
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(FreshnessState);
+        public DateTime TargetDate { get; set; } = DateTime.Today;
+        public void TriggerImmediateSync() { }
         public void RefreshTickerOnPreferenceChange() { }
         public void Dispose() { }
     }

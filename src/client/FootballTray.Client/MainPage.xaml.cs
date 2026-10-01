@@ -4,7 +4,9 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using FootballTray.Client.Services;
 using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
@@ -404,6 +406,92 @@ public sealed partial class MainPage : Page
         if (sender is FrameworkElement fe && fe.Tag is CalendarDayItemViewModel day && _viewModel != null)
         {
             _viewModel.SelectCalendarDate(day.Date);
+        }
+    }
+
+    private void OnMatchCardTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject dep)
+        {
+            var parent = dep;
+            while (parent != null && !ReferenceEquals(parent, sender))
+            {
+                if (parent is ButtonBase)
+                {
+                    return;
+                }
+                parent = VisualTreeHelper.GetParent(parent);
+            }
+        }
+
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel match)
+        {
+            OpenMatchCenter(match.Id);
+        }
+    }
+
+    private void OnTogglePinClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem)
+        {
+            _viewModel?.TogglePinMatch(matchItem.Id);
+        }
+    }
+
+    private async void OnToggleFollowHomeTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem && _viewModel != null)
+        {
+            await _viewModel.ToggleTeamFollowAsync(matchItem.HomeTeamId, matchItem.HomeTeamName, matchItem.HomeTeamLogoUrl);
+        }
+    }
+
+    private async void OnToggleFollowAwayTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem && _viewModel != null)
+        {
+            await _viewModel.ToggleTeamFollowAsync(matchItem.AwayTeamId, matchItem.AwayTeamName, matchItem.AwayTeamLogoUrl);
+        }
+    }
+
+    private async void OnToggleFollowCompetitionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem && _viewModel != null)
+        {
+            await _viewModel.ToggleCompetitionFollowAsync(matchItem.CompetitionId, matchItem.CompetitionName, matchItem.CompetitionCode);
+        }
+    }
+
+    private void OpenMatchCenter(string? matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+
+        if (App.CurrentTickerCoordinator != null)
+        {
+            App.CurrentTickerCoordinator.OpenMatchCenter(matchId);
+        }
+        else
+        {
+            OpenMatchCenterDirectly(matchId);
+        }
+    }
+
+    private static async void OpenMatchCenterDirectly(string matchId)
+    {
+        try
+        {
+            using var apiClient = new FootballApiClient();
+            var response = await apiClient.GetMatchDetailsAsync(matchId);
+            if (response.IsSuccess && response.Envelope?.Data != null)
+            {
+                var window = new Views.MatchCenterWindow();
+                window.Populate(response.Envelope.Data);
+                window.Activate();
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[MAIN] Failed to open MatchCenterWindow: {ex.Message}");
         }
     }
 
