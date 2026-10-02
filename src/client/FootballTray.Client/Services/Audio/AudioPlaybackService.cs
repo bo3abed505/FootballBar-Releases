@@ -54,6 +54,7 @@ public class AudioPlaybackService : IAudioPlaybackService
 
         switch (type)
         {
+            case NotificationType.Kickoff:
             case NotificationType.MatchStarted:
             case NotificationType.MatchResumed:
                 PlayAudioFile("RefereeWhistle_ShortBurst.wav");

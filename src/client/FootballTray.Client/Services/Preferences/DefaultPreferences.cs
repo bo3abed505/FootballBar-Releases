@@ -94,7 +94,12 @@ public static class DefaultPreferences
             AudioVolume = 0.2,
             IsTickerVisible = true,
             TickerOffsetX = 0,
-            TargetScreenDeviceName = null
+            TargetScreenDeviceName = null,
+            IsRunAtStartupEnabled = false,
+            IsLoggingEnabled = true,
+            IsDebugLoggingEnabled = false,
+            IsKickoffReminderEnabled = true,
+            KickoffReminderOffsetMinutes = 15
         };
     }
 }

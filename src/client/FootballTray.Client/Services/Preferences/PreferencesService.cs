@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Serialization;
 using FootballTray.Client.Services.Notifications;
 
@@ -59,6 +60,8 @@ public sealed class PreferencesService : IPreferencesService
 
             _currentPreferences = await LoadFromDiskAsync(cancellationToken);
             _isLoaded = true;
+            AppLogger.IsLoggingEnabled = _currentPreferences.IsLoggingEnabled;
+            AppLogger.IsDebugLoggingEnabled = _currentPreferences.IsDebugLoggingEnabled;
             return _currentPreferences;
         }
         finally
@@ -91,6 +94,8 @@ public sealed class PreferencesService : IPreferencesService
             await SaveToDiskAsync(normalized, cancellationToken);
             _currentPreferences = normalized;
             _isLoaded = true;
+            AppLogger.IsLoggingEnabled = _currentPreferences.IsLoggingEnabled;
+            AppLogger.IsDebugLoggingEnabled = _currentPreferences.IsDebugLoggingEnabled;
         }
         finally
         {
@@ -148,6 +153,7 @@ public sealed class PreferencesService : IPreferencesService
             int removed = teams.RemoveAll(t =>
                 string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(t.Name) && string.Equals(t.Name.Trim(), teamId.Trim(), StringComparison.OrdinalIgnoreCase)) ||
                 (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
 
             if (removed > 0)
@@ -166,6 +172,8 @@ public sealed class PreferencesService : IPreferencesService
 
         PreferencesChanged?.Invoke(this, _currentPreferences);
     }
+
+    public Task RemoveFollowedTeam(string teamId, CancellationToken cancellationToken = default) => UnfollowTeamAsync(teamId, cancellationToken);
 
     public async Task FollowCompetitionAsync(FollowedCompetition competition, CancellationToken cancellationToken = default)
     {
@@ -215,6 +223,7 @@ public sealed class PreferencesService : IPreferencesService
             int removed = comps.RemoveAll(c =>
                 string.Equals(c.Id, competitionId, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(c.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(c.Name) && string.Equals(c.Name.Trim(), competitionId.Trim(), StringComparison.OrdinalIgnoreCase)) ||
                 (CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
 
             if (removed > 0)
@@ -233,6 +242,8 @@ public sealed class PreferencesService : IPreferencesService
 
         PreferencesChanged?.Invoke(this, _currentPreferences);
     }
+
+    public Task RemoveFollowedCompetition(string competitionId, CancellationToken cancellationToken = default) => UnfollowCompetitionAsync(competitionId, cancellationToken);
 
     public async Task SetNotificationsGloballyEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
@@ -460,6 +471,118 @@ public sealed class PreferencesService : IPreferencesService
             if (_currentPreferences.Use24HourFormat != use24Hour)
             {
                 var updated = _currentPreferences with { Use24HourFormat = use24Hour };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetRunAtStartupAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.IsRunAtStartupEnabled != enabled)
+            {
+                var updated = _currentPreferences with { IsRunAtStartupEnabled = enabled };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetLoggingEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.IsLoggingEnabled != enabled)
+            {
+                var updated = _currentPreferences with { IsLoggingEnabled = enabled };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+                AppLogger.IsLoggingEnabled = enabled;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetDebugLoggingEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.IsDebugLoggingEnabled != enabled)
+            {
+                var updated = _currentPreferences with { IsDebugLoggingEnabled = enabled };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+                AppLogger.IsDebugLoggingEnabled = enabled;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetKickoffReminderEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.IsKickoffReminderEnabled != enabled)
+            {
+                var updated = _currentPreferences with { IsKickoffReminderEnabled = enabled };
+                var normalized = NormalizePreferences(updated);
+                await SaveToDiskAsync(normalized, cancellationToken);
+                _currentPreferences = normalized;
+                _isLoaded = true;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetKickoffReminderOffsetMinutesAsync(int minutes, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.KickoffReminderOffsetMinutes != minutes)
+            {
+                var updated = _currentPreferences with { KickoffReminderOffsetMinutes = minutes };
                 var normalized = NormalizePreferences(updated);
                 await SaveToDiskAsync(normalized, cancellationToken);
                 _currentPreferences = normalized;
@@ -793,6 +916,11 @@ public sealed class PreferencesService : IPreferencesService
             TargetScreenDeviceName = raw.TargetScreenDeviceName,
             EnableTickerCarousel = raw.EnableTickerCarousel,
             Use24HourFormat = raw.Use24HourFormat,
+            IsRunAtStartupEnabled = raw.IsRunAtStartupEnabled,
+            IsLoggingEnabled = raw.IsLoggingEnabled,
+            IsDebugLoggingEnabled = raw.IsDebugLoggingEnabled,
+            IsKickoffReminderEnabled = raw.IsKickoffReminderEnabled,
+            KickoffReminderOffsetMinutes = raw.KickoffReminderOffsetMinutes >= 0 ? raw.KickoffReminderOffsetMinutes : 15,
             ExtensionData = raw.ExtensionData
         };
     }

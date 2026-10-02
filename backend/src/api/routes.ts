@@ -99,17 +99,22 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // ----------------------------------------------------
   // Tray Matches Endpoint (supports ETag / 304)
   // ----------------------------------------------------
-  fastify.get<{ Querystring: { date?: string; teams?: string } }>('/api/tray', async (request, reply) => {
+  fastify.get<{ Querystring: { date?: string; teams?: string; competitions?: string } }>('/api/tray', async (request, reply) => {
     try {
       const dateParam = request.query.date;
       const teamsParam = request.query.teams;
+      const competitionsParam = request.query.competitions;
       const teams = teamsParam
         ? teamsParam.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+        : undefined;
+      const competitions = competitionsParam
+        ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
       const matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
+        competitions,
       });
 
       const formattedMatches = matches.map((m) => ({
@@ -226,22 +231,27 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // ----------------------------------------------------
   // Delivery API v2: Tray Matches (Canonical & Per-Fixture Freshness)
   // ----------------------------------------------------
-  fastify.get<{ Querystring: { date?: string; teams?: string } }>('/api/v2/tray', async (request, reply) => {
+  fastify.get<{ Querystring: { date?: string; teams?: string; competitions?: string } }>('/api/v2/tray', async (request, reply) => {
     try {
       const dateParam = request.query.date;
       const teamsParam = request.query.teams;
+      const competitionsParam = request.query.competitions;
       const teams = teamsParam
         ? teamsParam.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+        : undefined;
+      const competitions = competitionsParam
+        ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
       const matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
+        competitions,
       });
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
       // Compute deterministic ETag based on v2 match data and query parameters
-      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${JSON.stringify(formattedMatches)}`;
+      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(formattedMatches)}`;
       const dataHash = createHash('md5').update(cacheKey).digest('hex');
       const etag = `"${dataHash}"`;
 

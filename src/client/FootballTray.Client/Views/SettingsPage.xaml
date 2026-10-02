@@ -1,0 +1,424 @@
+<Page
+    x:Class="FootballTray.Client.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:prefs="using:FootballTray.Client.Services.Preferences"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Grid Margin="24,16,24,24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Button
+                x:Name="BackButton"
+                Click="OnBackClicked"
+                Margin="0,0,16,0"
+                VerticalAlignment="Center"
+                ToolTipService.ToolTip="Back to matches">
+                <FontIcon Glyph="&#xE72B;" FontSize="16" />
+            </Button>
+
+            <TextBlock
+                Grid.Column="1"
+                Text="Settings &amp; Preferences"
+                FontSize="24"
+                FontWeight="SemiBold"
+                VerticalAlignment="Center" />
+        </Grid>
+
+        <!-- Content ScrollViewer -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="20" MaxWidth="760" HorizontalAlignment="Left">
+
+                <!-- ======================================================== -->
+                <!-- CARD 1: DISPLAY                                          -->
+                <!-- ======================================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE790;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="Display" FontSize="16" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="Configure taskbar ticker rotation and global match time representation."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+
+                        <!-- Auto-Rotate Ticker (Carousel Mode) -->
+                        <ToggleSwitch
+                            x:Name="TickerCarouselToggle"
+                            Header="Auto-Rotate Ticker (Carousel Mode)"
+                            Toggled="OnTickerCarouselToggled" />
+
+                        <!-- 24-Hour Time Format -->
+                        <ToggleSwitch
+                            x:Name="TimeFormat24HourToggle"
+                            Header="24-Hour Time Format (e.g. 18:30 vs 6:30 PM)"
+                            Toggled="OnTimeFormat24HourToggled" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ======================================================== -->
+                <!-- CARD 2: NOTIFICATIONS                                    -->
+                <!-- ======================================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xEA8F;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="Notifications" FontSize="16" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="Desktop match kickoff reminders, score toasts, and stadium alert audio."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+
+                        <!-- Match Kickoff Reminders -->
+                        <ToggleSwitch
+                            x:Name="KickoffReminderToggle"
+                            Header="Match Kickoff Reminders"
+                            Toggled="OnKickoffReminderToggled" />
+
+                        <!-- Kickoff Reminder Lead Time Offset -->
+                        <StackPanel x:Name="KickoffLeadTimePanel" Spacing="6" Margin="0,2,0,0">
+                            <TextBlock Text="Kickoff Reminder Offset" FontWeight="Medium" FontSize="13" />
+                            <ComboBox x:Name="KickoffLeadTimeCombo" SelectionChanged="OnKickoffLeadTimeChanged" Width="240">
+                                <ComboBoxItem Tag="0">At kickoff (0 min)</ComboBoxItem>
+                                <ComboBoxItem Tag="5">5 minutes before</ComboBoxItem>
+                                <ComboBoxItem Tag="15">15 minutes before</ComboBoxItem>
+                                <ComboBoxItem Tag="30">30 minutes before</ComboBoxItem>
+                                <ComboBoxItem Tag="60">1 hour before</ComboBoxItem>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <MenuFlyoutSeparator Margin="0,4,0,4" />
+
+                        <!-- Desktop Notifications Toggle -->
+                        <ToggleSwitch
+                            x:Name="GlobalNotificationsToggle"
+                            Header="Global Desktop Toast Notifications"
+                            Toggled="OnGlobalNotificationsToggled" />
+
+                        <!-- Sound Mode Selector -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Notification Sound Alert" FontWeight="Medium" FontSize="13" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" MaxWidth="280" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox
+                                    Grid.Column="0"
+                                    x:Name="SoundModeCombo"
+                                    HorizontalAlignment="Stretch"
+                                    SelectionChanged="OnSoundModeChanged">
+                                    <ComboBoxItem Tag="Off">Mute (No Sound)</ComboBoxItem>
+                                    <ComboBoxItem Tag="SystemDefault">Windows Default Sound</ComboBoxItem>
+                                    <ComboBoxItem Tag="Custom">Authentic Stadium Sounds</ComboBoxItem>
+                                </ComboBox>
+                                <Button
+                                    Grid.Column="1"
+                                    x:Name="TestSoundButton"
+                                    Content="🔊 Test Sound"
+                                    Click="OnTestSoundClicked" />
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ======================================================== -->
+                <!-- CARD 3: SYSTEM                                           -->
+                <!-- ======================================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE770;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="System" FontSize="16" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="Configure Windows system integration and automated background startup."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+
+                        <!-- Run at Startup -->
+                        <ToggleSwitch
+                            x:Name="RunAtStartupToggle"
+                            Header="Run at Startup (Start in Tray automatically on login)"
+                            Toggled="OnRunAtStartupToggled" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ======================================================== -->
+                <!-- CARD 4: UPDATES & DIAGNOSTICS                            -->
+                <!-- ======================================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="16">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE9D9;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="Updates &amp; Diagnostics" FontSize="16" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="Inspect system health telemetry, verify updates, and manage diagnostic logs."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+
+                        <!-- Software Updates Section -->
+                        <Border
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+                            <StackPanel Spacing="10">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE895;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                    <TextBlock Text="Software Updates" FontWeight="SemiBold" FontSize="13" />
+                                </StackPanel>
+
+                                <TextBlock
+                                    x:Name="UpdateCurrentVersionText"
+                                    Text="Current Version: Loading..."
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                                <!-- Update Available Banner -->
+                                <Border
+                                    x:Name="UpdateAvailablePanel"
+                                    Visibility="Collapsed"
+                                    Background="{ThemeResource LayerFillColorAltBrush}"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="10">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock
+                                            x:Name="UpdateTargetVersionText"
+                                            Text="Version v1.1.0 available"
+                                            FontWeight="Bold"
+                                            FontSize="12" />
+                                        <TextBlock
+                                            x:Name="UpdateReleaseNotesText"
+                                            TextWrapping="Wrap"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <ProgressBar
+                                            x:Name="UpdateDownloadProgressBar"
+                                            Visibility="Collapsed"
+                                            Minimum="0"
+                                            Maximum="100" />
+                                        <TextBlock
+                                            x:Name="UpdateDownloadStatusText"
+                                            Visibility="Collapsed"
+                                            FontSize="11" />
+                                        <Button
+                                            x:Name="DownloadUpdateButton"
+                                            Content="Download update"
+                                            Style="{ThemeResource AccentButtonStyle}"
+                                            Click="OnDownloadUpdateClicked" />
+                                        <Button
+                                            x:Name="InstallUpdateButton"
+                                            Content="Install update"
+                                            Style="{ThemeResource AccentButtonStyle}"
+                                            Visibility="Collapsed"
+                                            Click="OnInstallUpdateClicked" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock
+                                    x:Name="UpdateStatusText"
+                                    Visibility="Collapsed"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap" />
+
+                                <Button
+                                    x:Name="CheckForUpdatesButton"
+                                    Content="Check for updates"
+                                    Click="OnCheckForUpdatesClicked"
+                                    HorizontalAlignment="Left" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- System Health Readout -->
+                        <Border
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="System Health Readout" FontWeight="SemiBold" FontSize="13" />
+
+                                <Grid ColumnSpacing="12" RowSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" MinWidth="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Status:" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="HealthStatusText" Text="Healthy" FontWeight="SemiBold" FontSize="12" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Last Sync:" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="LastSyncText" Text="Never" FontSize="12" />
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="ETag:" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="LastEtagText" Text="None" FontSize="12" TextTrimming="CharacterEllipsis" />
+
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Taskbar Host:" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="TaskbarStatusText" Text="Attached" FontSize="12" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Verbose Logging & Diagnostics Actions -->
+                        <ToggleSwitch
+                            x:Name="DebugLoggingToggle"
+                            Header="Enable Verbose Debug Logging"
+                            Toggled="OnDebugLoggingToggled" />
+
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button
+                                Content="📁 Open Logs Folder"
+                                Click="OnOpenLogsClicked" />
+                            <Button
+                                x:Name="CopyDiagnosticsButton"
+                                Content="📋 Copy Diagnostics"
+                                Click="OnCopyDiagnosticsClicked" />
+                        </StackPanel>
+
+                        <TextBlock
+                            x:Name="DiagnosticsCopyStatusText"
+                            Visibility="Collapsed"
+                            FontSize="11"
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ======================================================== -->
+                <!-- CARD 5: FOLLOWED FAVORITES                               -->
+                <!-- ======================================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE734;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="Followed Favorites" FontSize="16" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="Manage your tracked clubs and competitions."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+
+                        <!-- Followed Teams -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Followed Clubs" FontWeight="SemiBold" FontSize="13" />
+                            <ListView
+                                x:Name="FollowedTeamsListView"
+                                SelectionMode="None"
+                                MaxHeight="180">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="prefs:FollowedTeam">
+                                        <Grid Padding="4,4,4,4" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center" FontWeight="Medium" FontSize="13" />
+                                            <Button
+                                                Grid.Column="1"
+                                                Content="Unfollow"
+                                                Tag="{x:Bind Id}"
+                                                Click="OnUnfollowTeamClicked"
+                                                Padding="8,4" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <TextBlock
+                                x:Name="NoFollowedTeamsText"
+                                Text="No clubs followed yet. Use the Search tab on the home screen."
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Visibility="Collapsed"
+                                FontSize="12" />
+                        </StackPanel>
+
+                        <!-- Followed Competitions -->
+                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                            <TextBlock Text="Followed Competitions" FontWeight="SemiBold" FontSize="13" />
+                            <ListView
+                                x:Name="FollowedCompetitionsListView"
+                                SelectionMode="None"
+                                MaxHeight="180">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="prefs:FollowedCompetition">
+                                        <Grid Padding="4,4,4,4" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center" FontWeight="Medium" FontSize="13" />
+                                            <Button
+                                                Grid.Column="1"
+                                                Content="Unfollow"
+                                                Tag="{x:Bind Id}"
+                                                Click="OnUnfollowCompetitionClicked"
+                                                Padding="8,4" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <TextBlock
+                                x:Name="NoFollowedCompetitionsText"
+                                Text="No competitions followed yet. Use the Search tab on the home screen."
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Visibility="Collapsed"
+                                FontSize="12" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

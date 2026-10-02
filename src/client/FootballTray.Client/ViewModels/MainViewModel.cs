@@ -103,6 +103,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public IUpdateInstallationService? UpdateInstallationService => _updateInstallationService;
     public IAppShutdownHandler? AppShutdownHandler => _appShutdownHandler;
     public bool HasUpdateCapability => _updateDiscoveryService != null;
+    public SettingsViewModel Settings { get; }
 
     public string DiagnosticsVersionText => $"Version {_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
     public string DiagnosticsHealthStatusText => $"{_diagnosticsService.GetCurrentSnapshot().HealthState} ({_diagnosticsService.GetCurrentSnapshot().FreshnessState})";
@@ -533,6 +534,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ImageCacheService.Instance,
             _dispatcherQueue,
             _delayFunc);
+
+        Settings = new SettingsViewModel(
+            this,
+            _preferencesService,
+            _diagnosticsService,
+            _updateDiscoveryService,
+            _dispatcherQueue);
 
         _preferencesService.PreferencesChanged += OnPreferencesChanged;
 
@@ -1176,9 +1184,27 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
             bool isActive = match.Id == ActiveMatchId;
-            bool homeFollowed = !string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id);
-            bool awayFollowed = !string.IsNullOrEmpty(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id);
-            bool compFollowed = !string.IsNullOrEmpty(match.Competition?.Id) && followedCompIds.Contains(match.Competition.Id);
+            bool homeFollowed = (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
+                || (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId))
+                || (!string.IsNullOrEmpty(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.Id, out var hCanon) && followedTeamIds.Contains(hCanon))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.LegacyId, out var hLegCanon) && followedTeamIds.Contains(hLegCanon))
+                || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), match.HomeTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+
+            bool awayFollowed = (!string.IsNullOrEmpty(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id))
+                || (!string.IsNullOrEmpty(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId))
+                || (!string.IsNullOrEmpty(match.AwayTeam?.Name) && followedTeamIds.Contains(match.AwayTeam.Name))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.Id, out var aCanon) && followedTeamIds.Contains(aCanon))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.LegacyId, out var aLegCanon) && followedTeamIds.Contains(aLegCanon))
+                || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), match.AwayTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+
+            bool compFollowed = relevance.FollowedByCompetition
+                || (!string.IsNullOrEmpty(match.Competition?.Id) && followedCompIds.Contains(match.Competition.Id))
+                || (!string.IsNullOrEmpty(match.Competition?.LegacyId) && followedCompIds.Contains(match.Competition.LegacyId))
+                || (!string.IsNullOrEmpty(match.Competition?.Name) && followedCompIds.Contains(match.Competition.Name))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.Id, out var cCanon) && followedCompIds.Contains(cCanon))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.LegacyId, out var cLegCanon) && followedCompIds.Contains(cLegCanon))
+                || (prefs?.FollowedCompetitions.Any(c => string.Equals(c.Name?.Trim(), match.Competition?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
 
             viewModels.Add(MatchItemViewModel.FromDto(
                 match,
@@ -1932,6 +1958,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _disposeCts.Cancel();
         _disposeCts.Dispose();
         SearchCatalog.Dispose();
+        Settings?.Dispose();
         _preferencesService.PreferencesChanged -= OnPreferencesChanged;
         if (_syncService != null)
         {

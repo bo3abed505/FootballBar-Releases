@@ -20,8 +20,10 @@ public interface IPreferencesService
 
     Task FollowTeamAsync(FollowedTeam team, CancellationToken cancellationToken = default);
     Task UnfollowTeamAsync(string teamId, CancellationToken cancellationToken = default);
+    Task RemoveFollowedTeam(string teamId, CancellationToken cancellationToken = default) => UnfollowTeamAsync(teamId, cancellationToken);
     Task FollowCompetitionAsync(FollowedCompetition competition, CancellationToken cancellationToken = default);
     Task UnfollowCompetitionAsync(string competitionId, CancellationToken cancellationToken = default);
+    Task RemoveFollowedCompetition(string competitionId, CancellationToken cancellationToken = default) => UnfollowCompetitionAsync(competitionId, cancellationToken);
 
     Task SetNotificationsGloballyEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task SetNotificationTypeEnabledAsync(NotificationType type, bool enabled, CancellationToken cancellationToken = default);
@@ -33,4 +35,9 @@ public interface IPreferencesService
     Task SetTargetScreenDeviceNameAsync(string? deviceName, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task SetEnableTickerCarouselAsync(bool enable, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task SetUse24HourFormatAsync(bool use24Hour, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetRunAtStartupAsync(bool enabled, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetLoggingEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetDebugLoggingEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetKickoffReminderEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task SetKickoffReminderOffsetMinutesAsync(int minutes, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

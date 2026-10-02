@@ -64,6 +64,11 @@ public sealed partial class MainWindow : Window
         AppWindow.Hide();
     }
 
+    public void Navigate(Type sourcePageType, object? parameter = null)
+    {
+        RootFrame.Navigate(sourcePageType, parameter);
+    }
+
     private IntPtr WindowSubclass(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, nuint uIdSubclass, IntPtr dwRefData)
     {
         if (uMsg == 0x0112 && (wParam.ToInt32() & 0xFFF0) == 0xF020)

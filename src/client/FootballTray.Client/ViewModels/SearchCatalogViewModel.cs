@@ -226,12 +226,11 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                     TeamSearchResults.Clear();
                     if (response.IsSuccess && response.Envelope?.Data != null)
                     {
-                        var followedIds = new HashSet<string>(FollowedTeams.Select(t => t.Id), StringComparer.OrdinalIgnoreCase);
+                        var prefs = _preferencesService.Current;
                         var uniqueTeams = response.Envelope.Data.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
                         foreach (var dto in uniqueTeams)
                         {
-                            bool isFollowed = followedIds.Contains(dto.Id) ||
-                                              (dto.LegacyId != null && followedIds.Contains(dto.LegacyId));
+                            bool isFollowed = IsTeamFollowed(dto.Id, dto.LegacyId, dto.Name, dto.ShortName, prefs);
                             var item = FollowedTeamItemViewModel.FromCatalogDto(dto, isFollowed);
                             _ = item.EnsureLogoCachedAsync(_imageCacheService);
                             TeamSearchResults.Add(item);
@@ -261,12 +260,11 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                     CompetitionSearchResults.Clear();
                     if (response.IsSuccess && response.Envelope?.Data != null)
                     {
-                        var followedIds = new HashSet<string>(FollowedCompetitions.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
+                        var prefs = _preferencesService.Current;
                         var uniqueComps = response.Envelope.Data.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
                         foreach (var dto in uniqueComps)
                         {
-                            bool isFollowed = followedIds.Contains(dto.Id) ||
-                                              (dto.LegacyId != null && followedIds.Contains(dto.LegacyId));
+                            bool isFollowed = IsCompetitionFollowed(dto.Id, dto.LegacyId, dto.Name, dto.Code, prefs);
                             var item = FollowedCompetitionItemViewModel.FromCatalogDto(dto, isFollowed);
                             _ = item.EnsureLogoCachedAsync(_imageCacheService);
                             CompetitionSearchResults.Add(item);
@@ -301,6 +299,134 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public async Task ExecuteToggleFollow(FollowedTeamItemViewModel item, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.IsFollowed)
+        {
+            item.IsFollowed = false;
+            await _preferencesService.RemoveFollowedTeam(item.Id, cancellationToken);
+            await _preferencesService.SaveAsync(cancellationToken);
+
+            RunOnUi(() =>
+            {
+                var existing = FollowedTeams.FirstOrDefault(t =>
+                    string.Equals(t.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(t.Name, item.Id, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    FollowedTeams.Remove(existing);
+                }
+
+                var matchingResult = TeamSearchResults.FirstOrDefault(t =>
+                    string.Equals(t.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(t.Name, item.Name, StringComparison.OrdinalIgnoreCase));
+                if (matchingResult != null)
+                {
+                    matchingResult.IsFollowed = false;
+                }
+
+                NotifyCollectionCounts();
+            });
+        }
+        else
+        {
+            item.IsFollowed = true;
+            await _preferencesService.FollowTeamAsync(item.ToDomain(), cancellationToken);
+            await _preferencesService.SaveAsync(cancellationToken);
+
+            RunOnUi(() =>
+            {
+                if (!FollowedTeams.Any(t => string.Equals(t.Id, item.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var followedItem = FollowedTeamItemViewModel.FromDomain(item.ToDomain(), isFollowed: true);
+                    _ = followedItem.EnsureLogoCachedAsync(_imageCacheService);
+                    FollowedTeams.Add(followedItem);
+                }
+
+                var matchingResult = TeamSearchResults.FirstOrDefault(t =>
+                    string.Equals(t.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrWhiteSpace(item.Name) && string.Equals(t.Name, item.Name, StringComparison.OrdinalIgnoreCase)));
+                if (matchingResult != null)
+                {
+                    matchingResult.IsFollowed = true;
+                }
+
+                NotifyCollectionCounts();
+            });
+        }
+    }
+
+    public async Task ExecuteToggleFollow(FollowedCompetitionItemViewModel item, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.IsFollowed)
+        {
+            item.IsFollowed = false;
+            await _preferencesService.RemoveFollowedCompetition(item.Id, cancellationToken);
+            await _preferencesService.SaveAsync(cancellationToken);
+
+            RunOnUi(() =>
+            {
+                var existing = FollowedCompetitions.FirstOrDefault(c =>
+                    string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(c.Name, item.Id, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    FollowedCompetitions.Remove(existing);
+                }
+
+                var matchingResult = CompetitionSearchResults.FirstOrDefault(c =>
+                    string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(c.Name, item.Name, StringComparison.OrdinalIgnoreCase));
+                if (matchingResult != null)
+                {
+                    matchingResult.IsFollowed = false;
+                }
+
+                NotifyCollectionCounts();
+            });
+        }
+        else
+        {
+            item.IsFollowed = true;
+            await _preferencesService.FollowCompetitionAsync(item.ToDomain(), cancellationToken);
+            await _preferencesService.SaveAsync(cancellationToken);
+
+            RunOnUi(() =>
+            {
+                if (!FollowedCompetitions.Any(c => string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase) || string.Equals(c.Name, item.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var followedItem = FollowedCompetitionItemViewModel.FromDomain(item.ToDomain(), isFollowed: true);
+                    _ = followedItem.EnsureLogoCachedAsync(_imageCacheService);
+                    FollowedCompetitions.Add(followedItem);
+                }
+
+                var matchingResult = CompetitionSearchResults.FirstOrDefault(c =>
+                    string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrWhiteSpace(item.Name) && string.Equals(c.Name, item.Name, StringComparison.OrdinalIgnoreCase)));
+                if (matchingResult != null)
+                {
+                    matchingResult.IsFollowed = true;
+                }
+
+                NotifyCollectionCounts();
+            });
+        }
+    }
+
+    public async Task ExecuteToggleFollow(object? item, CancellationToken cancellationToken = default)
+    {
+        if (item is FollowedTeamItemViewModel team)
+        {
+            await ExecuteToggleFollow(team, cancellationToken);
+        }
+        else if (item is FollowedCompetitionItemViewModel comp)
+        {
+            await ExecuteToggleFollow(comp, cancellationToken);
+        }
+    }
+
     public async Task FollowTeamAsync(FollowedTeamItemViewModel item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -317,7 +443,9 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                 FollowedTeams.Add(followedItem);
             }
 
-            var matchingResult = TeamSearchResults.FirstOrDefault(t => string.Equals(t.Id, item.Id, StringComparison.OrdinalIgnoreCase));
+            var matchingResult = TeamSearchResults.FirstOrDefault(t =>
+                string.Equals(t.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(item.Name) && string.Equals(t.Name, item.Name, StringComparison.OrdinalIgnoreCase)));
             if (matchingResult != null)
             {
                 matchingResult.IsFollowed = true;
@@ -335,13 +463,17 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
 
         RunOnUi(() =>
         {
-            var existing = FollowedTeams.FirstOrDefault(t => string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase));
+            var existing = FollowedTeams.FirstOrDefault(t =>
+                string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(t.Name, teamId, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
                 FollowedTeams.Remove(existing);
             }
 
-            var matchingResult = TeamSearchResults.FirstOrDefault(t => string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase));
+            var matchingResult = TeamSearchResults.FirstOrDefault(t =>
+                string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(t.Name, teamId, StringComparison.OrdinalIgnoreCase));
             if (matchingResult != null)
             {
                 matchingResult.IsFollowed = false;
@@ -360,14 +492,16 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
         RunOnUi(() =>
         {
             item.IsFollowed = true;
-            if (!FollowedCompetitions.Any(c => string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase)))
+            if (!FollowedCompetitions.Any(c => string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase) || string.Equals(c.Name, item.Name, StringComparison.OrdinalIgnoreCase)))
             {
                 var followedItem = FollowedCompetitionItemViewModel.FromDomain(item.ToDomain(), isFollowed: true);
                 _ = followedItem.EnsureLogoCachedAsync(_imageCacheService);
                 FollowedCompetitions.Add(followedItem);
             }
 
-            var matchingResult = CompetitionSearchResults.FirstOrDefault(c => string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase));
+            var matchingResult = CompetitionSearchResults.FirstOrDefault(c =>
+                string.Equals(c.Id, item.Id, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(item.Name) && string.Equals(c.Name, item.Name, StringComparison.OrdinalIgnoreCase)));
             if (matchingResult != null)
             {
                 matchingResult.IsFollowed = true;
@@ -385,13 +519,17 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
 
         RunOnUi(() =>
         {
-            var existing = FollowedCompetitions.FirstOrDefault(c => string.Equals(c.Id, compId, StringComparison.OrdinalIgnoreCase));
+            var existing = FollowedCompetitions.FirstOrDefault(c =>
+                string.Equals(c.Id, compId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Name, compId, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
                 FollowedCompetitions.Remove(existing);
             }
 
-            var matchingResult = CompetitionSearchResults.FirstOrDefault(c => string.Equals(c.Id, compId, StringComparison.OrdinalIgnoreCase));
+            var matchingResult = CompetitionSearchResults.FirstOrDefault(c =>
+                string.Equals(c.Id, compId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Name, compId, StringComparison.OrdinalIgnoreCase));
             if (matchingResult != null)
             {
                 matchingResult.IsFollowed = false;
@@ -437,7 +575,7 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
             // Update IsFollowed flags in current search results
             foreach (var searchResult in TeamSearchResults)
             {
-                searchResult.IsFollowed = followedTeamIds.Contains(searchResult.Id);
+                searchResult.IsFollowed = IsTeamFollowed(searchResult.Id, searchResult.LegacyId, searchResult.Name, searchResult.ShortName, prefs);
             }
 
             // Synchronize FollowedCompetitions
@@ -464,11 +602,109 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
 
             foreach (var searchResult in CompetitionSearchResults)
             {
-                searchResult.IsFollowed = followedCompIds.Contains(searchResult.Id);
+                searchResult.IsFollowed = IsCompetitionFollowed(searchResult.Id, searchResult.LegacyId, searchResult.Name, searchResult.Code, prefs);
             }
 
             NotifyCollectionCounts();
         });
+    }
+
+    public static bool IsCompetitionFollowed(
+        string? id,
+        string? legacyId,
+        string? name,
+        string? code,
+        UserPreferences? prefs)
+    {
+        if (prefs == null) return false;
+
+        var followedIds = prefs.GetFollowedCompetitionIdSet();
+
+        // 1. Direct ID or LegacyId in followed set
+        if (!string.IsNullOrWhiteSpace(id) && followedIds.Contains(id)) return true;
+        if (!string.IsNullOrWhiteSpace(legacyId) && followedIds.Contains(legacyId)) return true;
+
+        // 2. Canonical translations
+        if (CanonicalEntityIds.TryTranslateLegacyId(id, out var canon1) && followedIds.Contains(canon1)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(legacyId, out var canon2) && followedIds.Contains(canon2)) return true;
+
+        // 3. Name match against user's followed competitions
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            string trimmedName = name.Trim();
+            foreach (var c in prefs.FollowedCompetitions)
+            {
+                if (string.IsNullOrWhiteSpace(c.Name)) continue;
+                if (string.Equals(c.Name.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // 4. Code match
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            string trimmedCode = code.Trim();
+            foreach (var c in prefs.FollowedCompetitions)
+            {
+                if (!string.IsNullOrWhiteSpace(c.Code) && string.Equals(c.Code.Trim(), trimmedCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsTeamFollowed(
+        string? id,
+        string? legacyId,
+        string? name,
+        string? shortName,
+        UserPreferences? prefs)
+    {
+        if (prefs == null) return false;
+
+        var followedIds = prefs.GetFollowedTeamIdSet();
+
+        // 1. Direct ID or LegacyId in followed set
+        if (!string.IsNullOrWhiteSpace(id) && followedIds.Contains(id)) return true;
+        if (!string.IsNullOrWhiteSpace(legacyId) && followedIds.Contains(legacyId)) return true;
+
+        // 2. Canonical translations
+        if (CanonicalEntityIds.TryTranslateLegacyId(id, out var canon1) && followedIds.Contains(canon1)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(legacyId, out var canon2) && followedIds.Contains(canon2)) return true;
+
+        // 3. Name match against user's followed teams
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            string trimmedName = name.Trim();
+            foreach (var t in prefs.FollowedTeams)
+            {
+                if (string.IsNullOrWhiteSpace(t.Name)) continue;
+                if (string.Equals(t.Name.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // 4. ShortName match
+        if (!string.IsNullOrWhiteSpace(shortName))
+        {
+            string trimmedShort = shortName.Trim();
+            foreach (var t in prefs.FollowedTeams)
+            {
+                if (!string.IsNullOrWhiteSpace(t.ShortName) && string.Equals(t.ShortName.Trim(), trimmedShort, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void NotifyCollectionCounts()

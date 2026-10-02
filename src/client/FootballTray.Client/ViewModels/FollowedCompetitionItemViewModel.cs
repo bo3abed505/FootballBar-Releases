@@ -15,6 +15,7 @@ public sealed class FollowedCompetitionItemViewModel : INotifyPropertyChanged
     private Uri? _cachedLogoUri;
 
     public string Id { get; init; } = string.Empty;
+    public string? LegacyId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string Code { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;
@@ -40,7 +41,7 @@ public sealed class FollowedCompetitionItemViewModel : INotifyPropertyChanged
     }
 
     public string FollowButtonText => _isFollowed ? "Following" : "+ Follow";
-    public bool CanFollow => !_isFollowed;
+    public bool CanFollow => true;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -52,6 +53,7 @@ public sealed class FollowedCompetitionItemViewModel : INotifyPropertyChanged
         return new FollowedCompetitionItemViewModel
         {
             Id = comp.Id ?? string.Empty,
+            LegacyId = null,
             Name = comp.Name ?? string.Empty,
             Code = comp.Code ?? string.Empty,
             Country = comp.Country ?? string.Empty,
@@ -66,6 +68,7 @@ public sealed class FollowedCompetitionItemViewModel : INotifyPropertyChanged
         return new FollowedCompetitionItemViewModel
         {
             Id = dto.Id ?? string.Empty,
+            LegacyId = dto.LegacyId,
             Name = dto.Name ?? string.Empty,
             Code = dto.Code ?? string.Empty,
             Country = dto.Country ?? string.Empty,

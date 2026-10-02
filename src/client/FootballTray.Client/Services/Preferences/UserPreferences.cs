@@ -53,6 +53,21 @@ public sealed record UserPreferences
     [JsonPropertyName("use24HourFormat")]
     public bool Use24HourFormat { get; init; } = true;
 
+    [JsonPropertyName("isRunAtStartupEnabled")]
+    public bool IsRunAtStartupEnabled { get; init; } = false;
+
+    [JsonPropertyName("isLoggingEnabled")]
+    public bool IsLoggingEnabled { get; init; } = true;
+
+    [JsonPropertyName("isDebugLoggingEnabled")]
+    public bool IsDebugLoggingEnabled { get; init; } = false;
+
+    [JsonPropertyName("isKickoffReminderEnabled")]
+    public bool IsKickoffReminderEnabled { get; init; } = true;
+
+    [JsonPropertyName("kickoffReminderOffsetMinutes")]
+    public int KickoffReminderOffsetMinutes { get; init; } = 15;
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 

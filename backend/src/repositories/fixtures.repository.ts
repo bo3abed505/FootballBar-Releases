@@ -7,6 +7,7 @@ import { resolveFixtureCanonicalIdByAlias, extractProviderId } from '../db/provi
 export interface GetTrayMatchesOptions {
   date?: string | Date | null;
   teams?: string[] | null;
+  competitions?: string[] | null;
   limit?: number | null;
 }
 
@@ -123,6 +124,7 @@ export class FixturesRepository {
     let limit: number | undefined = undefined;
     let targetDate: string | Date | null = null;
     let targetTeams: string[] | null = null;
+    let targetCompetitions: string[] | null = null;
 
     if (typeof optionsOrLimit === 'number') {
       limit = optionsOrLimit;
@@ -130,6 +132,7 @@ export class FixturesRepository {
       limit = optionsOrLimit.limit ?? undefined;
       targetDate = optionsOrLimit.date ?? null;
       targetTeams = optionsOrLimit.teams ?? null;
+      targetCompetitions = optionsOrLimit.competitions ?? null;
     }
 
     const LIVE_STATES = ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY'];
@@ -159,20 +162,41 @@ export class FixturesRepository {
     const startOfActiveDay = new Date(Date.UTC(activeDate.getUTCFullYear(), activeDate.getUTCMonth(), activeDate.getUTCDate(), 0, 0, 0, 0));
     const endOfActiveDay = new Date(Date.UTC(activeDate.getUTCFullYear(), activeDate.getUTCMonth(), activeDate.getUTCDate(), 23, 59, 59, 999));
 
-    const livePastCutoff = new Date(nowMs - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS);
-    const liveFutureCutoff = new Date(nowMs + AcquisitionPolicyEngine.APPROACHING_WINDOW_MS);
-    const prematchPastCutoff = targetDate ? startOfActiveDay : new Date(nowMs - AcquisitionPolicyEngine.APPROACHING_WINDOW_MS);
-    const prematchFutureCutoff = targetDate ? endOfActiveDay : new Date(Math.max(nowMs + 24 * 60 * 60 * 1000, endOfActiveDay.getTime()));
-    const finishedPastCutoff = startOfActiveDay;
+    // Live match cutoffs:
+    // If targetDate is specified, bound to the selected day.
+    // If real-time tray (targetDate is null), include matches active today or kicking off within approaching window.
+    const livePastCutoff = targetDate
+      ? startOfActiveDay
+      : new Date(Math.max(startOfActiveDay.getTime(), nowMs - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS));
+    const liveFutureCutoff = targetDate
+      ? endOfActiveDay
+      : new Date(Math.max(endOfActiveDay.getTime(), nowMs + AcquisitionPolicyEngine.APPROACHING_WINDOW_MS));
+
+    // Prematch schedule: ALWAYS include all scheduled matches for the active day
+    const prematchPastCutoff = startOfActiveDay;
+    const prematchFutureCutoff = targetDate
+      ? endOfActiveDay
+      : new Date(Math.max(nowMs + 24 * 60 * 60 * 1000, endOfActiveDay.getTime()));
+
+    // Finished matches: active day, plus graceful buffer for midnight rollover so evening matches (e.g. 3-12h ago) don't disappear at 00:01 UTC
+    const finishedPastCutoff = targetDate
+      ? startOfActiveDay
+      : new Date(Math.min(startOfActiveDay.getTime(), nowMs - 12 * 60 * 60 * 1000));
     const finishedFutureCutoff = endOfActiveDay;
 
     // Expand teams to include legacy IDs, stripped numeric prefixes, and resolve canonical IDs
     const expandedTeamIds = new Set<string>();
+    const expandedCompIds = new Set<string>();
+
     if (targetTeams && targetTeams.length > 0) {
       for (const t of targetTeams) {
         if (!t) continue;
         const trimmed = t.trim();
         if (!trimmed) continue;
+        if (trimmed.startsWith('comp_') || trimmed.startsWith('ft_comp_')) {
+          expandedCompIds.add(trimmed);
+          continue;
+        }
         expandedTeamIds.add(trimmed);
         if (trimmed.startsWith('team_')) {
           expandedTeamIds.add(trimmed.substring(5));
@@ -196,54 +220,81 @@ export class FixturesRepository {
           // Non-critical fallback
         }
       }
+    }
 
-      // Check if any canonical competition IDs (e.g. ft_comp_...) were provided and resolve their legacy IDs
-      const canonicalCompCandidates = Array.from(expandedTeamIds).filter((id) => id.startsWith('ft_comp_'));
-      if (canonicalCompCandidates.length > 0) {
-        try {
-          const matchedComps = await db.query.competitions.findMany({
-            where: inArray(schema.competitions.canonicalId, canonicalCompCandidates),
-            columns: { id: true, canonicalId: true },
-          });
-          for (const mc of matchedComps) {
-            if (mc.id) expandedTeamIds.add(mc.id);
-          }
-        } catch {
-          // Non-critical fallback
+    if (targetCompetitions && targetCompetitions.length > 0) {
+      for (const c of targetCompetitions) {
+        if (!c) continue;
+        const trimmed = c.trim();
+        if (!trimmed) continue;
+        expandedCompIds.add(trimmed);
+        if (trimmed.startsWith('comp_')) {
+          expandedCompIds.add(trimmed.substring(5));
+        } else if (!trimmed.startsWith('ft_comp_')) {
+          expandedCompIds.add(`comp_${trimmed}`);
         }
       }
     }
 
-    const orConditions: any[] = [
-      and(
-        inArray(schema.fixtures.state, LIVE_STATES),
-        gte(schema.fixtures.kickoffTime, livePastCutoff),
-        lte(schema.fixtures.kickoffTime, liveFutureCutoff)
-      ),
-      and(
-        inArray(schema.fixtures.state, PREMATCH_STATES),
-        gte(schema.fixtures.kickoffTime, prematchPastCutoff),
-        lte(schema.fixtures.kickoffTime, prematchFutureCutoff)
-      ),
-      and(
-        inArray(schema.fixtures.state, FINISHED_STATES),
-        gte(schema.fixtures.kickoffTime, finishedPastCutoff),
-        lte(schema.fixtures.kickoffTime, finishedFutureCutoff)
-      ),
-    ];
+    // Check if any canonical competition IDs (e.g. ft_comp_...) were provided and resolve their legacy IDs
+    const canonicalCompCandidates = Array.from(expandedCompIds).filter((id) => id.startsWith('ft_comp_'));
+    if (canonicalCompCandidates.length > 0) {
+      try {
+        const matchedComps = await db.query.competitions.findMany({
+          where: inArray(schema.competitions.canonicalId, canonicalCompCandidates),
+          columns: { id: true, canonicalId: true },
+        });
+        for (const mc of matchedComps) {
+          if (mc.id) expandedCompIds.add(mc.id);
+        }
+      } catch {
+        // Non-critical fallback
+      }
+    }
 
-    // Include ALL matches (where status is PREMATCH or LIVE) for the user's followed teams and competitions regardless of how far in the future
-    if (expandedTeamIds.size > 0) {
-      const targetIdList = Array.from(expandedTeamIds);
-      orConditions.push(
-        and(
-          inArray(schema.fixtures.state, [...LIVE_STATES, ...PREMATCH_STATES]),
-          or(
-            inArray(schema.fixtures.homeTeamId, targetIdList),
-            inArray(schema.fixtures.awayTeamId, targetIdList),
-            inArray(schema.fixtures.competitionId, targetIdList)
-          )
+    // Strict OR Query:
+    // (Matches exactly on requested ?date) OR (Matches belonging to ?teams) OR (Matches belonging to ?competitions)
+    const dateCondition = targetDate
+      ? and(
+          gte(schema.fixtures.kickoffTime, startOfActiveDay),
+          lte(schema.fixtures.kickoffTime, endOfActiveDay)
         )
+      : or(
+          and(
+            inArray(schema.fixtures.state, LIVE_STATES),
+            gte(schema.fixtures.kickoffTime, livePastCutoff),
+            lte(schema.fixtures.kickoffTime, liveFutureCutoff)
+          ),
+          and(
+            inArray(schema.fixtures.state, PREMATCH_STATES),
+            gte(schema.fixtures.kickoffTime, prematchPastCutoff),
+            lte(schema.fixtures.kickoffTime, prematchFutureCutoff)
+          ),
+          and(
+            inArray(schema.fixtures.state, FINISHED_STATES),
+            gte(schema.fixtures.kickoffTime, finishedPastCutoff),
+            lte(schema.fixtures.kickoffTime, finishedFutureCutoff)
+          )
+        );
+
+    const orConditions: any[] = [dateCondition];
+
+    // Include matches belonging to ?teams
+    if (expandedTeamIds.size > 0) {
+      const targetTeamList = Array.from(expandedTeamIds);
+      orConditions.push(
+        or(
+          inArray(schema.fixtures.homeTeamId, targetTeamList),
+          inArray(schema.fixtures.awayTeamId, targetTeamList)
+        )
+      );
+    }
+
+    // Include matches belonging to ?competitions
+    if (expandedCompIds.size > 0) {
+      const targetCompList = Array.from(expandedCompIds);
+      orConditions.push(
+        inArray(schema.fixtures.competitionId, targetCompList)
       );
     }
 

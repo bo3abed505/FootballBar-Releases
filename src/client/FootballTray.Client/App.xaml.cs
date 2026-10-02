@@ -50,6 +50,7 @@ public partial class App : Application
     public static TaskbarTickerCoordinator? CurrentTickerCoordinator { get; private set; }
     public static MainViewModel? CurrentMainViewModel { get; private set; }
     public static IDiagnosticsService? CurrentDiagnosticsService { get; private set; }
+    public static PreferencesService? CurrentPreferencesService => _preferencesService;
 
     public App()
     {
@@ -92,7 +93,8 @@ public partial class App : Application
         var audioService = new AudioPlaybackService(_preferencesService);
         AudioPlaybackService.Instance = audioService;
         var notificationService = new NotificationService(audioService: audioService);
-        _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15));
+        var notificationCoordinator = new NotificationCoordinator(_preferencesService);
+        _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15), notificationCoordinator);
         _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);
         CurrentDiagnosticsService = _diagnosticsService;
         _updateDiscoveryService = new UpdateDiscoveryService();
@@ -314,6 +316,7 @@ public partial class App : Application
 
                 var trayMenu = new System.Windows.Forms.ContextMenuStrip();
                 trayMenu.Items.Add("Open Footballtray", null, (s, e) => OpenMainWindow());
+                trayMenu.Items.Add("Settings", null, (s, e) => OpenSettings());
 
                 var showHideTickerItem = new System.Windows.Forms.ToolStripMenuItem("Hide Ticker");
                 showHideTickerItem.Click += async (s, e) =>
@@ -541,6 +544,37 @@ public partial class App : Application
         else
         {
             dq.TryEnqueue(Restore);
+        }
+    }
+
+    public static void OpenSettings()
+    {
+        if (Current is not App app || app._window == null) return;
+        var dq = app._window.DispatcherQueue;
+        if (dq == null) return;
+
+        void RestoreAndNavigate()
+        {
+            try
+            {
+                app._window.AppWindow.Show();
+            }
+            catch { }
+            BringMainWindowToForeground(app._window);
+
+            if (app._window is MainWindow mw)
+            {
+                mw.Navigate(typeof(Views.SettingsPage));
+            }
+        }
+
+        if (dq.HasThreadAccess)
+        {
+            RestoreAndNavigate();
+        }
+        else
+        {
+            dq.TryEnqueue(RestoreAndNavigate);
         }
     }
 

@@ -78,7 +78,7 @@ export class MockFootballProvider implements FootballProvider {
   // Seeded Competitions
   private readonly compLaLiga: ProviderCompetition = {
     id: 'comp_laliga',
-    name: 'La Liga (Dev Mock)',
+    name: 'La Liga',
     code: 'ESP_L1',
     type: 'league',
     country: 'Spain',
@@ -87,7 +87,7 @@ export class MockFootballProvider implements FootballProvider {
 
   private readonly compInternational: ProviderCompetition = {
     id: 'comp_international',
-    name: 'International Friendly (Dev Mock)',
+    name: 'International Friendly',
     code: 'INT_FRN',
     type: 'cup',
     country: 'World',
@@ -150,7 +150,7 @@ export class MockFootballProvider implements FootballProvider {
         type: 'PeriodStart',
         minute: 1,
         extraMinute: 0,
-        description: '[DEV MOCK] First half kicks off',
+        description: 'First half kicks off',
       },
       {
         id: 'evt_elclasico_2',
@@ -160,11 +160,11 @@ export class MockFootballProvider implements FootballProvider {
         type: 'Goal',
         minute: 17,
         extraMinute: 0,
-        playerName: 'L. Martinez (Dev Player)',
+        playerName: 'L. Martinez',
         playerId: 'ply_bar_10',
-        assistPlayerName: 'P. Gonzalez (Dev Player)',
+        assistPlayerName: 'P. Gonzalez',
         assistPlayerId: 'ply_bar_8',
-        description: '[DEV MOCK] Goal! L. Martinez slots it into the bottom corner.',
+        description: 'Goal! L. Martinez slots it into the bottom corner.',
       },
       {
         id: 'evt_elclasico_3',
@@ -174,9 +174,9 @@ export class MockFootballProvider implements FootballProvider {
         type: 'YellowCard',
         minute: 35,
         extraMinute: 0,
-        playerName: 'V. Silva (Dev Player)',
+        playerName: 'V. Silva',
         playerId: 'ply_rma_5',
-        description: '[DEV MOCK] Yellow card for tactical foul',
+        description: 'Yellow card for tactical foul',
       },
       {
         id: 'evt_elclasico_4',
@@ -186,7 +186,7 @@ export class MockFootballProvider implements FootballProvider {
         type: 'PeriodEnd',
         minute: 45,
         extraMinute: 0,
-        description: '[DEV MOCK] Half-time whistle',
+        description: 'Half-time whistle',
       },
       {
         id: 'evt_elclasico_5',
@@ -196,7 +196,7 @@ export class MockFootballProvider implements FootballProvider {
         type: 'PeriodStart',
         minute: 46,
         extraMinute: 0,
-        description: '[DEV MOCK] Second half kicks off',
+        description: 'Second half kicks off',
       },
       {
         id: 'evt_elclasico_6',
@@ -206,11 +206,11 @@ export class MockFootballProvider implements FootballProvider {
         type: 'Goal',
         minute: 72,
         extraMinute: 0,
-        playerName: 'K. Becker (Dev Player)',
+        playerName: 'K. Becker',
         playerId: 'ply_rma_9',
-        assistPlayerName: 'R. Hernandez (Dev Player)',
+        assistPlayerName: 'R. Hernandez',
         assistPlayerId: 'ply_rma_7',
-        description: '[DEV MOCK] Goal! K. Becker powers a header past the keeper.',
+        description: 'Goal! K. Becker powers a header past the keeper.',
       },
     ];
 
@@ -224,7 +224,7 @@ export class MockFootballProvider implements FootballProvider {
       season: this.seasonLaLiga,
       homeTeam: this.teamBarcelona,
       awayTeam: this.teamRealMadrid,
-      round: '[DEV MOCK] Regular Season - Round 26',
+      round: 'Regular Season - Round 26',
       kickoffTime: '2026-09-01T01:42:51.804Z',
       state: 'LIVE',
       elapsedMinute: 72,
@@ -235,7 +235,7 @@ export class MockFootballProvider implements FootballProvider {
         homeHt: 1,
         awayHt: 0,
       },
-      venue: 'Spotify Camp Nou (Mock)',
+      venue: 'Spotify Camp Nou',
       referee: 'J. Manzano',
       events: elClasicoEvents,
     };
@@ -251,7 +251,7 @@ export class MockFootballProvider implements FootballProvider {
       season: this.seasonInternational,
       homeTeam: this.teamSpain,
       awayTeam: this.teamEgypt,
-      round: '[DEV MOCK] International Friendly',
+      round: 'International Friendly',
       kickoffTime: '2026-09-01T06:27:51.804Z',
       state: 'PREMATCH',
       elapsedMinute: 0,
@@ -395,7 +395,7 @@ export class MockFootballProvider implements FootballProvider {
       playerId: scorer.id,
       assistPlayerName: assist?.name,
       assistPlayerId: assist?.id,
-      description: `[DEV MOCK] Goal! ${scorer.name} curls a strike into the top corner.`,
+      description: `Goal! ${scorer.name} curls a strike into the top corner.`,
     };
 
     fixture.score = newScore;

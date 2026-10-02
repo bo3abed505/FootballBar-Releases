@@ -99,6 +99,7 @@ public class DiagnosticsService : IDiagnosticsService
                 HealthState = health,
                 CachedPayloadTimestamp = _syncService?.LastValidatedAt,
                 HasETag = !string.IsNullOrWhiteSpace(_syncService?.LastKnownETag),
+                LastKnownETag = _syncService?.LastKnownETag,
                 FollowedTeamsCount = prefs.FollowedTeams.Count,
                 FollowedCompetitionsCount = prefs.FollowedCompetitions.Count,
                 NotificationsGloballyEnabled = prefs.Notifications.GlobalEnabled,

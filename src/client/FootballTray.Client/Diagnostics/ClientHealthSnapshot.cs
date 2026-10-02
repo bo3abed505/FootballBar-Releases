@@ -21,6 +21,7 @@ public record ClientHealthSnapshot
     public ApplicationHealthState HealthState { get; init; } = ApplicationHealthState.Healthy;
     public DateTimeOffset? CachedPayloadTimestamp { get; init; }
     public bool HasETag { get; init; }
+    public string? LastKnownETag { get; init; }
     public int FollowedTeamsCount { get; init; }
     public int FollowedCompetitionsCount { get; init; }
     public bool NotificationsGloballyEnabled { get; init; } = true;

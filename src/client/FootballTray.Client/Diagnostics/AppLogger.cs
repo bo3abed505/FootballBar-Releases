@@ -20,6 +20,10 @@ public static class AppLogger
     public static event Action<DiagnosticLogEntry>? EntryLogged;
 
     public static FileLogSink FileSink => _fileSink;
+    public static string LogDirectory => _fileSink.LogDirectory;
+
+    public static volatile bool IsLoggingEnabled = true;
+    public static volatile bool IsDebugLoggingEnabled = false;
 
     /// <summary>
     /// Configures custom log sink (primarily for tests).
@@ -57,6 +61,9 @@ public static class AppLogger
     {
         try
         {
+            if (!IsLoggingEnabled) return;
+            if (level == DiagnosticLogLevel.Debug && !IsDebugLoggingEnabled) return;
+
             string sanitizedMsg = Sanitize(message);
             string? exType = ex?.GetType().Name;
             string? exMsg = null;

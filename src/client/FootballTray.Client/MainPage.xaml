@@ -272,14 +272,24 @@
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
-            <!-- Status / Error InfoBar -->
-            <InfoBar
-                Grid.Column="1"
-                x:Name="StatusInfoBar"
-                IsOpen="False"
-                Severity="Warning"
-                IsClosable="True"
-                VerticalAlignment="Center" />
+            <!-- Status / Error InfoBar & Settings Button -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <InfoBar
+                    x:Name="StatusInfoBar"
+                    IsOpen="False"
+                    Severity="Warning"
+                    IsClosable="True"
+                    VerticalAlignment="Center" />
+
+                <Button
+                    x:Name="OpenSettingsButton"
+                    Content="&#xE713;"
+                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                    FontSize="16"
+                    Padding="8"
+                    ToolTipService.ToolTip="Settings &amp; Preferences"
+                    Click="OnOpenSettingsClicked" />
+            </StackPanel>
         </Grid>
 
         <!-- Main Content Area -->
@@ -503,9 +513,9 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="18">
 
-                        <!-- Preferences Header -->
+                        <!-- Search Header -->
                         <TextBlock
-                            Text="Preferences &amp; Alerts"
+                            Text="Search &amp; Follow"
                             Style="{ThemeResource SubtitleTextBlockStyle}"
                             FontWeight="SemiBold" />
 
@@ -794,314 +804,6 @@
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- ======================================================== -->
-                        <!-- SECTION D: NOTIFICATIONS                                 -->
-                        <!-- ======================================================== -->
-                        <Border
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="12">
-                            <StackPanel Spacing="12">
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock
-                                            Text="Windows Match Notifications"
-                                            FontWeight="SemiBold"
-                                            FontSize="14" />
-                                        <TextBlock
-                                            Text="Receive native Windows toast alerts for confirmed match events."
-                                            FontSize="11"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <!-- Global Notifications Toggle -->
-                                <ToggleSwitch
-                                    x:Name="GlobalNotificationsSwitch"
-                                    Header="Global Notifications Enabled"
-                                    IsOn="True"
-                                    Toggled="OnGlobalNotificationsToggled" />
-
-                                <!-- Notification Sound Mode Selector & Test Button -->
-                                <StackPanel Spacing="4">
-                                    <TextBlock
-                                        Text="Notification Sound"
-                                        FontWeight="SemiBold"
-                                        FontSize="12"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <ComboBox
-                                            Grid.Column="0"
-                                            x:Name="SoundModeComboBox"
-                                            HorizontalAlignment="Stretch"
-                                            SelectionChanged="OnSoundModeSelectionChanged">
-                                            <ComboBoxItem Content="Custom (Authentic Stadium Sounds)" Tag="Custom" />
-                                            <ComboBoxItem Content="System Default (Windows Chime)" Tag="SystemDefault" />
-                                            <ComboBoxItem Content="Off (Muted)" Tag="Off" />
-                                        </ComboBox>
-                                        <Button
-                                            Grid.Column="1"
-                                            x:Name="TestSoundButton"
-                                            Content="🔊 Test Sound"
-                                            Click="OnTestSoundClicked"
-                                            VerticalAlignment="Center" />
-                                    </Grid>
-                                </StackPanel>
-
-                                <MenuFlyoutSeparator />
-
-                                <TextBlock
-                                    Text="Event Categories"
-                                    FontWeight="SemiBold"
-                                    FontSize="12"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
-                                <!-- Per Category List -->
-                                <ItemsControl x:Name="NotificationCategoriesList">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:NotificationCategoryItemViewModel">
-                                            <Grid Padding="4,2,4,2" ColumnSpacing="10">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                                    <TextBlock
-                                                        Text="{x:Bind DisplayName}"
-                                                        FontWeight="SemiBold"
-                                                        FontSize="12" />
-                                                    <TextBlock
-                                                        Text="{x:Bind Description}"
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </StackPanel>
-                                                <ToggleSwitch
-                                                    Grid.Column="1"
-                                                    IsOn="{x:Bind IsEnabled, Mode=TwoWay}"
-                                                    Tag="{x:Bind Type}"
-                                                    Toggled="OnNotificationCategoryToggled"
-                                                    MinWidth="0" />
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- ======================================================== -->
-                        <!-- SECTION E: TASKBAR & DISPLAY SETTINGS                    -->
-                        <!-- ======================================================== -->
-                        <Border
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="12">
-                            <StackPanel Spacing="12">
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
-                                    <StackPanel VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock
-                                            Text="Taskbar &amp; Display"
-                                            FontWeight="SemiBold"
-                                            FontSize="14" />
-                                        <TextBlock
-                                            Text="Configure carousel rotation and global time display format."
-                                            FontSize="11"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <!-- Ticker Carousel Toggle -->
-                                <ToggleSwitch
-                                    x:Name="TickerCarouselSwitch"
-                                    Header="Auto-Rotate Ticker (Carousel Mode)"
-                                    IsOn="True"
-                                    Toggled="OnTickerCarouselToggled" />
-
-                                <!-- 24-Hour Time Format Toggle -->
-                                <ToggleSwitch
-                                    x:Name="TimeFormat24HourSwitch"
-                                    Header="24-Hour Time Format (e.g. 18:30 vs 6:30 PM)"
-                                    IsOn="True"
-                                    Toggled="OnTimeFormat24HourToggled" />
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Software Updates Card -->
-                        <Border
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="16">
-                            <StackPanel Spacing="10">
-                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE895;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                                    <StackPanel>
-                                        <TextBlock
-                                            Text="Software Updates"
-                                            FontWeight="SemiBold"
-                                            FontSize="14" />
-                                        <TextBlock
-                                            x:Name="UpdateCurrentVersionText"
-                                            Text="Current: Loading..."
-                                            FontSize="11"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <!-- Persistent Update Available Section -->
-                                <Border
-                                    x:Name="UpdateAvailablePanel"
-                                    Visibility="Collapsed"
-                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="6"
-                                    Padding="12">
-                                    <StackPanel Spacing="6">
-                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                            <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                                            <TextBlock Text="Update available" FontWeight="Bold" FontSize="12" />
-                                        </StackPanel>
-                                        <TextBlock
-                                            x:Name="UpdateTargetVersionText"
-                                            Text="Version v1.1.0"
-                                            FontWeight="SemiBold"
-                                            FontSize="12" />
-                                        <TextBlock
-                                            x:Name="UpdateReleaseNotesHeader"
-                                            Text="Release Notes:"
-                                            FontSize="11"
-                                            FontWeight="SemiBold"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                        <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
-                                            <TextBlock
-                                                x:Name="UpdateReleaseNotesText"
-                                                TextWrapping="Wrap"
-                                                FontSize="11"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                        </ScrollViewer>
-
-                                        <!-- Download Update Action & Progress -->
-                                        <StackPanel Spacing="6" Margin="0,6,0,0">
-                                            <ProgressBar
-                                                x:Name="UpdateDownloadProgressBar"
-                                                Visibility="Collapsed"
-                                                Minimum="0"
-                                                Maximum="100"
-                                                Value="0"
-                                                HorizontalAlignment="Stretch" />
-
-                                            <TextBlock
-                                                x:Name="UpdateDownloadStatusText"
-                                                Visibility="Collapsed"
-                                                FontSize="11"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                TextWrapping="Wrap" />
-
-                                            <Button
-                                                x:Name="DownloadUpdateButton"
-                                                Content="Download update"
-                                                Style="{ThemeResource AccentButtonStyle}"
-                                                HorizontalAlignment="Stretch"
-                                                Click="OnDownloadUpdateClick" />
-
-                                            <Button
-                                                x:Name="InstallUpdateButton"
-                                                Content="Install update"
-                                                Style="{ThemeResource AccentButtonStyle}"
-                                                HorizontalAlignment="Stretch"
-                                                Visibility="Collapsed"
-                                                Click="OnInstallUpdateClick" />
-
-                                            <TextBlock
-                                                x:Name="UpdateInstallStatusText"
-                                                Visibility="Collapsed"
-                                                FontSize="11"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- Manual Update Status Message -->
-                                <TextBlock
-                                    x:Name="UpdateStatusText"
-                                    Visibility="Collapsed"
-                                    FontSize="11"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextWrapping="Wrap" />
-
-                                <!-- Manual Check for Updates Button -->
-                                <Button
-                                    x:Name="CheckForUpdatesButton"
-                                    Content="Check for updates"
-                                    HorizontalAlignment="Stretch"
-                                    Click="OnCheckForUpdatesClick" />
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Diagnostics & Troubleshooting Card -->
-                        <Border
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="16">
-                            <StackPanel Spacing="12">
-                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE9D9;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                                    <StackPanel>
-                                        <TextBlock
-                                            Text="System Diagnostics"
-                                            FontWeight="SemiBold"
-                                            FontSize="14" />
-                                        <TextBlock
-                                            x:Name="DiagnosticsVersionText"
-                                            Text="Version 1.0.0 (x64)"
-                                            FontSize="11"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <Grid ColumnSpacing="8" RowSpacing="6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Health:" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="DiagnosticsHealthText" Text="Healthy" FontWeight="SemiBold" FontSize="11" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Last Sync:" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DiagnosticsLastSyncText" Text="None" FontSize="11" />
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Taskbar:" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DiagnosticsTaskbarText" Text="Attached" FontSize="11" />
-                                </Grid>
-
-                                <Button
-                                    x:Name="CopyDiagnosticsButton"
-                                    Content="Copy Diagnostics"
-                                    HorizontalAlignment="Stretch"
-                                    Click="OnCopyDiagnosticsClick" />
                             </StackPanel>
                         </Border>
 

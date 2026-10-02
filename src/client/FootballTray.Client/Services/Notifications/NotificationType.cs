@@ -13,5 +13,6 @@ public enum NotificationType
     MatchCancelled,
     MatchResumed,
     RedCard,
-    PenaltyAwarded
+    PenaltyAwarded,
+    Kickoff
 }

@@ -6,6 +6,10 @@ import {
   formatV2CatalogTeam,
   formatV2CatalogCompetition,
 } from '../api/v2-dto.js';
+import {
+  PRIORITY_COMPETITIONS,
+  CANONICAL_COMPETITION_MAP,
+} from '../acquisition/priority-competitions.js';
 
 /**
  * Escapes SQL LIKE / ILIKE wildcard characters (%, _) and backslash (\)
@@ -94,7 +98,8 @@ export class CatalogRepository {
 
   /**
    * Performs case-insensitive partial search for competitions across name and code.
-   * Special characters (%, _) are escaped before applying wildcards.
+   * Merges database competitions with curated priority global competitions to guarantee
+   * full coverage for world leagues (e.g. Premier League, Champions League, La Liga, Serie A).
    */
   async searchCompetitions(query: string, limit: number = 20): Promise<V2CatalogCompetition[]> {
     const trimmed = query.trim();
@@ -125,6 +130,59 @@ export class CatalogRepository {
       )
       .limit(clampedLimit);
 
-    return rows.map(formatV2CatalogCompetition);
+    const resultsMap = new Map<string, V2CatalogCompetition>();
+
+    // 1. Add database matches
+    for (const row of rows) {
+      if (row.name && row.name.toLowerCase().includes('(dev mock)')) {
+        continue;
+      }
+      const formatted = formatV2CatalogCompetition(row);
+      const normKey = formatted.name.trim().toLowerCase();
+      resultsMap.set(normKey, formatted);
+    }
+
+    // 2. Add matching priority competitions
+    const lowerQuery = trimmed.toLowerCase();
+    const matchingPriority = PRIORITY_COMPETITIONS.filter((prio) => {
+      const name = prio.name.toLowerCase();
+      const code = (prio.code || '').toLowerCase();
+      const country = (prio.country || '').toLowerCase();
+      return name.includes(lowerQuery) || code.includes(lowerQuery) || country.includes(lowerQuery);
+    });
+
+    for (const prio of matchingPriority) {
+      const normKey = prio.name.trim().toLowerCase();
+      const existing = resultsMap.get(normKey);
+
+      const canonicalId = CANONICAL_COMPETITION_MAP[prio.id] || `ft_comp_${prio.id}`;
+      const legacyId = `comp_${prio.id}`;
+      const logoUrl = `https://media.api-sports.io/football/leagues/${prio.id}.png`;
+
+      if (!existing) {
+        resultsMap.set(normKey, {
+          id: canonicalId,
+          legacyId,
+          name: prio.name,
+          code: prio.code || null,
+          country: prio.country || null,
+          logo: logoUrl,
+          logoUrl,
+        });
+      } else {
+        // Enhance existing if missing canonical or logo/code metadata
+        if (CANONICAL_COMPETITION_MAP[prio.id] && (!existing.id || existing.id.startsWith('comp_'))) {
+          existing.id = CANONICAL_COMPETITION_MAP[prio.id];
+        }
+        if (!existing.legacyId) existing.legacyId = legacyId;
+        if (!existing.code && prio.code) existing.code = prio.code;
+        if (!existing.country && prio.country) existing.country = prio.country;
+        if (!existing.logoUrl) existing.logoUrl = logoUrl;
+        if (!existing.logo) existing.logo = logoUrl;
+      }
+    }
+
+    return Array.from(resultsMap.values()).slice(0, clampedLimit);
   }
 }
+

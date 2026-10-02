@@ -27,6 +27,7 @@ public class SyncService : ISyncService
     private readonly FootballApiClient _apiClient;
     private readonly LocalCacheService _cacheService;
     private readonly NotificationService? _notificationService;
+    private readonly FootballTray.Client.Services.Notifications.NotificationCoordinator? _notificationCoordinator;
     private readonly IPreferencesService? _preferencesService;
     private readonly TimeSpan _pollingInterval;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -93,13 +94,15 @@ public class SyncService : ISyncService
         LocalCacheService cacheService,
         NotificationService? notificationService = null,
         IPreferencesService? preferencesService = null,
-        TimeSpan? pollingInterval = null)
+        TimeSpan? pollingInterval = null,
+        FootballTray.Client.Services.Notifications.NotificationCoordinator? notificationCoordinator = null)
     {
         _apiClient = apiClient;
         _cacheService = cacheService;
         _notificationService = notificationService;
         _preferencesService = preferencesService;
         _pollingInterval = pollingInterval ?? TimeSpan.FromSeconds(15);
+        _notificationCoordinator = notificationCoordinator;
 
         if (_preferencesService != null)
         {
@@ -176,6 +179,7 @@ public class SyncService : ISyncService
             _notificationService?.Engine.EvaluateUpdates(null, _currentTrayData);
 
             PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+            _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
         }
         else
         {
@@ -216,7 +220,8 @@ public class SyncService : ISyncService
         try
         {
             var prefs = _preferencesService?.Current ?? _preferencesService?.GetPreferences();
-            var targetIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var teamIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var compIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             if (prefs != null)
             {
@@ -225,14 +230,14 @@ public class SyncService : ISyncService
                 {
                     if (!string.IsNullOrWhiteSpace(id) && !id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
                     {
-                        targetIds.Add(id.Trim());
+                        teamIds.Add(id.Trim());
                     }
                 }
                 if (prefs.FollowedTeams != null)
                 {
                     foreach (var t in prefs.FollowedTeams)
                     {
-                        if (!string.IsNullOrWhiteSpace(t.Id)) targetIds.Add(t.Id.Trim());
+                        if (!string.IsNullOrWhiteSpace(t.Id)) teamIds.Add(t.Id.Trim());
                     }
                 }
 
@@ -241,25 +246,27 @@ public class SyncService : ISyncService
                 {
                     if (!string.IsNullOrWhiteSpace(id) && !id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
                     {
-                        targetIds.Add(id.Trim());
+                        compIds.Add(id.Trim());
                     }
                 }
                 if (prefs.FollowedCompetitions != null)
                 {
                     foreach (var c in prefs.FollowedCompetitions)
                     {
-                        if (!string.IsNullOrWhiteSpace(c.Id)) targetIds.Add(c.Id.Trim());
+                        if (!string.IsNullOrWhiteSpace(c.Id)) compIds.Add(c.Id.Trim());
                     }
                 }
             }
 
-            var targetIdList = targetIds.ToList();
+            var teamIdList = teamIds.ToList();
+            var compIdList = compIds.ToList();
 
-            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {_targetDate:yyyy-MM-dd}, Targets: {targetIdList.Count}, ETag: '{_lastKnownEtag ?? "none"}')...");
+            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {_targetDate:yyyy-MM-dd}, Teams: {teamIdList.Count}, Competitions: {compIdList.Count}, ETag: '{_lastKnownEtag ?? "none"}')...");
             var response = await _apiClient.GetTrayAsync(
                 _lastKnownEtag,
                 _targetDate,
-                targetIdList,
+                teamIdList,
+                compIdList,
                 cancellationToken);
             sw.Stop();
             _lastRefreshDurationMs = sw.ElapsedMilliseconds;
@@ -286,6 +293,7 @@ public class SyncService : ISyncService
                 }
 
                 AppLogger.Info("Sync", "PollNotModified", $"Backend returned 304 Not Modified ({_lastRefreshDurationMs}ms). Cache revalidated.");
+                _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
                 PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                 return _freshnessState;
             }
@@ -319,6 +327,7 @@ public class SyncService : ISyncService
                 }
 
                 AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
+                _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
                 PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                 return _freshnessState;
             }

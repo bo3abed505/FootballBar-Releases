@@ -72,6 +72,24 @@ public static class CanonicalEntityIds
     public const int WorldCupNumericId = 1;
     public const string WorldCupMockAlias = "comp_wc";
 
+    /// <summary>UEFA European Championship canonical ID</summary>
+    public const string EuroChampionship = "ft_comp_01M3Y7E15VJYGS76SM21GBR1YD";
+    public const string LegacyEuroChampionship = "comp_4";
+    public const int EuroChampionshipNumericId = 4;
+    public const string EuroChampionshipMockAlias = "comp_euro";
+
+    /// <summary>UEFA Nations League canonical ID</summary>
+    public const string NationsLeague = "ft_comp_01M3Y7E15Z5X08Y7S7K0JPAGE6";
+    public const string LegacyNationsLeague = "comp_5";
+    public const int NationsLeagueNumericId = 5;
+    public const string NationsLeagueMockAlias = "comp_unl";
+
+    /// <summary>Copa America canonical ID</summary>
+    public const string CopaAmerica = "ft_comp_01M3Y7E1608TK80WDRTGYQHF2X";
+    public const string LegacyCopaAmerica = "comp_9";
+    public const int CopaAmericaNumericId = 9;
+    public const string CopaAmericaMockAlias = "comp_ca";
+
     // ==========================================
     // Legacy to Canonical Migration Dictionary
     // ==========================================
@@ -113,6 +131,15 @@ public static class CanonicalEntityIds
         { "comp_1", WorldCup },
         { "1", WorldCup },
         { "comp_wc", WorldCup },
+        { "comp_4", EuroChampionship },
+        { "4", EuroChampionship },
+        { "comp_euro", EuroChampionship },
+        { "comp_5", NationsLeague },
+        { "5", NationsLeague },
+        { "comp_unl", NationsLeague },
+        { "comp_9", CopaAmerica },
+        { "9", CopaAmerica },
+        { "comp_ca", CopaAmerica },
     };
 
     /// <summary>

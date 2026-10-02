@@ -85,9 +85,9 @@ async function setupTestDatabase() {
     console.log('[TEST_DB_SETUP] Seeding baseline test data into test database...');
     // Competitions
     await testDb.insert(schema.competitions).values([
-      { id: 'comp_laliga', canonicalId: generateCanonicalId('comp'), name: 'La Liga (Dev Mock)', code: 'ESP_L1', type: 'league', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/leagues/140.png' },
-      { id: 'comp_egypt_pl', canonicalId: generateCanonicalId('comp'), name: 'Egyptian Premier League (Dev Mock)', code: 'EGY_PL', type: 'league', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/leagues/233.png' },
-      { id: 'comp_international', canonicalId: generateCanonicalId('comp'), name: 'International Friendly (Dev Mock)', code: 'INT_FRN', type: 'cup', country: 'World', logoUrl: 'https://media.api-sports.io/football/leagues/10.png' },
+      { id: 'comp_laliga', canonicalId: generateCanonicalId('comp'), name: 'La Liga', code: 'ESP_L1', type: 'league', country: 'Spain', logoUrl: 'https://media.api-sports.io/football/leagues/140.png' },
+      { id: 'comp_egypt_pl', canonicalId: generateCanonicalId('comp'), name: 'Egyptian Premier League', code: 'EGY_PL', type: 'league', country: 'Egypt', logoUrl: 'https://media.api-sports.io/football/leagues/233.png' },
+      { id: 'comp_international', canonicalId: generateCanonicalId('comp'), name: 'International Friendly', code: 'INT_FRN', type: 'cup', country: 'World', logoUrl: 'https://media.api-sports.io/football/leagues/10.png' },
     ]).onConflictDoNothing();
 
     // Seasons
@@ -115,7 +115,7 @@ async function setupTestDatabase() {
         seasonId: 'season_laliga_2025',
         homeTeamId: 'team_barcelona',
         awayTeamId: 'team_realmadrid',
-        round: '[DEV MOCK] Regular Season - Round 26',
+        round: 'Regular Season - Round 26',
         kickoffTime: new Date(Date.now() - 45 * 60 * 1000),
         state: 'LIVE',
         elapsedMinute: 72,
@@ -124,7 +124,7 @@ async function setupTestDatabase() {
         awayScore: 1,
         homeScoreHt: 1,
         awayScoreHt: 0,
-        venue: 'Spotify Camp Nou (Mock)',
+        venue: 'Spotify Camp Nou',
         referee: 'J. Manzano',
         lastPolledAt: new Date(),
       },
@@ -135,14 +135,14 @@ async function setupTestDatabase() {
         seasonId: 'season_international_2025',
         homeTeamId: 'team_spain',
         awayTeamId: 'team_egypt',
-        round: '[DEV MOCK] International Friendly',
+        round: 'International Friendly',
         kickoffTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
         state: 'PREMATCH',
         elapsedMinute: 0,
         extraMinute: 0,
         homeScore: 0,
         awayScore: 0,
-        venue: 'Estadio Metropolitano (Mock)',
+        venue: 'Estadio Metropolitano',
         referee: 'M. Oliver',
         lastPolledAt: new Date(),
       },
@@ -150,12 +150,12 @@ async function setupTestDatabase() {
 
     // Events
     await testDb.insert(schema.events).values([
-      { id: 'evt_elclasico_1', eventUid: 'evt_fix_elclasico_2026_1_0_PeriodStart_init', fixtureId: 'fix_elclasico_2026', teamId: 'team_barcelona', type: 'PeriodStart', minute: 1, description: '[DEV MOCK] First half kicks off' },
-      { id: 'evt_elclasico_2', eventUid: 'evt_fix_elclasico_2026_17_0_Goal_bar10', fixtureId: 'fix_elclasico_2026', teamId: 'team_barcelona', type: 'Goal', minute: 17, playerName: 'L. Martinez (Dev Player)', playerId: 'ply_bar_10', description: '[DEV MOCK] Goal! L. Martinez slots it into the bottom corner.' },
-      { id: 'evt_elclasico_3', eventUid: 'evt_fix_elclasico_2026_35_0_YellowCard_rma5', fixtureId: 'fix_elclasico_2026', teamId: 'team_realmadrid', type: 'YellowCard', minute: 35, playerName: 'V. Silva (Dev Player)', playerId: 'ply_rma_5', description: '[DEV MOCK] Yellow card for tactical foul' },
-      { id: 'evt_elclasico_4', eventUid: 'evt_fix_elclasico_2026_45_0_PeriodEnd_ht', fixtureId: 'fix_elclasico_2026', teamId: 'team_barcelona', type: 'PeriodEnd', minute: 45, description: '[DEV MOCK] Half-time whistle' },
-      { id: 'evt_elclasico_5', eventUid: 'evt_fix_elclasico_2026_46_0_PeriodStart_2h', fixtureId: 'fix_elclasico_2026', teamId: 'team_realmadrid', type: 'PeriodStart', minute: 46, description: '[DEV MOCK] Second half kicks off' },
-      { id: 'evt_elclasico_6', eventUid: 'evt_fix_elclasico_2026_72_0_Goal_rma9', fixtureId: 'fix_elclasico_2026', teamId: 'team_realmadrid', type: 'Goal', minute: 72, playerName: 'K. Becker (Dev Player)', playerId: 'ply_rma_9', description: '[DEV MOCK] Goal! K. Becker powers a header past the keeper.' },
+      { id: 'evt_elclasico_1', eventUid: 'evt_fix_elclasico_2026_1_0_PeriodStart_init', fixtureId: 'fix_elclasico_2026', teamId: 'team_barcelona', type: 'PeriodStart', minute: 1, description: 'First half kicks off' },
+      { id: 'evt_elclasico_2', eventUid: 'evt_fix_elclasico_2026_17_0_Goal_bar10', fixtureId: 'fix_elclasico_2026', teamId: 'team_barcelona', type: 'Goal', minute: 17, playerName: 'L. Martinez', playerId: 'ply_bar_10', description: 'Goal! L. Martinez slots it into the bottom corner.' },
+      { id: 'evt_elclasico_3', eventUid: 'evt_fix_elclasico_2026_35_0_YellowCard_rma5', fixtureId: 'fix_elclasico_2026', teamId: 'team_realmadrid', type: 'YellowCard', minute: 35, playerName: 'V. Silva', playerId: 'ply_rma_5', description: 'Yellow card for tactical foul' },
+      { id: 'evt_elclasico_4', eventUid: 'evt_fix_elclasico_2026_45_0_PeriodEnd_ht', fixtureId: 'fix_elclasico_2026', teamId: 'team_barcelona', type: 'PeriodEnd', minute: 45, description: 'Half-time whistle' },
+      { id: 'evt_elclasico_5', eventUid: 'evt_fix_elclasico_2026_46_0_PeriodStart_2h', fixtureId: 'fix_elclasico_2026', teamId: 'team_realmadrid', type: 'PeriodStart', minute: 46, description: 'Second half kicks off' },
+      { id: 'evt_elclasico_6', eventUid: 'evt_fix_elclasico_2026_72_0_Goal_rma9', fixtureId: 'fix_elclasico_2026', teamId: 'team_realmadrid', type: 'Goal', minute: 72, playerName: 'K. Becker', playerId: 'ply_rma_9', description: 'Goal! K. Becker powers a header past the keeper.' },
     ]).onConflictDoNothing();
 
     console.log('====================================================');

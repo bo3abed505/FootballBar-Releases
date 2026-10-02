@@ -10,7 +10,7 @@ export async function seedDatabase() {
     {
       id: 'comp_laliga',
       canonicalId: generateCanonicalId('comp'),
-      name: 'La Liga (Dev Mock)',
+      name: 'La Liga',
       code: 'ESP_L1',
       type: 'league',
       country: 'Spain',
@@ -19,7 +19,7 @@ export async function seedDatabase() {
     {
       id: 'comp_egypt_pl',
       canonicalId: generateCanonicalId('comp'),
-      name: 'Egyptian Premier League (Dev Mock)',
+      name: 'Egyptian Premier League',
       code: 'EGY_PL',
       type: 'league',
       country: 'Egypt',
@@ -28,7 +28,7 @@ export async function seedDatabase() {
     {
       id: 'comp_international',
       canonicalId: generateCanonicalId('comp'),
-      name: 'International Friendly (Dev Mock)',
+      name: 'International Friendly',
       code: 'INT_FRN',
       type: 'cup',
       country: 'World',
@@ -138,7 +138,7 @@ export async function seedDatabase() {
       seasonId: 'season_laliga_2025',
       homeTeamId: 'team_barcelona',
       awayTeamId: 'team_realmadrid',
-      round: '[DEV MOCK] Regular Season - Round 26',
+      round: 'Regular Season - Round 26',
       kickoffTime: new Date(Date.now() - 45 * 60 * 1000), // Kickoff 45 mins ago
       state: 'LIVE',
       elapsedMinute: 72,
@@ -147,7 +147,7 @@ export async function seedDatabase() {
       awayScore: 1,
       homeScoreHt: 1,
       awayScoreHt: 0,
-      venue: 'Spotify Camp Nou (Mock)',
+      venue: 'Spotify Camp Nou',
       referee: 'J. Manzano',
       lastPolledAt: new Date(),
     },
@@ -158,14 +158,14 @@ export async function seedDatabase() {
       seasonId: 'season_international_2025',
       homeTeamId: 'team_spain',
       awayTeamId: 'team_egypt',
-      round: '[DEV MOCK] International Friendly',
+      round: 'International Friendly',
       kickoffTime: new Date(Date.now() + 4 * 60 * 60 * 1000), // Upcoming in 4 hours
       state: 'PREMATCH',
       elapsedMinute: 0,
       extraMinute: 0,
       homeScore: 0,
       awayScore: 0,
-      venue: 'Estadio Metropolitano (Mock)',
+      venue: 'Estadio Metropolitano',
       referee: 'M. Oliver',
       lastPolledAt: new Date(),
     },
@@ -182,7 +182,7 @@ export async function seedDatabase() {
       type: 'PeriodStart',
       minute: 1,
       extraMinute: 0,
-      description: '[DEV MOCK] First half kicks off',
+      description: 'First half kicks off',
     },
     {
       id: 'evt_elclasico_2',
@@ -192,11 +192,11 @@ export async function seedDatabase() {
       type: 'Goal',
       minute: 17,
       extraMinute: 0,
-      playerName: 'L. Martinez (Dev Player)',
+      playerName: 'L. Martinez',
       playerId: 'ply_bar_10',
-      assistPlayerName: 'P. Gonzalez (Dev Player)',
+      assistPlayerName: 'P. Gonzalez',
       assistPlayerId: 'ply_bar_8',
-      description: '[DEV MOCK] Goal! L. Martinez slots it into the bottom corner.',
+      description: 'Goal! L. Martinez slots it into the bottom corner.',
     },
     {
       id: 'evt_elclasico_3',
@@ -206,9 +206,9 @@ export async function seedDatabase() {
       type: 'YellowCard',
       minute: 35,
       extraMinute: 0,
-      playerName: 'V. Silva (Dev Player)',
+      playerName: 'V. Silva',
       playerId: 'ply_rma_5',
-      description: '[DEV MOCK] Yellow card for tactical foul',
+      description: 'Yellow card for tactical foul',
     },
     {
       id: 'evt_elclasico_4',
@@ -218,7 +218,7 @@ export async function seedDatabase() {
       type: 'PeriodEnd',
       minute: 45,
       extraMinute: 0,
-      description: '[DEV MOCK] Half-time whistle',
+      description: 'Half-time whistle',
     },
     {
       id: 'evt_elclasico_5',
@@ -228,7 +228,7 @@ export async function seedDatabase() {
       type: 'PeriodStart',
       minute: 46,
       extraMinute: 0,
-      description: '[DEV MOCK] Second half kicks off',
+      description: 'Second half kicks off',
     },
     {
       id: 'evt_elclasico_6',
@@ -238,15 +238,15 @@ export async function seedDatabase() {
       type: 'Goal',
       minute: 72,
       extraMinute: 0,
-      playerName: 'K. Becker (Dev Player)',
+      playerName: 'K. Becker',
       playerId: 'ply_rma_9',
-      assistPlayerName: 'R. Hernandez (Dev Player)',
+      assistPlayerName: 'R. Hernandez',
       assistPlayerId: 'ply_rma_7',
-      description: '[DEV MOCK] Goal! K. Becker powers a header past the keeper.',
+      description: 'Goal! K. Becker powers a header past the keeper.',
     },
   ]).onConflictDoNothing();
 
-  console.log('[SEED] Database seeded successfully with development mock fixtures!');
+  console.log('[SEED] Database seeded successfully with canonical fixtures!');
 }
 
 // Auto-run if executed directly

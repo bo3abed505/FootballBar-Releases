@@ -22,6 +22,7 @@ public class FileLogSink
     private readonly object _lock = new();
 
     public string LogFilePath => _logFilePath;
+    public string LogDirectory => _logDirectory;
 
     public FileLogSink(string? customLogPath = null, long maxSizeBytes = DefaultMaxSizeBytes, int maxRetainedFiles = DefaultMaxRetainedFiles)
     {

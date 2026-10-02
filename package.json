@@ -1,0 +1,11 @@
+{
+  "name": "footballtray-root",
+  "private": true,
+  "description": "FootballTray workspace root helper scripts",
+  "scripts": {
+    "simulate:match": "npm --prefix backend run simulate:match",
+    "dev": "npm --prefix backend run dev",
+    "build": "npm --prefix backend run build",
+    "test": "npm --prefix backend run test"
+  }
+}
