@@ -385,7 +385,7 @@ export class FixturesRepository {
         )
       );
 
-    return result.rowCount ?? 0;
+    return (result as any).rowCount ?? (result as any).changes ?? 0;
   }
 
   // Tracks dates for which schedule discovery has been executed

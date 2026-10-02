@@ -1,17 +1,14 @@
-import pg from 'pg';
 import { pool as defaultPool } from '../db/index.js';
 import { GatewayRequestOptions, GatewayResponse, ReservationResult } from './types.js';
-
-const { Pool } = pg;
 
 export class RequestGateway {
   static readonly HARD_DAILY_LIMIT = 100;
   static readonly OPERATIONAL_DAILY_LIMIT = 90;
   static readonly MINUTE_CEILING = 8;
 
-  private readonly pool: pg.Pool;
+  private readonly pool: any;
 
-  constructor(customPool?: pg.Pool) {
+  constructor(customPool?: any) {
     this.pool = customPool ?? defaultPool;
   }
 

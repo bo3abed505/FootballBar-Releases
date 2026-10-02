@@ -6,8 +6,8 @@ dotenv.config();
 export default defineConfig({
   schema: './src/db/schema.ts',
   out: './drizzle',
-  dialect: 'postgresql',
+  dialect: 'sqlite',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/footballtray?schema=public',
+    url: process.env.DATABASE_URL?.replace(/^file:/, '') || './local.db',
   },
 });

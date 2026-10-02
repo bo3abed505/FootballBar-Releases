@@ -4,7 +4,7 @@
  * Single-instance, cancellable, budget-aware background scheduler for FootballTray.
  *
  * Responsibilities:
- *   - Repeatedly evaluates AcquisitionPolicyEngine against PostgreSQL fixture state & budget.
+ *   - Repeatedly evaluates AcquisitionPolicyEngine against SQLite fixture state & budget.
  *   - Dispatches resulting SyncPlan via SyncService (orchestration only).
  *   - Waits for policy-recommended cadence intervals before repeating.
  *   - Ensures strictly zero cycle overlap.
@@ -113,7 +113,7 @@ async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Default PostgreSQL reader for provider daily budget state.
+ * Default SQLite reader for provider daily budget state.
  */
 export async function getDatabaseBudgetContext(provider = 'api_football', now = new Date()): Promise<BudgetContext> {
   const todayStr = now.toISOString().slice(0, 10);
@@ -246,7 +246,7 @@ export class AcquisitionScheduler {
   }
 
   /**
-   * Hydrates scheduler state, historical cycles, and milestones from PostgreSQL.
+   * Hydrates scheduler state, historical cycles, and milestones from SQLite.
    * Recovers any unfinished cycles left by an unexpected process restart.
    */
   async hydrateStateFromDatabase(): Promise<void> {
@@ -572,7 +572,7 @@ export class AcquisitionScheduler {
       } else if (errMsg.includes('BUDGET') || errMsg.includes('QUOTA') || errMsg.includes('EXHAUSTED')) {
         errorType = 'QUOTA_EXHAUSTED';
         outcome = 'QUOTA_BLOCKED';
-      } else if (errMsg.includes('database') || errMsg.includes('postgres') || errMsg.includes('pool') || errMsg.includes('connection')) {
+      } else if (errMsg.includes('database') || errMsg.includes('postgres') || errMsg.includes('sqlite') || errMsg.includes('pool') || errMsg.includes('connection')) {
         errorType = 'DATABASE_ERROR';
         outcome = 'ERROR';
       }

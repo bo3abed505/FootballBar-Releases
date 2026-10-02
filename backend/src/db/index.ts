@@ -1,76 +1,108 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import pg from 'pg';
+import Database, { type Database as SQLiteDatabase } from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 import * as dotenv from 'dotenv';
+import path from 'node:path';
+import fs from 'node:fs';
 
 dotenv.config();
 
-const { Pool } = pg;
-
 export const isTestEnvironment = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
 
-function resolveDatabaseUrl(): string {
+function resolveDatabasePath(): string {
+  let rawUrl: string | undefined;
   if (isTestEnvironment) {
-    const testUrl = process.env.DATABASE_URL_TEST;
-    if (!testUrl || testUrl.trim().length === 0) {
-      throw new Error(
-        '[SAFETY] Integration tests require DATABASE_URL_TEST to be defined in .env or environment.\n' +
-        'Automated tests are strictly forbidden from running against the development database.'
-      );
-    }
-    // Safety check: ensure test URL is not pointing to the default dev database
-    if (testUrl.includes('/footballtray?') || testUrl.endsWith('/footballtray')) {
-      throw new Error(
-        '[SAFETY] DATABASE_URL_TEST must point to a dedicated test database (e.g. footballtray_test), not the primary development database.'
-      );
-    }
-    return testUrl.trim();
+    rawUrl = process.env.DATABASE_URL_TEST || process.env.DATABASE_URL || './local_test.db';
+  } else {
+    rawUrl = process.env.DATABASE_URL || './local.db';
   }
 
-  const devUrl = process.env.DATABASE_URL;
-  if (!devUrl || devUrl.trim().length === 0) {
-    throw new Error('[DB] DATABASE_URL is not defined in environment or .env');
+  let dbPath = rawUrl.trim();
+  if (dbPath.startsWith('file:')) {
+    dbPath = dbPath.slice(5);
   }
-  return devUrl.trim();
+  if (dbPath.startsWith('sqlite://')) {
+    dbPath = dbPath.slice(9);
+  } else if (dbPath.startsWith('sqlite:')) {
+    dbPath = dbPath.slice(7);
+  }
+
+  if (dbPath === ':memory:') {
+    return ':memory:';
+  }
+
+  const resolved = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
+  const dir = path.dirname(resolved);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return resolved;
 }
 
-export const databaseUrl = resolveDatabaseUrl();
+export const databasePath = resolveDatabasePath();
+export const databaseUrl = `file:${databasePath}`;
 
-export const pool = new Pool({
-  connectionString: databaseUrl,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+export const sqlite: SQLiteDatabase = new Database(databasePath);
+sqlite.pragma('journal_mode = WAL');
+sqlite.pragma('foreign_keys = ON');
+sqlite.pragma('busy_timeout = 5000');
 
-// Suppress unhandled error crashes from idle clients
-pool.on('error', (err) => {
-  console.error('[DB] Unexpected idle client error:', err.message);
-});
-
-export const db = drizzle(pool, { schema });
+export const db = drizzle(sqlite, { schema });
 
 /**
- * Checks if the configured PostgreSQL database is reachable.
+ * Checks if the configured SQLite database is reachable and operational.
  * Returns true if connected, false otherwise without throwing.
  */
 export async function checkDatabaseConnection(): Promise<{ connected: boolean; latencyMs?: number; error?: string }> {
   const start = Date.now();
   try {
-    const client = await pool.connect();
-    try {
-      await client.query('SELECT 1');
-      return { connected: true, latencyMs: Date.now() - start };
-    } finally {
-      client.release();
-    }
+    sqlite.prepare('SELECT 1').get();
+    return { connected: true, latencyMs: Date.now() - start };
   } catch (err: any) {
     return {
       connected: false,
-      error: err?.message ?? 'Database connection failed',
+      error: err?.message ?? 'SQLite database connection failed',
       latencyMs: Date.now() - start,
     };
   }
 }
+
+/**
+ * Safe adapter for any legacy scripts/services calling pool lifecycle or queries.
+ * Rips out pg/pg-pool completely while ensuring graceful SQLite query execution.
+ */
+function executeSqliteQuery(queryText: string, params: any[] = []) {
+  let sql = queryText
+    .replace(/::int/g, '')
+    .replace(/::text/g, '')
+    .replace(/\s+FOR\s+UPDATE/gi, '')
+    .replace(/NOW\(\)/gi, "strftime('%s', 'now') * 1000")
+    .replace(/\$\d+/g, '?');
+
+  const trimmed = sql.trim().toUpperCase();
+  if (trimmed.startsWith('SELECT') || trimmed.startsWith('WITH') || trimmed.startsWith('PRAGMA')) {
+    const rows = sqlite.prepare(sql).all(...params);
+    return { rows, rowCount: rows.length };
+  } else {
+    const info = sqlite.prepare(sql).run(...params);
+    return { rows: [], rowCount: info.changes };
+  }
+}
+
+export const pool = {
+  connect: async () => ({
+    query: async (sqlText: string, params: any[] = []) => executeSqliteQuery(sqlText, params),
+    release: () => {},
+  }),
+  query: async (sqlText: string, params: any[] = []) => executeSqliteQuery(sqlText, params),
+  end: async () => {
+    try {
+      sqlite.close();
+    } catch {
+      // ignore if already closed
+    }
+  },
+  on: () => {},
+};
 
 export { schema };

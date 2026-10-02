@@ -1,10 +1,10 @@
-import { pgTable, text, integer, boolean, timestamp, date, jsonb, uniqueIndex, index, primaryKey } from 'drizzle-orm/pg-core';
+import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 
 // ----------------------------------------------------
 // 1. Competitions
 // ----------------------------------------------------
-export const competitions = pgTable('competitions', {
+export const competitions = sqliteTable('competitions', {
   id: text('id').primaryKey(),
   canonicalId: text('canonical_id').notNull().unique(),
   name: text('name').notNull(),
@@ -12,22 +12,22 @@ export const competitions = pgTable('competitions', {
   type: text('type').default('league'),
   country: text('country'),
   logoUrl: text('logo_url'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 });
 
 // ----------------------------------------------------
 // 2. Competition Seasons
 // ----------------------------------------------------
-export const competitionSeasons = pgTable('competition_seasons', {
+export const competitionSeasons = sqliteTable('competition_seasons', {
   id: text('id').primaryKey(),
   competitionId: text('competition_id').notNull().references(() => competitions.id, { onDelete: 'cascade' }),
   year: integer('year').notNull(),
   displayYear: text('display_year').notNull(),
-  startDate: timestamp('start_date', { withTimezone: true }).notNull(),
-  endDate: timestamp('end_date', { withTimezone: true }).notNull(),
-  isCurrent: boolean('is_current').default(true).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  startDate: integer('start_date', { mode: 'timestamp_ms' }).notNull(),
+  endDate: integer('end_date', { mode: 'timestamp_ms' }).notNull(),
+  isCurrent: integer('is_current', { mode: 'boolean' }).default(true).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('comp_season_unique_idx').on(table.competitionId, table.year),
 ]);
@@ -35,7 +35,7 @@ export const competitionSeasons = pgTable('competition_seasons', {
 // ----------------------------------------------------
 // 3. Teams
 // ----------------------------------------------------
-export const teams = pgTable('teams', {
+export const teams = sqliteTable('teams', {
   id: text('id').primaryKey(),
   canonicalId: text('canonical_id').notNull().unique(),
   name: text('name').notNull(),
@@ -45,14 +45,14 @@ export const teams = pgTable('teams', {
   logoUrl: text('logo_url'),
   founded: integer('founded'),
   venueName: text('venue_name'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 });
 
 // ----------------------------------------------------
 // 4. Fixtures
 // ----------------------------------------------------
-export const fixtures = pgTable('fixtures', {
+export const fixtures = sqliteTable('fixtures', {
   id: text('id').primaryKey(),
   canonicalId: text('canonical_id').notNull().unique(),
   competitionId: text('competition_id').notNull().references(() => competitions.id),
@@ -60,7 +60,7 @@ export const fixtures = pgTable('fixtures', {
   homeTeamId: text('home_team_id').notNull().references(() => teams.id),
   awayTeamId: text('away_team_id').notNull().references(() => teams.id),
   round: text('round'),
-  kickoffTime: timestamp('kickoff_time', { withTimezone: true }).notNull(),
+  kickoffTime: integer('kickoff_time', { mode: 'timestamp_ms' }).notNull(),
   state: text('state').notNull().default('PREMATCH'), // PREMATCH, LIVE, HALFTIME, FINISHED, POSTMATCH, POSTPONED, CANCELLED
   elapsedMinute: integer('elapsed_minute').default(0).notNull(),
   extraMinute: integer('extra_minute').default(0).notNull(),
@@ -74,13 +74,13 @@ export const fixtures = pgTable('fixtures', {
   awayScorePen: integer('away_score_pen'),
   venue: text('venue'),
   referee: text('referee'),
-  lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+  lastPolledAt: integer('last_polled_at', { mode: 'timestamp_ms' }),
   liveSourceProvider: text('live_source_provider'),
-  liveObservedAt: timestamp('live_observed_at', { withTimezone: true }),
+  liveObservedAt: integer('live_observed_at', { mode: 'timestamp_ms' }),
   scheduleSourceProvider: text('schedule_source_provider'),
-  scheduleObservedAt: timestamp('schedule_observed_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  scheduleObservedAt: integer('schedule_observed_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   index('fixtures_state_idx').on(table.state),
   index('fixtures_kickoff_idx').on(table.kickoffTime),
@@ -91,7 +91,7 @@ export const fixtures = pgTable('fixtures', {
 // ----------------------------------------------------
 // 5. Events
 // ----------------------------------------------------
-export const events = pgTable('events', {
+export const events = sqliteTable('events', {
   id: text('id').primaryKey(),
   eventUid: text('event_uid').unique().notNull(),
   fixtureId: text('fixture_id').notNull().references(() => fixtures.id, { onDelete: 'cascade' }),
@@ -104,7 +104,7 @@ export const events = pgTable('events', {
   assistPlayerName: text('assist_player_name'),
   assistPlayerId: text('assist_player_id'),
   description: text('description'),
-  timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
+  timestamp: integer('timestamp', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   index('events_fixture_idx').on(table.fixtureId),
   uniqueIndex('events_uid_idx').on(table.eventUid),
@@ -113,14 +113,14 @@ export const events = pgTable('events', {
 // ----------------------------------------------------
 // 6. Lineups
 // ----------------------------------------------------
-export const lineups = pgTable('lineups', {
+export const lineups = sqliteTable('lineups', {
   id: text('id').primaryKey(),
   fixtureId: text('fixture_id').notNull().references(() => fixtures.id, { onDelete: 'cascade' }),
   teamId: text('team_id').notNull().references(() => teams.id),
   formation: text('formation'),
   coachName: text('coach_name'),
   coachId: text('coach_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('lineup_fixture_team_idx').on(table.fixtureId, table.teamId),
 ]);
@@ -128,7 +128,7 @@ export const lineups = pgTable('lineups', {
 // ----------------------------------------------------
 // 7. Lineup Players
 // ----------------------------------------------------
-export const lineupPlayers = pgTable('lineup_players', {
+export const lineupPlayers = sqliteTable('lineup_players', {
   id: text('id').primaryKey(),
   lineupId: text('lineup_id').notNull().references(() => lineups.id, { onDelete: 'cascade' }),
   playerId: text('player_id').notNull(),
@@ -136,7 +136,7 @@ export const lineupPlayers = pgTable('lineup_players', {
   number: integer('number'),
   position: text('position'),
   grid: text('grid'),
-  isStarter: boolean('is_starter').default(true).notNull(),
+  isStarter: integer('is_starter', { mode: 'boolean' }).default(true).notNull(),
 }, (table) => [
   index('lineup_players_lineup_idx').on(table.lineupId),
 ]);
@@ -144,7 +144,7 @@ export const lineupPlayers = pgTable('lineup_players', {
 // ----------------------------------------------------
 // 8. Fixture Statistics
 // ----------------------------------------------------
-export const fixtureStatistics = pgTable('fixture_statistics', {
+export const fixtureStatistics = sqliteTable('fixture_statistics', {
   id: text('id').primaryKey(),
   fixtureId: text('fixture_id').notNull().references(() => fixtures.id, { onDelete: 'cascade' }),
   teamId: text('team_id').notNull().references(() => teams.id),
@@ -160,7 +160,7 @@ export const fixtureStatistics = pgTable('fixture_statistics', {
   goalkeeperSaves: integer('goalkeeper_saves'),
   totalPasses: integer('total_passes'),
   passesAccurate: integer('passes_accurate'),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('stats_fixture_team_idx').on(table.fixtureId, table.teamId),
 ]);
@@ -168,7 +168,7 @@ export const fixtureStatistics = pgTable('fixture_statistics', {
 // ----------------------------------------------------
 // 9. Standings
 // ----------------------------------------------------
-export const standings = pgTable('standings', {
+export const standings = sqliteTable('standings', {
   id: text('id').primaryKey(),
   competitionId: text('competition_id').notNull().references(() => competitions.id),
   seasonId: text('season_id').notNull().references(() => competitionSeasons.id),
@@ -184,7 +184,7 @@ export const standings = pgTable('standings', {
   points: integer('points').default(0).notNull(),
   form: text('form'),
   description: text('description'),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('standings_comp_season_team_idx').on(table.competitionId, table.seasonId, table.teamId),
   index('standings_comp_season_pos_idx').on(table.competitionId, table.seasonId, table.position),
@@ -193,22 +193,22 @@ export const standings = pgTable('standings', {
 // ----------------------------------------------------
 // 10. Provider Coverage
 // ----------------------------------------------------
-export const providerCoverage = pgTable('provider_coverage', {
+export const providerCoverage = sqliteTable('provider_coverage', {
   id: text('id').primaryKey(),
   provider: text('provider').default('api_football').notNull(),
   competitionId: text('competition_id').notNull().references(() => competitions.id),
   seasonYear: integer('season_year').notNull(),
-  hasFixtures: boolean('has_fixtures').default(true).notNull(),
-  hasLiveOdds: boolean('has_live_odds').default(false).notNull(),
-  hasLineups: boolean('has_lineups').default(true).notNull(),
-  hasEvents: boolean('has_events').default(true).notNull(),
-  hasStatistics: boolean('has_statistics').default(true).notNull(),
-  hasStandings: boolean('has_standings').default(true).notNull(),
-  hasPlayers: boolean('has_players').default(true).notNull(),
-  hasCommentary: boolean('has_commentary').default(false).notNull(),
-  hasRatings: boolean('has_ratings').default(false).notNull(),
-  hasXg: boolean('has_xg').default(false).notNull(),
-  lastAuditedAt: timestamp('last_audited_at', { withTimezone: true }),
+  hasFixtures: integer('has_fixtures', { mode: 'boolean' }).default(true).notNull(),
+  hasLiveOdds: integer('has_live_odds', { mode: 'boolean' }).default(false).notNull(),
+  hasLineups: integer('has_lineups', { mode: 'boolean' }).default(true).notNull(),
+  hasEvents: integer('has_events', { mode: 'boolean' }).default(true).notNull(),
+  hasStatistics: integer('has_statistics', { mode: 'boolean' }).default(true).notNull(),
+  hasStandings: integer('has_standings', { mode: 'boolean' }).default(true).notNull(),
+  hasPlayers: integer('has_players', { mode: 'boolean' }).default(true).notNull(),
+  hasCommentary: integer('has_commentary', { mode: 'boolean' }).default(false).notNull(),
+  hasRatings: integer('has_ratings', { mode: 'boolean' }).default(false).notNull(),
+  hasXg: integer('has_xg', { mode: 'boolean' }).default(false).notNull(),
+  lastAuditedAt: integer('last_audited_at', { mode: 'timestamp_ms' }),
 }, (table) => [
   uniqueIndex('provider_comp_season_idx').on(table.provider, table.competitionId, table.seasonYear),
 ]);
@@ -216,7 +216,7 @@ export const providerCoverage = pgTable('provider_coverage', {
 // ----------------------------------------------------
 // 11. Acquisition Jobs
 // ----------------------------------------------------
-export const acquisitionJobs = pgTable('acquisition_jobs', {
+export const acquisitionJobs = sqliteTable('acquisition_jobs', {
   id: text('id').primaryKey(),
   jobType: text('job_type').notNull(), // fixture_poll, standings_sync, daily_schedule
   status: text('status').default('pending').notNull(), // pending, running, completed, failed
@@ -224,9 +224,9 @@ export const acquisitionJobs = pgTable('acquisition_jobs', {
   priority: integer('priority').default(0).notNull(),
   attempts: integer('attempts').default(0).notNull(),
   lastError: text('last_error'),
-  scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
-  executedAt: timestamp('executed_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  scheduledAt: integer('scheduled_at', { mode: 'timestamp_ms' }).notNull(),
+  executedAt: integer('executed_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   index('jobs_status_scheduled_idx').on(table.status, table.scheduledAt),
 ]);
@@ -234,7 +234,7 @@ export const acquisitionJobs = pgTable('acquisition_jobs', {
 // ----------------------------------------------------
 // 12. API Request Ledger
 // ----------------------------------------------------
-export const apiRequestLedger = pgTable('api_request_ledger', {
+export const apiRequestLedger = sqliteTable('api_request_ledger', {
   id: text('id').primaryKey(),
   cycleId: text('cycle_id'),
   competitionId: text('competition_id'),
@@ -242,13 +242,13 @@ export const apiRequestLedger = pgTable('api_request_ledger', {
   endpoint: text('endpoint').notNull(),
   operation: text('operation').default('unknown').notNull(),
   priority: text('priority').default('NORMAL').notNull(), // NORMAL, CRITICAL
-  success: boolean('success').default(true).notNull(),
+  success: integer('success', { mode: 'boolean' }).default(true).notNull(),
   httpStatus: integer('http_status').notNull(),
   responseTimeMs: integer('response_time_ms').notNull(),
   costUnits: integer('cost_units').default(1).notNull(),
   providerDailyRemaining: integer('provider_daily_remaining'),
   providerMinuteRemaining: integer('provider_minute_remaining'),
-  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+  requestedAt: integer('requested_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
   errorMessage: text('error_message'),
 }, (table) => [
   index('ledger_requested_at_idx').on(table.requestedAt),
@@ -260,14 +260,14 @@ export const apiRequestLedger = pgTable('api_request_ledger', {
 // ----------------------------------------------------
 // 12b. Scheduler Cycles
 // ----------------------------------------------------
-export const schedulerCycles = pgTable('scheduler_cycles', {
+export const schedulerCycles = sqliteTable('scheduler_cycles', {
   id: text('id').primaryKey(),
   action: text('action').notNull(),
   priority: text('priority').default('NORMAL').notNull(),
   reason: text('reason').notNull(),
-  targetCompetitionIds: jsonb('target_competition_ids').$type<number[]>(),
-  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
-  completedAt: timestamp('completed_at', { withTimezone: true }),
+  targetCompetitionIds: text('target_competition_ids', { mode: 'json' }).$type<number[]>(),
+  startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+  completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
   durationMs: integer('duration_ms'),
   outcome: text('outcome'), // IDLE, SUCCESS, NO_OP, ERROR, QUOTA_BLOCKED, RATE_LIMITED (NULL while uncompleted)
   providerRequestsCount: integer('provider_requests_count').default(0).notNull(),
@@ -276,7 +276,7 @@ export const schedulerCycles = pgTable('scheduler_cycles', {
   errorMessage: text('error_message'),
   fixturesDiscovered: integer('fixtures_discovered').default(0).notNull(),
   fixturesUpdated: integer('fixtures_updated').default(0).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   index('scheduler_cycles_started_idx').on(table.startedAt),
   index('scheduler_cycles_action_idx').on(table.action, table.startedAt),
@@ -286,15 +286,15 @@ export const schedulerCycles = pgTable('scheduler_cycles', {
 // ----------------------------------------------------
 // 13. Provider Daily Budget
 // ----------------------------------------------------
-export const providerDailyBudget = pgTable('provider_daily_budget', {
+export const providerDailyBudget = sqliteTable('provider_daily_budget', {
   id: text('id').primaryKey(),
   provider: text('provider').default('api_football').notNull(),
-  budgetDate: date('budget_date').notNull(),
+  budgetDate: text('budget_date').notNull(),
   allocatedCalls: integer('allocated_calls').default(100).notNull(),
   consumedCalls: integer('consumed_calls').default(0).notNull(),
   remainingCalls: integer('remaining_calls').default(100).notNull(),
-  isExhausted: boolean('is_exhausted').default(false).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  isExhausted: integer('is_exhausted', { mode: 'boolean' }).default(false).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('budget_provider_date_idx').on(table.provider, table.budgetDate),
 ]);
@@ -302,37 +302,37 @@ export const providerDailyBudget = pgTable('provider_daily_budget', {
 // ----------------------------------------------------
 // 14. Installations
 // ----------------------------------------------------
-export const installations = pgTable('installations', {
+export const installations = sqliteTable('installations', {
   id: text('id').primaryKey(),
   installationId: text('installation_id').unique().notNull(),
   clientVersion: text('client_version'),
   platform: text('platform').default('Windows 11').notNull(),
-  lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow().notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  lastActiveAt: integer('last_active_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 });
 
 // ----------------------------------------------------
 // 15. Installation Settings
 // ----------------------------------------------------
-export const installationSettings = pgTable('installation_settings', {
+export const installationSettings = sqliteTable('installation_settings', {
   id: text('id').primaryKey(),
   installationId: text('installation_id').notNull().references(() => installations.installationId, { onDelete: 'cascade' }),
   favoriteTeamId: text('favorite_team_id').references(() => teams.id),
   favoriteCompetitionId: text('favorite_competition_id').references(() => competitions.id),
-  enableSpoilers: boolean('enable_spoilers').default(true).notNull(),
+  enableSpoilers: integer('enable_spoilers', { mode: 'boolean' }).default(true).notNull(),
   pollingIntervalSeconds: integer('polling_interval_seconds').default(60).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 });
 
 // ----------------------------------------------------
 // 16. Competition Provider Aliases
 // ----------------------------------------------------
-export const competitionProviderAliases = pgTable('competition_provider_aliases', {
+export const competitionProviderAliases = sqliteTable('competition_provider_aliases', {
   canonicalCompetitionId: text('canonical_competition_id').notNull().references(() => competitions.canonicalId, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
   providerId: text('provider_id').notNull(),
-  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
-  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  firstSeenAt: integer('first_seen_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   primaryKey({ columns: [table.provider, table.providerId] }),
   index('comp_provider_aliases_canonical_idx').on(table.canonicalCompetitionId),
@@ -341,12 +341,12 @@ export const competitionProviderAliases = pgTable('competition_provider_aliases'
 // ----------------------------------------------------
 // 17. Team Provider Aliases
 // ----------------------------------------------------
-export const teamProviderAliases = pgTable('team_provider_aliases', {
+export const teamProviderAliases = sqliteTable('team_provider_aliases', {
   canonicalTeamId: text('canonical_team_id').notNull().references(() => teams.canonicalId, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
   providerId: text('provider_id').notNull(),
-  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
-  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  firstSeenAt: integer('first_seen_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   primaryKey({ columns: [table.provider, table.providerId] }),
   index('team_provider_aliases_canonical_idx').on(table.canonicalTeamId),
@@ -355,12 +355,12 @@ export const teamProviderAliases = pgTable('team_provider_aliases', {
 // ----------------------------------------------------
 // 18. Fixture Provider Aliases
 // ----------------------------------------------------
-export const fixtureProviderAliases = pgTable('fixture_provider_aliases', {
+export const fixtureProviderAliases = sqliteTable('fixture_provider_aliases', {
   canonicalFixtureId: text('canonical_fixture_id').notNull().references(() => fixtures.canonicalId, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
   providerId: text('provider_id').notNull(),
-  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
-  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  firstSeenAt: integer('first_seen_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
+  lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   primaryKey({ columns: [table.provider, table.providerId] }),
   index('fix_provider_aliases_canonical_idx').on(table.canonicalFixtureId),

@@ -222,7 +222,7 @@ export class SchedulerCyclesRepository {
         )
       );
 
-    return result.rowCount ?? 0;
+    return (result as any).rowCount ?? (result as any).changes ?? 0;
   }
 
   /**

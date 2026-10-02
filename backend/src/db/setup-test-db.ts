@@ -1,87 +1,33 @@
-import pg from 'pg';
+import Database from 'better-sqlite3';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import * as fs from 'fs';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 import { generateCanonicalId } from './canonical-id.js';
 
 dotenv.config();
 
-const { Client, Pool } = pg;
-
 async function setupTestDatabase() {
   console.log('====================================================');
-  console.log('FOOTBALLTRAY TEST DATABASE SETUP');
+  console.log('FOOTBALLTRAY TEST DATABASE SETUP (SQLite)');
   console.log('====================================================');
 
-  const testUrl = process.env.DATABASE_URL_TEST;
-  if (!testUrl) {
-    throw new Error('[TEST_DB_SETUP] DATABASE_URL_TEST is not configured in .env');
+  const testUrl = process.env.DATABASE_URL_TEST || './local_test.db';
+  let dbPath = testUrl.replace(/^(file:|sqlite:\/\/|sqlite:)/, '');
+  const resolved = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
+  const dir = path.dirname(resolved);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Parse connection details to connect to maintenance postgres db
-  const url = new URL(testUrl);
-  const targetDbName = url.pathname.replace(/^\//, '');
-  const username = url.username;
-  const password = decodeURIComponent(url.password);
-  const host = url.hostname;
-  const port = parseInt(url.port || '5432', 10);
-
-  console.log(`[TEST_DB_SETUP] Target Test Database: '${targetDbName}' on ${host}:${port}`);
-
-  // 1. Connect to postgres maintenance db to check / create test DB
-  const maintenanceClient = new Client({
-    host,
-    port,
-    user: username,
-    password,
-    database: 'postgres',
-  });
+  const sqlite = new Database(resolved);
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.pragma('foreign_keys = ON');
 
   try {
-    await maintenanceClient.connect();
-    console.log('[TEST_DB_SETUP] PostgreSQL server is reachable.');
+    const testDb = drizzle(sqlite, { schema });
 
-    const checkDb = await maintenanceClient.query(
-      `SELECT 1 FROM pg_database WHERE datname = $1`,
-      [targetDbName]
-    );
-
-    if (checkDb.rows.length === 0) {
-      console.log(`[TEST_DB_SETUP] Database '${targetDbName}' not found. Creating database...`);
-      await maintenanceClient.query(`CREATE DATABASE "${targetDbName}"`);
-      console.log(`[TEST_DB_SETUP] Database '${targetDbName}' created successfully.`);
-    } else {
-      console.log(`[TEST_DB_SETUP] Database '${targetDbName}' exists.`);
-    }
-  } finally {
-    await maintenanceClient.end();
-  }
-
-  // 2. Connect to the test database and run migrations
-  console.log('[TEST_DB_SETUP] Applying Drizzle migrations to test database...');
-  const testPool = new Pool({
-    connectionString: testUrl,
-    max: 5,
-  });
-
-  try {
-    const testDb = drizzle(testPool, { schema });
-    const migrationsFolder = path.resolve('drizzle');
-    await migrate(testDb, { migrationsFolder });
-    console.log('[TEST_DB_SETUP] Migrations successfully applied from:', migrationsFolder);
-
-    // 3. Verify all tables in test DB
-    const tablesRes = await testPool.query(`
-      SELECT table_name
-      FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-      ORDER BY table_name;
-    `);
-    console.log(`[TEST_DB_SETUP] Verified ${tablesRes.rows.length} tables in '${targetDbName}'.`);
-
-    // 4. Seed baseline test data into test DB
     console.log('[TEST_DB_SETUP] Seeding baseline test data into test database...');
     // Competitions
     await testDb.insert(schema.competitions).values([
@@ -162,7 +108,7 @@ async function setupTestDatabase() {
     console.log('[TEST_DB_SETUP] TEST DATABASE SETUP COMPLETE');
     console.log('====================================================');
   } finally {
-    await testPool.end();
+    sqlite.close();
   }
 }
 
