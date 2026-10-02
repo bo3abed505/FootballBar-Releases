@@ -1,4 +1,4 @@
-import { ilike, or } from 'drizzle-orm';
+import { like, or } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   V2CatalogTeam,
@@ -47,10 +47,10 @@ export class CatalogRepository {
       .from(schema.teams)
       .where(
         or(
-          ilike(schema.teams.name, searchPattern),
-          ilike(schema.teams.shortName, searchPattern),
-          ilike(schema.teams.code, searchPattern),
-          ilike(schema.teams.country, searchPattern)
+          like(schema.teams.name, searchPattern),
+          like(schema.teams.shortName, searchPattern),
+          like(schema.teams.code, searchPattern),
+          like(schema.teams.country, searchPattern)
         )
       )
       .limit(clampedLimit * 2);
@@ -123,9 +123,9 @@ export class CatalogRepository {
       .from(schema.competitions)
       .where(
         or(
-          ilike(schema.competitions.name, searchPattern),
-          ilike(schema.competitions.code, searchPattern),
-          ilike(schema.competitions.country, searchPattern)
+          like(schema.competitions.name, searchPattern),
+          like(schema.competitions.code, searchPattern),
+          like(schema.competitions.country, searchPattern)
         )
       )
       .limit(clampedLimit);

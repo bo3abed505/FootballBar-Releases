@@ -77,6 +77,7 @@ function executeSqliteQuery(queryText: string, params: any[] = []) {
     .replace(/::text/g, '')
     .replace(/\s+FOR\s+UPDATE/gi, '')
     .replace(/NOW\(\)/gi, "strftime('%s', 'now') * 1000")
+    .replace(/current_database\(\)/gi, "'footballtray_test' as current_database")
     .replace(/\$\d+/g, '?');
 
   const trimmed = sql.trim().toUpperCase();
