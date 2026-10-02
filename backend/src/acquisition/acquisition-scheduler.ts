@@ -405,6 +405,45 @@ export class AcquisitionScheduler {
       // 3. Evaluate pure acquisition policy
       plan = AcquisitionPolicyEngine.evaluateSyncPlan(budget, summary, currentDate);
 
+      // 3b. Scheduler Bootstrapping: If policy evaluates to IDLE but database has zero fixtures
+      // for the active target date (e.g. freshly seeded catalog or purged fixtures), generate a
+      // POLL_SCHEDULE / bootstrap discovery plan to immediately download today's fixtures rather than idling.
+      if (plan.action === 'IDLE' && budget.remainingDaily > 10) {
+        let hasFixturesToday = false;
+        try {
+          if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
+            hasFixturesToday = await (this.fixturesRepo as any).hasFixturesForDate(todayDateStr);
+          } else if (this.fixturesRepo instanceof FixturesRepository) {
+            const startOfToday = new Date(`${todayDateStr}T00:00:00.000Z`);
+            const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+            const fixturesToday = await db
+              .select({ id: schema.fixtures.id })
+              .from(schema.fixtures)
+              .where(
+                and(
+                  gte(schema.fixtures.kickoffTime, startOfToday),
+                  lt(schema.fixtures.kickoffTime, endOfToday)
+                )
+              )
+              .limit(1);
+            hasFixturesToday = fixturesToday.length > 0;
+          } else {
+            hasFixturesToday = summary.scheduleKnownForToday;
+          }
+        } catch {
+          hasFixturesToday = true;
+        }
+
+        if (!hasFixturesToday) {
+          plan = {
+            action: 'DISCOVER_SCHEDULE',
+            priority: 'NORMAL',
+            recommendedNextPollMs: 3600_000,
+            reason: `Database has zero fixtures for active target date ${todayDateStr}. Bootstrapping initial daily schedule (POLL_SCHEDULE).`,
+          };
+        }
+      }
+
       // 4. Generate cycleId and create record in DB (completed_at and outcome remain NULL in-flight)
       cycleId = this.cyclesRepo.generateCycleId(currentDate);
       try {
@@ -446,6 +485,12 @@ export class AcquisitionScheduler {
         if (plan.action === 'RECOVER_STALE' && targetComps && targetComps.length === 0) {
           this.logger.warn('RECOVER_STALE plan triggered but no target competition IDs match stale fixtures. Skipping provider call.');
           syncSummary = null;
+        } else if ((plan.action as string) === 'POLL_SCHEDULE' || (plan.action as string) === 'BOOTSTRAP') {
+          syncSummary = await this.syncService.syncSchedule(
+            todayDateStr,
+            targetComps,
+            cycleId
+          );
         } else {
           syncSummary = await this.syncService.syncWithPlan(plan, {
             date: todayDateStr,
@@ -454,7 +499,7 @@ export class AcquisitionScheduler {
           });
         }
 
-        if (plan.action === 'DISCOVER_SCHEDULE') {
+        if (plan.action === 'DISCOVER_SCHEDULE' || (plan.action as string) === 'POLL_SCHEDULE' || (plan.action as string) === 'BOOTSTRAP') {
           if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
             await this.fixturesRepo.markScheduleDiscovered(todayDateStr, currentDate, cycleId);
           }
@@ -506,7 +551,7 @@ export class AcquisitionScheduler {
       }
 
       // 8. Update milestone metrics
-      if (plan.action === 'DISCOVER_SCHEDULE' && (outcome === 'SUCCESS' || outcome === 'NO_OP')) {
+      if ((plan.action === 'DISCOVER_SCHEDULE' || (plan.action as string) === 'POLL_SCHEDULE' || (plan.action as string) === 'BOOTSTRAP') && (outcome === 'SUCCESS' || outcome === 'NO_OP')) {
         this.milestones.lastSuccessfulDiscovery = {
           cycleId,
           timestamp: currentDate.toISOString(),

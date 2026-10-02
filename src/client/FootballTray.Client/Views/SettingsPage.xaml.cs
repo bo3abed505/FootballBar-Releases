@@ -1,11 +1,14 @@
 using System;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.ViewModels;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace FootballTray.Client.Views;
 
@@ -307,10 +310,33 @@ public sealed partial class SettingsPage : Page
         ViewModel?.OpenLogsFolder();
     }
 
-    private void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
+    private async void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
     {
-        ViewModel?.CopyDiagnostics();
+        if (ViewModel == null) return;
+
+        try
+        {
+            var dataPackage = new DataPackage();
+            string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
+            dataPackage.SetText(text);
+            Clipboard.SetContent(dataPackage);
+            Clipboard.Flush();
+
+            if (sender is Button btn)
+            {
+                var originalContent = btn.Content;
+                btn.Content = "Copied!";
+                await Task.Delay(2000);
+                btn.Content = originalContent;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics: {ex.Message}");
+        }
     }
+
+    private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e) => OnCopyDiagnosticsClicked(sender, e);
 
     private async void OnUnfollowTeamClicked(object sender, RoutedEventArgs e)
     {
