@@ -49,6 +49,12 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     public bool IsFinished { get; init; }
     public bool IsPrematch { get; init; }
 
+    public Microsoft.UI.Xaml.Visibility IsLiveBadgeVisible =>
+        IsLive ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+
+    public Microsoft.UI.Xaml.Visibility IsNormalBadgeVisible =>
+        IsLive ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
+
     public bool IsActiveTaskbarMatch
     {
         get => _isActiveTaskbarMatch;
@@ -189,23 +195,55 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         string homeShort = match.HomeTeam?.ShortName ?? (homeName.Length <= 3 ? homeName.ToUpperInvariant() : homeName[..3].ToUpperInvariant());
         string awayShort = match.AwayTeam?.ShortName ?? (awayName.Length <= 3 ? awayName.ToUpperInvariant() : awayName[..3].ToUpperInvariant());
 
-        string upperState = (match.State ?? "PREMATCH").ToUpperInvariant();
-        bool isLive = upperState is "LIVE" or "1H" or "2H" or "HT" or "ET" or "P";
+        string upperState = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
+
+        // API-Football short status codes:
+        // 1H (First Half), 2H (Second Half), HT (Halftime), ET (Extra Time), BT (Break Time),
+        // P (Penalty in progress), SUSP (Suspended), INT (Interrupted)
+        // Also support verbose variants LIVE, IN_PLAY, HALFTIME, EXTRA_TIME, PENALTIES
+        bool isExplicitLiveCode = upperState is "LIVE" or "1H" or "2H" or "HT" or "ET" or "BT" or "P" or "SUSP" or "INT"
+            or "IN_PLAY" or "HALFTIME" or "EXTRA_TIME" or "PENALTIES";
+
         bool isFinished = upperState is "FT" or "AET" or "PEN" or "FINISHED";
-        bool isPrematch = upperState is "PREMATCH" or "NS" or "TBD";
+        bool isCancelledOrPostponed = upperState is "POSTP" or "POSTPONED" or "CANC" or "CANCELLED" or "ABD" or "AWD" or "WO";
+
+        bool hasActiveScore = match.Score != null && (match.Score.Home > 0 || match.Score.Away > 0);
+
+        // Safe check: Active live state codes OR active scores past/at kickoff time when not finished
+        bool isLive = !isFinished && !isCancelledOrPostponed &&
+            (isExplicitLiveCode || (hasActiveScore && match.KickoffTime <= DateTimeOffset.UtcNow.AddMinutes(15)));
+
+        bool isPrematch = !isLive && !isFinished && !isCancelledOrPostponed &&
+            (upperState is "PREMATCH" or "NS" or "TBD" || (!hasActiveScore && match.KickoffTime > DateTimeOffset.UtcNow));
 
         string timeFormat = use24HourFormat ? "HH:mm" : "h:mm tt";
 
         string stateDisplay;
-        if (upperState == "HT")
+        if (upperState == "HT" || upperState == "HALFTIME")
         {
             stateDisplay = "Half Time (HT)";
         }
+        else if (upperState is "SUSP")
+        {
+            stateDisplay = "LIVE (SUSP)";
+        }
+        else if (upperState is "INT")
+        {
+            stateDisplay = "LIVE (INT)";
+        }
+        else if (upperState is "BT")
+        {
+            stateDisplay = "LIVE (BT)";
+        }
+        else if (upperState is "P" or "PENALTIES")
+        {
+            stateDisplay = "LIVE (PEN)";
+        }
         else if (isLive)
         {
-            stateDisplay = match.ExtraMinute > 0
-                ? $"LIVE {match.ElapsedMinute}+{match.ExtraMinute}'"
-                : $"LIVE {match.ElapsedMinute}'";
+            stateDisplay = match.ElapsedMinute > 0
+                ? (match.ExtraMinute > 0 ? $"LIVE {match.ElapsedMinute}+{match.ExtraMinute}'" : $"LIVE {match.ElapsedMinute}'")
+                : "LIVE";
         }
         else if (isFinished)
         {

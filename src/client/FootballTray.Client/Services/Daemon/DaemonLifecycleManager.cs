@@ -215,6 +215,9 @@ public sealed class DaemonLifecycleManager : IDisposable
             RedirectStandardError = true,
         };
 
+        // Explicitly enforce production environment to eliminate mock fallback
+        startInfo.EnvironmentVariables["NODE_ENV"] = "production";
+
         if (!string.IsNullOrEmpty(envFilePath))
         {
             startInfo.EnvironmentVariables["DOTENV_CONFIG_PATH"] = envFilePath;
@@ -240,6 +243,9 @@ public sealed class DaemonLifecycleManager : IDisposable
             {
                 AppLogger.Warn("Daemon", "EnvParseFailed", $"Could not parse .env file at '{envFilePath}': {ex.Message}");
             }
+
+            // Strictly enforce production environment to prevent downgrade by local .env settings
+            startInfo.EnvironmentVariables["NODE_ENV"] = "production";
         }
 
         try

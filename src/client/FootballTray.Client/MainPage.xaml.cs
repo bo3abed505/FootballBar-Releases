@@ -155,6 +155,16 @@ public sealed partial class MainPage : Page
             StatusInfoBar.IsOpen = false;
         }
 
+        // Sync footer status
+        if (SyncStatusTextBlock != null)
+        {
+            SyncStatusTextBlock.Text = _viewModel.SyncStatusText;
+        }
+        if (SyncStatusIcon != null)
+        {
+            SyncStatusIcon.Glyph = _viewModel.SyncIconGlyph;
+        }
+
         // Update active filter button styling
         UpdateFilterButtons();
         UpdateSearchCatalogUi();

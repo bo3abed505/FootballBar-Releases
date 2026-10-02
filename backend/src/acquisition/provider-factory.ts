@@ -19,6 +19,7 @@
 import { FootballProvider } from '../providers/football-provider.js';
 import { MockFootballProvider } from '../providers/mock.provider.js';
 import { ApiFootballProvider } from '../providers/api-football/api-football.provider.js';
+import { EmptyFootballProvider } from '../providers/empty.provider.js';
 
 export type SupportedProvider = 'mock' | 'api_football';
 
@@ -55,15 +56,39 @@ export interface ProviderFactoryOptions {
  * Never silently falls back from api_football to mock.
  */
 export function createProvider(options?: ProviderFactoryOptions): FootballProvider {
+  const isProduction = process.env.NODE_ENV === 'production';
   const hasActiveProviderOption = options && 'activeProvider' in options;
   const rawProvider = (
     hasActiveProviderOption
-      ? options.activeProvider ?? 'mock'
-      : process.env.ACTIVE_PROVIDER ?? 'mock'
+      ? options.activeProvider ?? (isProduction ? 'api_football' : 'mock')
+      : process.env.ACTIVE_PROVIDER ?? (isProduction ? 'api_football' : 'mock')
   ).trim().toLowerCase();
+
+  // Sever the mock fallback in production
+  if (isProduction && (rawProvider === 'mock' || !hasActiveProviderOption)) {
+    const keyIsPresent = typeof process.env.API_FOOTBALL_KEY === 'string' &&
+      process.env.API_FOOTBALL_KEY.trim().length > 0;
+
+    if (!keyIsPresent) {
+      console.warn(
+        '[PROVIDER:WARN] API_FOOTBALL_KEY is not configured in production. ' +
+        'External match acquisition is disabled. Operating with an empty active calendar; ' +
+        'mock provider fallback is completely disabled.'
+      );
+      return new EmptyFootballProvider();
+    }
+    return new ApiFootballProvider();
+  }
 
   switch (rawProvider) {
     case 'mock':
+      if (isProduction) {
+        console.warn(
+          '[PROVIDER:WARN] Mock provider requested in production mode. ' +
+          'Mock provider is strictly disabled in production. Operating with an empty active calendar.'
+        );
+        return new EmptyFootballProvider();
+      }
       return new MockFootballProvider();
 
     case 'api_football': {
@@ -91,6 +116,13 @@ export function createProvider(options?: ProviderFactoryOptions): FootballProvid
           process.env.API_FOOTBALL_KEY.trim().length > 0;
 
       if (!keyIsPresent) {
+        if (isProduction) {
+          console.warn(
+            '[PROVIDER:WARN] API_FOOTBALL_KEY is missing. ' +
+            'Operating with an empty active calendar; mock provider fallback is completely disabled.'
+          );
+          return new EmptyFootballProvider();
+        }
         throw new ProviderConfigError(
           'ACTIVE_PROVIDER=api_football requires API_FOOTBALL_KEY to be set in the environment. ' +
           'Obtain a key from https://www.api-football.com/ and add it to your .env file.'

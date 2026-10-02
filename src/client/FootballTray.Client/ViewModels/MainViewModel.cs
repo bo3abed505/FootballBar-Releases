@@ -438,6 +438,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetProperty(ref _emptyStateMessage, value);
     }
 
+    private bool _isSyncing;
+    public bool IsSyncing
+    {
+        get => _isSyncing;
+        private set
+        {
+            if (SetProperty(ref _isSyncing, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncIconGlyph)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSyncFooterVisible)));
+            }
+        }
+    }
+
+    public string SyncStatusText => IsSyncing
+        ? "Syncing active calendar day & followed team fixtures..."
+        : "Up to date";
+
+    public string SyncIconGlyph => IsSyncing ? "\uE72C" : "\uE73E";
+
+    public bool IsSyncFooterVisible => true;
+
     public DateTime SelectedCalendarDate
     {
         get => _selectedCalendarDate;
@@ -547,6 +570,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (_syncService != null)
         {
             _syncService.TrayUpdated += OnTrayUpdated;
+            _syncService.SyncStateChanged += OnSyncStateChanged;
         }
 
         RebuildCalendarDays();
@@ -875,9 +899,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         RunOnUiSafe(() =>
         {
+            IsSyncing = false;
             _latestTrayData = e.TrayData;
             RefreshMatches(e.TrayData, e.FreshnessState, e.ConnectionState);
         }, nameof(OnTrayUpdated));
+    }
+
+    private void OnSyncStateChanged(object? sender, bool isSyncing)
+    {
+        RunOnUiSafe(() =>
+        {
+            IsSyncing = isSyncing;
+        }, nameof(OnSyncStateChanged));
     }
 
     private void OnPreferencesChanged(object? sender, UserPreferences prefs)
@@ -1963,6 +1996,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (_syncService != null)
         {
             _syncService.TrayUpdated -= OnTrayUpdated;
+            _syncService.SyncStateChanged -= OnSyncStateChanged;
         }
     }
 

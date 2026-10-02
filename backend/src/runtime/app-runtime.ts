@@ -24,6 +24,8 @@
 import { FastifyInstance } from 'fastify';
 import { FootballProvider } from '../providers/football-provider.js';
 import { createProvider } from '../acquisition/provider-factory.js';
+import { EmptyFootballProvider } from '../providers/empty.provider.js';
+import { ApiFootballProvider } from '../providers/api-football/api-football.provider.js';
 import { SyncService } from '../acquisition/sync.service.js';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import { AcquisitionScheduler } from '../acquisition/acquisition-scheduler.js';
@@ -76,7 +78,27 @@ export class AppRuntime {
     };
 
     // 1. Construct Provider via ProviderFactory (boundary enforcement)
-    this.provider = options.provider ?? createProvider();
+    if (options.provider) {
+      this.provider = options.provider;
+    } else {
+      const isProduction = process.env.NODE_ENV === 'production';
+      const keyIsPresent = typeof process.env.API_FOOTBALL_KEY === 'string' &&
+        process.env.API_FOOTBALL_KEY.trim().length > 0;
+
+      if (!keyIsPresent) {
+        this.logger.warn(
+          'API_FOOTBALL_KEY is not configured in the environment. ' +
+          'Live match synchronization is disabled. ' +
+          'Returning an empty active calendar; mock provider fallback is completely disabled.'
+        );
+        this.provider = new EmptyFootballProvider();
+      } else if (isProduction || process.env.ACTIVE_PROVIDER === 'api_football') {
+        process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS || 'true';
+        this.provider = new ApiFootballProvider();
+      } else {
+        this.provider = createProvider();
+      }
+    }
 
     // 2. Initialize Repositories and Services
     this.fixturesRepository = options.fixturesRepository ?? new FixturesRepository();

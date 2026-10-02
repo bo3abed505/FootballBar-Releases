@@ -11,6 +11,8 @@ namespace FootballTray.Client.Services;
 public interface ISyncService : IDisposable
 {
     event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
+    event EventHandler<bool>? SyncStateChanged { add { } remove { } }
+    bool IsSyncing => false;
     TrayDataDto? CurrentTrayData { get; }
     DataFreshnessState FreshnessState { get; }
     DataFreshnessState CurrentFreshness => FreshnessState;

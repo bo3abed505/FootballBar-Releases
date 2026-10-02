@@ -45,6 +45,9 @@ public class SyncService : ISyncService
     private long _lastRefreshDurationMs;
 
     public event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
+    public event EventHandler<bool>? SyncStateChanged;
+    private bool _isSyncing;
+    public bool IsSyncing => _isSyncing;
 
     public TrayDataDto? CurrentTrayData => _currentTrayData;
     public DataFreshnessState FreshnessState => _freshnessState;
@@ -215,6 +218,8 @@ public class SyncService : ISyncService
     private async Task<DataFreshnessState> ExecutePollInternalAsync(CancellationToken cancellationToken)
     {
         await _refreshLock.WaitAsync(cancellationToken);
+        _isSyncing = true;
+        SyncStateChanged?.Invoke(this, true);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         _lastRefreshAttempt = DateTimeOffset.UtcNow;
         try
@@ -351,6 +356,8 @@ public class SyncService : ISyncService
         }
         finally
         {
+            _isSyncing = false;
+            SyncStateChanged?.Invoke(this, false);
             _refreshLock.Release();
         }
     }

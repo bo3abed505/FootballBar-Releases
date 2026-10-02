@@ -23,7 +23,12 @@ public static class FixtureRelevanceEngine
 {
     private static readonly HashSet<string> LiveStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "LIVE", "1H", "2H", "ET", "P", "BT", "IN_PLAY", "HALFTIME", "HT", "EXTRA_TIME", "PENALTIES"
+        "LIVE", "1H", "2H", "ET", "P", "BT", "IN_PLAY", "HALFTIME", "HT", "EXTRA_TIME", "PENALTIES", "SUSP", "INT"
+    };
+
+    private static readonly HashSet<string> FinishedStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "FT", "AET", "PEN", "FINISHED"
     };
 
     private static readonly HashSet<string> PrematchStates = new(StringComparer.OrdinalIgnoreCase)
@@ -173,7 +178,12 @@ public static class FixtureRelevanceEngine
 
     public static bool IsLive(TrayMatchDto? match)
     {
-        return match != null && !string.IsNullOrWhiteSpace(match.State) && LiveStates.Contains(match.State);
+        if (match == null) return false;
+        string state = match.State?.Trim() ?? string.Empty;
+        if (LiveStates.Contains(state)) return true;
+        if (FinishedStates.Contains(state)) return false;
+        bool hasActiveScore = match.Score != null && (match.Score.Home > 0 || match.Score.Away > 0);
+        return hasActiveScore && match.KickoffTime <= DateTimeOffset.UtcNow.AddMinutes(15);
     }
 
     public static bool IsPrematch(TrayMatchDto? match)
