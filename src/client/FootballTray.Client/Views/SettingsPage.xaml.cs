@@ -310,30 +310,33 @@ public sealed partial class SettingsPage : Page
         ViewModel?.OpenLogsFolder();
     }
 
-    private async void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
+    private void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
     {
         if (ViewModel == null) return;
 
-        try
+        this.DispatcherQueue.TryEnqueue(async () =>
         {
-            var dataPackage = new DataPackage();
-            string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
-            dataPackage.SetText(text);
-            Clipboard.SetContent(dataPackage);
-            Clipboard.Flush();
-
-            if (sender is Button btn)
+            try
             {
-                var originalContent = btn.Content;
-                btn.Content = "Copied!";
-                await Task.Delay(2000);
-                btn.Content = originalContent;
+                var dataPackage = new DataPackage();
+                string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
+                dataPackage.SetText(text);
+                Clipboard.SetContent(dataPackage);
+                Clipboard.Flush();
+
+                if (sender is Button btn)
+                {
+                    var originalContent = btn.Content;
+                    btn.Content = "Copied!";
+                    await Task.Delay(2000);
+                    btn.Content = originalContent;
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics: {ex.Message}");
-        }
+            catch (Exception ex)
+            {
+                AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics: {ex.Message}");
+            }
+        });
     }
 
     private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e) => OnCopyDiagnosticsClicked(sender, e);
