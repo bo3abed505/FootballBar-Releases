@@ -1,7 +1,13 @@
-import { db, schema, pool } from './index.js';
+import { db, schema, pool, sqlite } from './index.js';
 import { generateCanonicalId } from './canonical-id.js';
 
 export async function seedDatabase() {
+  console.log('[SEED] Purging ghost mock catalog entities...');
+  sqlite.exec(`
+    DELETE FROM competitions WHERE name LIKE '%(Dev Mock)%';
+    DELETE FROM teams WHERE name LIKE '%(Dev Mock)%';
+  `);
+
   console.log('[SEED] Starting catalog seed...');
 
   // 1. Competitions

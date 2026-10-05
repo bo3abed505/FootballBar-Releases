@@ -310,33 +310,42 @@ public sealed partial class SettingsPage : Page
         ViewModel?.OpenLogsFolder();
     }
 
-    private void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
+    private async void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
     {
         if (ViewModel == null) return;
 
-        this.DispatcherQueue.TryEnqueue(async () =>
+        try
         {
-            try
-            {
-                var dataPackage = new DataPackage();
-                string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
-                dataPackage.SetText(text);
-                Clipboard.SetContent(dataPackage);
-                Clipboard.Flush();
+            var dataPackage = new DataPackage();
+            string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
+            dataPackage.RequestedOperation = DataPackageOperation.Copy;
+            dataPackage.SetText(text);
 
-                if (sender is Button btn)
-                {
-                    var originalContent = btn.Content;
-                    btn.Content = "Copied!";
-                    await Task.Delay(2000);
-                    btn.Content = originalContent;
-                }
-            }
-            catch (Exception ex)
+            DispatcherQueue.TryEnqueue(() =>
             {
-                AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics: {ex.Message}");
+                try
+                {
+                    Clipboard.SetContent(dataPackage);
+                    Clipboard.Flush();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics: {ex.ToString()}");
+                }
+            });
+
+            if (sender is Button btn)
+            {
+                var originalContent = btn.Content;
+                btn.Content = "Copied!";
+                await Task.Delay(2000);
+                btn.Content = originalContent;
             }
-        });
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to prepare diagnostics: {ex.ToString()}");
+        }
     }
 
     private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e) => OnCopyDiagnosticsClicked(sender, e);

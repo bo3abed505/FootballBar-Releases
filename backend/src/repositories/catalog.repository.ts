@@ -60,6 +60,9 @@ export class CatalogRepository {
     const deduplicatedMap = new Map<string, typeof rows[0]>();
 
     for (const row of rows) {
+      if (row.name && row.name.toLowerCase().includes('(dev mock)')) {
+        continue;
+      }
       const normKey = row.name.trim().toLowerCase();
       const existing = deduplicatedMap.get(normKey);
 

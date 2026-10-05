@@ -24,6 +24,7 @@ public class DiagnosticsAndObservabilityTests
     [TestInitialize]
     public void Setup()
     {
+        AppLogger.IsLoggingEnabled = true;
         _tempDir = Path.Combine(Path.GetTempPath(), "FT_DiagTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
     }

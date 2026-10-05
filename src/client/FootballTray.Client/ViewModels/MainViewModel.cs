@@ -438,6 +438,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetProperty(ref _emptyStateMessage, value);
     }
 
+    private DataFreshnessState _freshnessState;
+    private TickerConnectionState _connectionState;
+
     private bool _isSyncing;
     public bool IsSyncing
     {
@@ -453,9 +456,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public string SyncStatusText => IsSyncing
-        ? "Syncing active calendar day & followed team fixtures..."
-        : "Up to date";
+    public string SyncStatusText
+    {
+        get
+        {
+            if (IsSyncing) return "Syncing active calendar day & followed team fixtures...";
+            if (IsOffline) return "Offline";
+            if (_freshnessState == DataFreshnessState.Empty && FilteredMatches.Count == 0) return "No matches available";
+            if (FilteredMatches.Count == 0) return "Up to date (No matches)";
+            return "Up to date";
+        }
+    }
 
     public string SyncIconGlyph => IsSyncing ? "\uE72C" : "\uE73E";
 
@@ -582,9 +593,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            dataPackage.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
             dataPackage.SetText(report);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
-            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
         }
         catch
         {
@@ -895,10 +906,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public void CheckAndExecuteSync()
+    {
+        if (SelectedCalendarDate.Date == DateTime.Today.AddDays(-1).Date)
+        {
+            SelectedCalendarDate = DateTime.Today;
+            RebuildCalendarDays();
+            ApplyCurrentFilter();
+        }
+    }
+
     private void OnTrayUpdated(object? sender, TrayUpdateEventArgs e)
     {
         RunOnUiSafe(() =>
         {
+            CheckAndExecuteSync();
             IsSyncing = false;
             _latestTrayData = e.TrayData;
             RefreshMatches(e.TrayData, e.FreshnessState, e.ConnectionState);
@@ -924,7 +946,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void RefreshMatches(TrayDataDto? trayData, DataFreshnessState freshnessState, TickerConnectionState connectionState)
     {
+        CheckAndExecuteSync();
         _latestTrayData = trayData;
+        _freshnessState = freshnessState;
+        _connectionState = connectionState;
+
 
         // Update connection status
         switch (connectionState)
@@ -1444,6 +1470,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 EmptyStateMessage = "No matches match the selected criteria.";
             }
         }
+        else
+        {
+            EmptyStateTitle = null;
+            EmptyStateMessage = null;
+        }
+
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
     }
 
     /// <summary>

@@ -263,6 +263,17 @@ public class SyncService : ISyncService
                 }
             }
 
+            // Thick-client caching requirement: Always request primary divisions to ensure offline availability
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.PremierLeague);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.LaLiga);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.EgyptianPremierLeague);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.ChampionsLeague);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.AfricaCupOfNations);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.WorldCup);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.EuroChampionship);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.NationsLeague);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.CopaAmerica);
+
             var teamIdList = teamIds.ToList();
             var compIdList = compIds.ToList();
 

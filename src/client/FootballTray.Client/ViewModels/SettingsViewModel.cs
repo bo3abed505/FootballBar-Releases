@@ -334,9 +334,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            dataPackage.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
             dataPackage.SetText(report);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
-            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
             DiagnosticsCopyStatus = "Diagnostics report copied to clipboard!";
         }
         catch (Exception ex)
