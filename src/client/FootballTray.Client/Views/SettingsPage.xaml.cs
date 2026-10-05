@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -310,43 +311,103 @@ public sealed partial class SettingsPage : Page
         ViewModel?.OpenLogsFolder();
     }
 
-    private async void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
+    private void OnCopyDiagnosticsClicked(object sender, RoutedEventArgs e)
     {
         if (ViewModel == null) return;
 
         try
         {
-            var dataPackage = new DataPackage();
             string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
-            dataPackage.RequestedOperation = DataPackageOperation.Copy;
-            dataPackage.SetText(text);
 
-            DispatcherQueue.TryEnqueue(() =>
+            bool copied = false;
+            try
             {
-                try
+                OleInitialize(IntPtr.Zero);
+                var dataPackage = new DataPackage();
+                dataPackage.RequestedOperation = DataPackageOperation.Copy;
+                dataPackage.SetText(text);
+                Clipboard.SetContent(dataPackage);
+                copied = true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn("SettingsPage", "WinRTClipboardError", $"WinRT Clipboard.SetContent failed: [{ex.GetType().Name}] {ex.Message}. Falling back to native Win32 clipboard.", ex: ex);
+                copied = SetClipboardTextWin32(text);
+                if (!copied)
                 {
-                    Clipboard.SetContent(dataPackage);
-                    Clipboard.Flush();
+                    AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics via both WinRT and Win32 clipboard: {ex}");
                 }
-                catch (Exception ex)
-                {
-                    AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to copy diagnostics: {ex.ToString()}");
-                }
-            });
+            }
 
-            if (sender is Button btn)
+            if (copied && sender is Button btn)
             {
                 var originalContent = btn.Content;
                 btn.Content = "Copied!";
-                await Task.Delay(2000);
-                btn.Content = originalContent;
+                var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                timer.Tick += (s, args) =>
+                {
+                    timer.Stop();
+                    btn.Content = originalContent;
+                };
+                timer.Start();
             }
         }
         catch (Exception ex)
         {
-            AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to prepare diagnostics: {ex.ToString()}");
+            AppLogger.Warn("SettingsPage", "ClipboardError", $"Failed to prepare diagnostics: {ex}");
         }
     }
+
+    private static bool SetClipboardTextWin32(string text)
+    {
+        if (text == null) return false;
+        if (!OpenClipboard(IntPtr.Zero)) return false;
+        try
+        {
+            if (!EmptyClipboard()) return false;
+            int bytes = (text.Length + 1) * sizeof(char);
+            IntPtr hGlobal = Marshal.AllocHGlobal(bytes);
+            if (hGlobal == IntPtr.Zero) return false;
+            try
+            {
+                Marshal.Copy(text.ToCharArray(), 0, hGlobal, text.Length);
+                Marshal.WriteInt16(hGlobal, text.Length * sizeof(char), 0);
+                if (SetClipboardData(13 /* CF_UNICODETEXT */, hGlobal) == IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(hGlobal);
+                    return false;
+                }
+                return true;
+            }
+            catch
+            {
+                Marshal.FreeHGlobal(hGlobal);
+                return false;
+            }
+        }
+        finally
+        {
+            CloseClipboard();
+        }
+    }
+
+    [DllImport("ole32.dll")]
+    private static extern int OleInitialize(IntPtr pvReserved);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
 
     private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e) => OnCopyDiagnosticsClicked(sender, e);
 
