@@ -370,12 +370,12 @@ export class FixturesRepository {
         )
       );
 
-    // Also sweep ancient PREMATCH fixtures past match day (> 24h past kickoff) locally to POSTPONED
+    // Also sweep ancient PREMATCH fixtures past match day (> 24h past kickoff) locally to FINISHED
     const ancientPrematchCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     await db
       .update(schema.fixtures)
       .set({
-        state: 'POSTPONED',
+        state: 'FINISHED',
         updatedAt: now,
       })
       .where(

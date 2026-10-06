@@ -24,46 +24,63 @@ import {
 
 export class ApiFootballMapper {
   /**
-   * Maps API-Football status short codes to canonical FootballTray MatchState.
+   * Maps API-Football status codes and descriptions to canonical FootballTray MatchState.
+   * Ensures finished matches (FT, AET, PEN, Match Finished, etc.) are accurately identified
+   * and never erroneously defaulted to POSTPONED.
    */
-  static mapStatusToMatchState(shortStatus: string | null | undefined): string {
+  static mapStatusToMatchState(shortStatus?: string | null, longStatus?: string | null): string {
     const status = (shortStatus || '').toUpperCase().trim();
+    const long = (longStatus || '').toUpperCase().trim();
 
-    switch (status) {
-      case 'TBD':
-      case 'NS':
-        return 'PREMATCH';
-
-      case '1H':
-      case '2H':
-      case 'ET':
-      case 'P':
-      case 'LIVE':
-        return 'LIVE';
-
-      case 'HT':
-      case 'BT':
-        return 'HALFTIME';
-
-      case 'FT':
-      case 'AET':
-      case 'PEN':
-        return 'FINISHED';
-
-      case 'SUSP':
-      case 'INT':
-      case 'PST':
-        return 'POSTPONED';
-
-      case 'CANC':
-      case 'ABD':
-      case 'AWD':
-      case 'WO':
-        return 'CANCELLED';
-
-      default:
-        return 'PREMATCH';
+    // 1. Finished match states (both short code and descriptive status)
+    if (
+      ['FT', 'AET', 'PEN', 'FINISHED', 'POSTMATCH'].includes(status) ||
+      ['MATCH FINISHED', 'FINISHED', 'FULL TIME', 'AFTER EXTRA TIME', 'PENALTY SHOOTOUT', 'PENALTIES'].includes(long)
+    ) {
+      return 'FINISHED';
     }
+
+    // 2. Active live states
+    if (
+      ['1H', '2H', 'ET', 'P', 'LIVE', 'IN_PLAY'].includes(status) ||
+      ['FIRST HALF', 'SECOND HALF', 'EXTRA TIME', 'PENALTY IN PROGRESS', 'LIVE', 'IN PLAY'].includes(long)
+    ) {
+      return 'LIVE';
+    }
+
+    // 3. Halftime / Break states
+    if (
+      ['HT', 'BT'].includes(status) ||
+      ['HALFTIME', 'HALF TIME', 'BREAK TIME'].includes(long)
+    ) {
+      return 'HALFTIME';
+    }
+
+    // 4. Postponed / Suspended / Interrupted states
+    if (
+      ['PST', 'SUSP', 'INT', 'POSTPONED'].includes(status) ||
+      ['MATCH POSTPONED', 'POSTPONED', 'MATCH SUSPENDED', 'SUSPENDED', 'MATCH INTERRUPTED', 'INTERRUPTED'].includes(long)
+    ) {
+      return 'POSTPONED';
+    }
+
+    // 5. Cancelled / Abandoned states
+    if (
+      ['CANC', 'ABD', 'AWD', 'WO', 'CANCELLED'].includes(status) ||
+      ['MATCH CANCELLED', 'CANCELLED', 'MATCH ABANDONED', 'ABANDONED', 'TECHNICAL LOSS', 'WALKOVER'].includes(long)
+    ) {
+      return 'CANCELLED';
+    }
+
+    // 6. Prematch states (default fallback)
+    if (
+      ['TBD', 'NS', 'PREMATCH'].includes(status) ||
+      ['TIME TO BE DEFINED', 'NOT STARTED'].includes(long)
+    ) {
+      return 'PREMATCH';
+    }
+
+    return 'PREMATCH';
   }
 
   static mapLeagueToCompetition(item: ApiFootballLeagueItem): ProviderCompetition {
@@ -153,7 +170,7 @@ export class ApiFootballMapper {
       awayTeam,
       round: item.league.round,
       kickoffTime: item.fixture.date,
-      state: this.mapStatusToMatchState(item.fixture.status.short),
+      state: this.mapStatusToMatchState(item.fixture.status?.short, item.fixture.status?.long),
       elapsedMinute: item.fixture.status.elapsed ?? 0,
       extraMinute: item.fixture.status.extra ?? 0,
       score: {

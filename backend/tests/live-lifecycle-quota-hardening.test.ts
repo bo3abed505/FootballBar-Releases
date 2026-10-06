@@ -1273,11 +1273,11 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
       expect(summary.stalePrematchCount).toBe(0); // Ancient fixture (> 24h) excluded from stale recovery
       expect(summary.liveCount).toBe(0);
 
-      // Verify that ancient prematch fixture was locally swept to POSTPONED
+      // Verify that ancient prematch fixture was locally swept to FINISHED
       const ancientFix = await db.query.fixtures.findFirst({
         where: eq(schema.fixtures.id, 'fix_ancient_prematch_test'),
       });
-      expect(ancientFix?.state).toBe('POSTPONED');
+      expect(ancientFix?.state).toBe('FINISHED');
 
       // 5. Execute single scheduler cycle on cold instance
       const freshScheduler = new AcquisitionScheduler({

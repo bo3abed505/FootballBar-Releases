@@ -27,6 +27,13 @@ describe('ApiFootballMapper', () => {
     expect(ApiFootballMapper.mapStatusToMatchState('CANC')).toBe('CANCELLED');
     expect(ApiFootballMapper.mapStatusToMatchState('ABD')).toBe('CANCELLED');
     expect(ApiFootballMapper.mapStatusToMatchState('UNKNOWN')).toBe('PREMATCH');
+    expect(ApiFootballMapper.mapStatusToMatchState(null, 'Match Finished')).toBe('FINISHED');
+    expect(ApiFootballMapper.mapStatusToMatchState(null, 'Full Time')).toBe('FINISHED');
+    expect(ApiFootballMapper.mapStatusToMatchState(null, 'After Extra Time')).toBe('FINISHED');
+    expect(ApiFootballMapper.mapStatusToMatchState(null, 'Penalty Shootout')).toBe('FINISHED');
+    expect(ApiFootballMapper.mapStatusToMatchState('FT', 'Match Finished')).toBe('FINISHED');
+    expect(ApiFootballMapper.mapStatusToMatchState(null, 'Match Postponed')).toBe('POSTPONED');
+    expect(ApiFootballMapper.mapStatusToMatchState(null, 'Not Started')).toBe('PREMATCH');
   });
 
   it('maps league items to ProviderCompetition and ProviderSeason models', () => {
