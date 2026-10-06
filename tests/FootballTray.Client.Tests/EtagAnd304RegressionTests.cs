@@ -384,6 +384,102 @@ public class EtagAnd304RegressionTests
         Assert.AreEqual("\"etag_fresh\"", syncService.LastKnownETag);
     }
 
+    [TestMethod]
+    public async Task Test_Strike18_304Response_WithQuotaExhaustedHeader_PropagatesToViewModelAndUI()
+    {
+        var prefService = new PreferencesService(_tempDir);
+        var envelope = CreateFourMatchEnvelope();
+
+        var mockHandler = new MockHttpMessageHandler
+        {
+            ResponseFactory = (req) =>
+            {
+                var resp = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(SerializeEnvelope(envelope), Encoding.UTF8, "application/json")
+                };
+                resp.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag_v1\"");
+                return resp;
+            }
+        };
+
+        using var httpClient = new HttpClient(mockHandler) { BaseAddress = new Uri("http://localhost:4000") };
+        using var client = new FootballApiClient(httpClient);
+        var cacheService = new LocalCacheService(_tempDir);
+        using var syncService = new SyncService(client, cacheService, preferencesService: prefService);
+        using var vm = new MainViewModel(prefService, syncService);
+        await vm.InitializeAsync();
+
+        // 1. Initial 200 poll
+        await syncService.PollOnceAsync();
+        Assert.AreEqual("Up to date", vm.SyncStatusText);
+        Assert.AreEqual("Online (Live)", vm.ConnectionStatusText);
+        Assert.AreEqual("\uE73E", vm.SyncIconGlyph);
+
+        // 2. Subsequent 304 response with X-Quota-Exhausted: true
+        mockHandler.ResponseFactory = (req) =>
+        {
+            var notMod = new HttpResponseMessage(HttpStatusCode.NotModified);
+            notMod.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag_v1\"");
+            notMod.Headers.Add("X-Quota-Exhausted", "true");
+            return notMod;
+        };
+
+        await syncService.PollOnceAsync();
+
+        // UI must reflect quota exhausted
+        Assert.IsTrue(syncService.CurrentTrayData?.QuotaExhausted == true, "SyncService.CurrentTrayData must be marked QuotaExhausted on 304.");
+        Assert.AreEqual("API Limit Reached (Resets Midnight)", vm.SyncStatusText);
+        Assert.AreEqual("\uE7BA", vm.SyncIconGlyph);
+    }
+
+    [TestMethod]
+    public async Task Test_Strike18_CalendarNavigation_304Response_PreservesExistingTrayData()
+    {
+        var prefService = new PreferencesService(_tempDir);
+        var envelope = CreateFourMatchEnvelope();
+
+        var mockHandler = new MockHttpMessageHandler
+        {
+            ResponseFactory = (req) =>
+            {
+                var resp = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(SerializeEnvelope(envelope), Encoding.UTF8, "application/json")
+                };
+                resp.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag_v1\"");
+                return resp;
+            }
+        };
+
+        using var httpClient = new HttpClient(mockHandler) { BaseAddress = new Uri("http://localhost:4000") };
+        using var client = new FootballApiClient(httpClient);
+        var cacheService = new LocalCacheService(_tempDir);
+        using var syncService = new SyncService(client, cacheService, preferencesService: prefService);
+        using var vm = new MainViewModel(prefService, syncService);
+        await vm.InitializeAsync();
+
+        // 1. Initial 200 poll
+        await syncService.PollOnceAsync();
+        Assert.AreEqual(4, vm.FilteredMatches.Count);
+
+        // 2. Next response returns 304 Not Modified
+        mockHandler.ResponseFactory = (req) =>
+        {
+            var notMod = new HttpResponseMessage(HttpStatusCode.NotModified);
+            notMod.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag_v1\"");
+            return notMod;
+        };
+
+        // 3. User navigates calendar days
+        vm.SelectedCalendarDate = DateTime.Today.AddDays(1);
+        await syncService.PollOnceAsync();
+
+        // SyncService must return existing _currentTrayData unaltered on 304
+        Assert.IsNotNull(syncService.CurrentTrayData);
+        Assert.AreEqual(4, syncService.CurrentTrayData.Matches.Count);
+    }
+
     private class FailingTouchLocalCacheService : LocalCacheService
     {
         public FailingTouchLocalCacheService(string customDirectory) : base(customDirectory) { }

@@ -20,6 +20,7 @@ public class TrayUpdateEventArgs : EventArgs
     public int Version { get; init; }
     public string? ETag { get; init; }
     public DateTimeOffset? LastValidatedAt { get; init; }
+    public bool QuotaExhausted { get; init; }
 }
 
 public class SyncService : ISyncService
@@ -334,6 +335,16 @@ public class SyncService : ISyncService
 
                     if (response.IsNotModified)
                     {
+                        try
+                        {
+                            var reloaded = await _cacheService.LoadCacheAsync(cancellationToken);
+                            if (reloaded?.Envelope?.Data != null)
+                            {
+                                _currentTrayData = reloaded.Envelope.Data;
+                            }
+                        }
+                        catch { }
+                        PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                         return _freshnessState;
                     }
                 }
@@ -346,6 +357,12 @@ public class SyncService : ISyncService
                     if (!string.IsNullOrWhiteSpace(response.ETag))
                     {
                         _lastKnownEtag = response.ETag;
+                    }
+
+                    // Propagate quota exhaustion even on 304 Not Modified
+                    if (response.QuotaExhausted && _currentTrayData != null)
+                    {
+                        _currentTrayData.QuotaExhausted = true;
                     }
 
                     // Update cache validation timestamp (secondary non-critical persistence)
@@ -466,18 +483,20 @@ public class SyncService : ISyncService
 
     private void PublishUpdate(TrayDataDto? data, DataFreshnessState freshness, int version, string? etag, DateTimeOffset? lastValidated)
     {
+        var targetData = data ?? _currentTrayData;
         var connectionState = MapToConnectionState(freshness);
         var preferences = _preferencesService?.GetPreferences();
-        var formatted = TrayTickerFormatter.FormatTicker(data, freshness, preferences);
+        var formatted = TrayTickerFormatter.FormatTicker(targetData, freshness, preferences);
         var args = new TrayUpdateEventArgs
         {
-            TrayData = data,
+            TrayData = targetData,
             FreshnessState = freshness,
             ConnectionState = connectionState,
             FormattedText = formatted,
             Version = version,
             ETag = etag,
             LastValidatedAt = lastValidated,
+            QuotaExhausted = targetData?.QuotaExhausted ?? false,
         };
 
         var handler = TrayUpdated;

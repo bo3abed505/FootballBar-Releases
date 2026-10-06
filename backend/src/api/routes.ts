@@ -273,6 +273,11 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         // Non-critical fallback
       }
 
+      // Append custom quota exhaustion header regardless of 200 or 304
+      if (quotaExhausted) {
+        reply.header('X-Quota-Exhausted', 'true');
+      }
+
       // Compute deterministic ETag based on v2 match data, query parameters, and quotaExhausted state
       const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(formattedMatches)}_${quotaExhausted}`;
       const dataHash = createHash('md5').update(cacheKey).digest('hex');
@@ -281,6 +286,9 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       const ifNoneMatch = request.headers['if-none-match'];
       if (ifNoneMatch && (ifNoneMatch === etag || ifNoneMatch === dataHash || ifNoneMatch === `W/${etag}`)) {
         reply.header('ETag', etag);
+        if (quotaExhausted) {
+          reply.header('X-Quota-Exhausted', 'true');
+        }
         return reply.status(304).send();
       }
 

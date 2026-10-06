@@ -486,6 +486,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     _syncService.TargetDate = value.Date;
                     _syncService.TriggerImmediateSync();
                 }
+                if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
+                {
+                    _latestTrayData = _syncService.CurrentTrayData;
+                }
                 UpdateCalendarSelection();
                 ApplyCurrentFilter();
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
@@ -927,6 +931,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 ApplyCurrentFilter();
             }
         }
+
+        if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
+        {
+            _latestTrayData = _syncService.CurrentTrayData;
+        }
     }
 
     private void OnTrayUpdated(object? sender, TrayUpdateEventArgs e)
@@ -935,8 +944,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             CheckAndExecuteSync();
             IsSyncing = false;
-            _latestTrayData = e.TrayData;
-            RefreshMatches(e.TrayData, e.FreshnessState, e.ConnectionState);
+            if (e.TrayData != null)
+            {
+                _latestTrayData = e.TrayData;
+            }
+            else if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
+            {
+                _latestTrayData = _syncService.CurrentTrayData;
+            }
+
+            if (e.QuotaExhausted && _latestTrayData != null)
+            {
+                _latestTrayData.QuotaExhausted = true;
+            }
+
+            RefreshMatches(_latestTrayData, e.FreshnessState, e.ConnectionState);
         }, nameof(OnTrayUpdated));
     }
 
@@ -960,7 +982,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public void RefreshMatches(TrayDataDto? trayData, DataFreshnessState freshnessState, TickerConnectionState connectionState)
     {
         CheckAndExecuteSync();
-        _latestTrayData = trayData;
+        if (trayData != null)
+        {
+            _latestTrayData = trayData;
+        }
+        else if (freshnessState == DataFreshnessState.NotModified && _latestTrayData != null)
+        {
+            // Preserve existing _latestTrayData on 304 Not Modified
+        }
+        else if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
+        {
+            _latestTrayData = _syncService.CurrentTrayData;
+        }
+
         _freshnessState = freshnessState;
         _connectionState = connectionState;
 
@@ -987,6 +1021,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         ApplyCurrentFilter();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncIconGlyph)));
     }
 
     public void TogglePinMatch(string matchId)
@@ -1191,6 +1227,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void ApplyCurrentFilter()
     {
+        if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
+        {
+            _latestTrayData = _syncService.CurrentTrayData;
+        }
         var prefs = _preferencesService.GetPreferences();
         var allMatches = _latestTrayData?.Matches ?? new List<TrayMatchDto>();
 

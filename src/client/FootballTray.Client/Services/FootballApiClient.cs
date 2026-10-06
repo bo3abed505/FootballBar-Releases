@@ -18,12 +18,13 @@ public class TrayApiResponse
     public string? ETag { get; init; }
     public ApiResponseEnvelope<TrayDataDto>? Envelope { get; init; }
     public string? ErrorMessage { get; init; }
+    public bool QuotaExhausted { get; set; }
 
-    public static TrayApiResponse Success(ApiResponseEnvelope<TrayDataDto> envelope, string? etag) =>
-        new() { IsSuccess = true, IsNotModified = false, Envelope = envelope, ETag = etag };
+    public static TrayApiResponse Success(ApiResponseEnvelope<TrayDataDto> envelope, string? etag, bool quotaExhausted = false) =>
+        new() { IsSuccess = true, IsNotModified = false, Envelope = envelope, ETag = etag, QuotaExhausted = quotaExhausted || envelope.QuotaExhausted || (envelope.Data?.QuotaExhausted ?? false) };
 
-    public static TrayApiResponse NotModified(string? etag) =>
-        new() { IsSuccess = true, IsNotModified = true, ETag = etag };
+    public static TrayApiResponse NotModified(string? etag, bool quotaExhausted = false) =>
+        new() { IsSuccess = true, IsNotModified = true, ETag = etag, QuotaExhausted = quotaExhausted };
 
     public static TrayApiResponse Error(string message) =>
         new() { IsSuccess = false, IsNotModified = false, ErrorMessage = message };
@@ -158,11 +159,18 @@ public class FootballApiClient : IDisposable
 
             using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
+            bool quotaExhaustedHeader = false;
+            if (response.Headers.Contains("X-Quota-Exhausted"))
+            {
+                var val = response.Headers.GetValues("X-Quota-Exhausted").FirstOrDefault();
+                quotaExhaustedHeader = string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+            }
+
             string? newEtag = response.Headers.ETag?.Tag ?? response.Headers.ETag?.ToString();
 
             if (response.StatusCode == HttpStatusCode.NotModified)
             {
-                return TrayApiResponse.NotModified(newEtag ?? ifNoneMatch);
+                return TrayApiResponse.NotModified(newEtag ?? ifNoneMatch, quotaExhaustedHeader);
             }
 
             if (response.IsSuccessStatusCode)
@@ -180,7 +188,16 @@ public class FootballApiClient : IDisposable
                     return TrayApiResponse.Error($"Malformed tray response payload: {validationError}");
                 }
 
-                return TrayApiResponse.Success(envelope, newEtag);
+                if (quotaExhaustedHeader)
+                {
+                    envelope.QuotaExhausted = true;
+                    if (envelope.Data != null)
+                    {
+                        envelope.Data.QuotaExhausted = true;
+                    }
+                }
+
+                return TrayApiResponse.Success(envelope, newEtag, quotaExhaustedHeader);
             }
 
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
