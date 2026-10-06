@@ -92,7 +92,7 @@ export class AppRuntime {
           'Returning an empty active calendar; mock provider fallback is completely disabled.'
         );
         this.provider = new EmptyFootballProvider();
-      } else if (isProduction || process.env.ACTIVE_PROVIDER === 'api_football') {
+      } else if (isProduction || process.env.ACTIVE_PROVIDER === 'api_football' || (!process.env.ACTIVE_PROVIDER && keyIsPresent)) {
         process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS || 'true';
         this.provider = new ApiFootballProvider();
       } else {

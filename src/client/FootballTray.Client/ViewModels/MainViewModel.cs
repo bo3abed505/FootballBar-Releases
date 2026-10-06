@@ -643,73 +643,41 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         IsGlobalNotificationsEnabled = prefs.Notifications.GlobalEnabled;
 
         // 1. Teams
-        var standardTeams = new List<FollowedTeam>
-        {
-            DefaultPreferences.Barcelona,
-            DefaultPreferences.AlAhly
-        };
+        var teamsToDisplay = prefs.FollowedTeams ?? new List<FollowedTeam>();
+        var followedTeamIds = prefs.GetFollowedTeamIdSet();
+        var dedupedTeams = teamsToDisplay.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
-        // Also add any extra teams in saved preferences
-        foreach (var followed in prefs.FollowedTeams)
+        foreach (var team in dedupedTeams)
         {
-            if (!standardTeams.Any(t => t.Id.Equals(followed.Id, StringComparison.OrdinalIgnoreCase) ||
-                                        (!string.IsNullOrWhiteSpace(t.Name) && !string.IsNullOrWhiteSpace(followed.Name) && string.Equals(t.Name.Trim(), followed.Name.Trim(), StringComparison.OrdinalIgnoreCase))))
+            var existing = AvailableTeams.FirstOrDefault(t => t.Id.Equals(team.Id, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
             {
-                standardTeams.Add(followed);
+                AvailableTeams.Add(FollowedTeamItemViewModel.FromDomain(team, true));
             }
         }
 
-        var followedTeamIds = prefs.GetFollowedTeamIdSet();
-        var dedupedTeams = standardTeams.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
-        foreach (var team in dedupedTeams)
+        foreach (var available in AvailableTeams)
         {
-            bool isFollowed = followedTeamIds.Contains(team.Id);
-            var existing = AvailableTeams.FirstOrDefault(t => t.Id.Equals(team.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
-            {
-                existing.IsFollowed = isFollowed;
-            }
-            else
-            {
-                AvailableTeams.Add(FollowedTeamItemViewModel.FromDomain(team, isFollowed));
-            }
+            available.IsFollowed = followedTeamIds.Contains(available.Id);
         }
 
         // 2. Competitions
-        var standardComps = new List<FollowedCompetition>
-        {
-            DefaultPreferences.PremierLeague,
-            DefaultPreferences.LaLiga,
-            DefaultPreferences.EgyptianPremierLeague,
-            DefaultPreferences.ChampionsLeague,
-            DefaultPreferences.AfricaCupOfNations,
-            DefaultPreferences.WorldCup
-        };
+        var compsToDisplay = prefs.FollowedCompetitions ?? new List<FollowedCompetition>();
+        var followedCompIds = prefs.GetFollowedCompetitionIdSet();
+        var dedupedComps = compsToDisplay.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
-        // Also add any extra competitions in saved preferences
-        foreach (var followed in prefs.FollowedCompetitions)
+        foreach (var comp in dedupedComps)
         {
-            if (!standardComps.Any(c => c.Id.Equals(followed.Id, StringComparison.OrdinalIgnoreCase) ||
-                                        (!string.IsNullOrWhiteSpace(c.Name) && !string.IsNullOrWhiteSpace(followed.Name) && string.Equals(c.Name.Trim(), followed.Name.Trim(), StringComparison.OrdinalIgnoreCase))))
+            var existing = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(comp.Id, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
             {
-                standardComps.Add(followed);
+                AvailableCompetitions.Add(FollowedCompetitionItemViewModel.FromDomain(comp, true));
             }
         }
 
-        var followedCompIds = prefs.GetFollowedCompetitionIdSet();
-        var dedupedComps = standardComps.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
-        foreach (var comp in dedupedComps)
+        foreach (var available in AvailableCompetitions)
         {
-            bool isFollowed = followedCompIds.Contains(comp.Id);
-            var existing = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(comp.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
-            {
-                existing.IsFollowed = isFollowed;
-            }
-            else
-            {
-                AvailableCompetitions.Add(FollowedCompetitionItemViewModel.FromDomain(comp, isFollowed));
-            }
+            available.IsFollowed = followedCompIds.Contains(available.Id);
         }
 
         // 3. Notification Categories (all 7 canonical NotificationType members)

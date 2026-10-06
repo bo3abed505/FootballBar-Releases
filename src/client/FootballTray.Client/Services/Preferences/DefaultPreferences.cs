@@ -71,20 +71,8 @@ public static class DefaultPreferences
         return new UserPreferences
         {
             PreferencesVersion = UserPreferences.CurrentSchemaVersion,
-            FollowedTeams = new List<FollowedTeam>
-            {
-                Barcelona,
-                AlAhly
-            },
-            FollowedCompetitions = new List<FollowedCompetition>
-            {
-                PremierLeague,
-                LaLiga,
-                EgyptianPremierLeague,
-                ChampionsLeague,
-                AfricaCupOfNations,
-                WorldCup
-            },
+            FollowedTeams = new List<FollowedTeam>(),
+            FollowedCompetitions = new List<FollowedCompetition>(),
             Notifications = new NotificationPreferences
             {
                 GlobalEnabled = true,

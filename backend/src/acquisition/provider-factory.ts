@@ -82,10 +82,10 @@ export function createProvider(options?: ProviderFactoryOptions): FootballProvid
 
   switch (rawProvider) {
     case 'mock':
-      if (isProduction) {
+      if (isProduction || (process.env.ALLOW_DEV_MOCKS !== 'true' && process.env.NODE_ENV !== 'test' && !process.env.VITEST)) {
         console.warn(
-          '[PROVIDER:WARN] Mock provider requested in production mode. ' +
-          'Mock provider is strictly disabled in production. Operating with an empty active calendar.'
+          '[PROVIDER:WARN] Mock provider requested without ALLOW_DEV_MOCKS=true. ' +
+          'Mock provider is strictly disabled. Operating with an empty active calendar.'
         );
         return new EmptyFootballProvider();
       }

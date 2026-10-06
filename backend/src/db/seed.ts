@@ -2,10 +2,19 @@ import { db, schema, pool, sqlite } from './index.js';
 import { generateCanonicalId } from './canonical-id.js';
 
 export async function seedDatabase() {
+  const allowDevSeeding = process.env.ALLOW_DEV_SEEDING === 'true';
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction || !allowDevSeeding) {
+    console.log('[SEED] Seeding skipped: DEV catalog seeding is strictly disabled in production and defaults to disabled unless ALLOW_DEV_SEEDING=true.');
+    return;
+  }
+
   console.log('[SEED] Purging ghost mock catalog entities...');
   sqlite.exec(`
-    DELETE FROM competitions WHERE name LIKE '%(Dev Mock)%';
-    DELETE FROM teams WHERE name LIKE '%(Dev Mock)%';
+    DELETE FROM competitions WHERE name LIKE '%(Dev Mock)%' OR id IN ('comp_laliga', 'comp_egypt_pl', 'comp_international');
+    DELETE FROM competition_seasons WHERE id IN ('season_laliga_2025', 'season_egypt_2025', 'season_international_2025');
+    DELETE FROM teams WHERE name LIKE '%(Dev Mock)%' OR id IN ('team_barcelona', 'team_realmadrid', 'team_alahly', 'team_egypt', 'team_spain');
   `);
 
   console.log('[SEED] Starting catalog seed...');

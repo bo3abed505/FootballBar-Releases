@@ -305,10 +305,11 @@ public class SearchCatalogViewModelTests
         var httpClient = new HttpClient(mockHandler) { BaseAddress = new Uri("http://localhost:4000") };
         var apiClient = new FootballApiClient(httpClient);
 
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
         using var vm = new SearchCatalogViewModel(apiClient, _prefService);
         await vm.InitializeAsync();
 
-        // Default preferences contain Barcelona
+        // Followed preferences contain Barcelona
         Assert.IsTrue(vm.FollowedTeams.Any(t => t.Id == CanonicalEntityIds.Barcelona));
 
         // Unfollow Barcelona
@@ -397,11 +398,11 @@ public class SearchCatalogViewModelTests
         using var vm = new SearchCatalogViewModel(apiClient, _prefService);
         await vm.InitializeAsync();
 
-        // Default preferences contain 2 teams (Barcelona, Al Ahly) and 6 competitions
-        Assert.AreEqual(2, vm.FollowedTeams.Count);
-        Assert.AreEqual(6, vm.FollowedCompetitions.Count);
-        Assert.IsTrue(vm.HasFollowedTeams);
-        Assert.IsTrue(vm.HasFollowedCompetitions);
+        // Default preferences contain empty followed lists
+        Assert.AreEqual(0, vm.FollowedTeams.Count);
+        Assert.AreEqual(0, vm.FollowedCompetitions.Count);
+        Assert.IsFalse(vm.HasFollowedTeams);
+        Assert.IsFalse(vm.HasFollowedCompetitions);
     }
 
     [TestMethod]

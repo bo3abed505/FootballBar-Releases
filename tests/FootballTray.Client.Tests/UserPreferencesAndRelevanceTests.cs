@@ -50,6 +50,27 @@ public class UserPreferencesAndRelevanceTests
     // Step 14: Preference Persistence Tests (1-20)
     // ============================================================
 
+    private static UserPreferences CreatePreferencesWithSampleFollows()
+    {
+        return DefaultPreferences.CreateDefault() with
+        {
+            FollowedTeams = new List<FollowedTeam>
+            {
+                DefaultPreferences.Barcelona,
+                DefaultPreferences.AlAhly
+            },
+            FollowedCompetitions = new List<FollowedCompetition>
+            {
+                DefaultPreferences.PremierLeague,
+                DefaultPreferences.LaLiga,
+                DefaultPreferences.EgyptianPremierLeague,
+                DefaultPreferences.ChampionsLeague,
+                DefaultPreferences.AfricaCupOfNations,
+                DefaultPreferences.WorldCup
+            }
+        };
+    }
+
     [TestMethod]
     public async Task Test01_DefaultPreferences_LoadCorrectly()
     {
@@ -57,17 +78,8 @@ public class UserPreferencesAndRelevanceTests
 
         Assert.IsNotNull(prefs);
         Assert.AreEqual(UserPreferences.CurrentSchemaVersion, prefs.PreferencesVersion);
-        Assert.AreEqual(2, prefs.FollowedTeams.Count);
-        Assert.IsTrue(prefs.FollowedTeams.Any(t => t.Id == CanonicalEntityIds.Barcelona));
-        Assert.IsTrue(prefs.FollowedTeams.Any(t => t.Id == CanonicalEntityIds.AlAhly));
-
-        Assert.AreEqual(6, prefs.FollowedCompetitions.Count);
-        Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.PremierLeague));
-        Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.LaLiga));
-        Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.EgyptianPremierLeague));
-        Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.ChampionsLeague));
-        Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.AfricaCupOfNations));
-        Assert.IsTrue(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.WorldCup));
+        Assert.AreEqual(0, prefs.FollowedTeams.Count);
+        Assert.AreEqual(0, prefs.FollowedCompetitions.Count);
 
         Assert.IsTrue(prefs.Notifications.GlobalEnabled);
         Assert.AreEqual(Enum.GetValues<NotificationType>().Length, prefs.Notifications.EnabledTypes.Count);
@@ -83,7 +95,7 @@ public class UserPreferencesAndRelevanceTests
         var newService = new PreferencesService(_tempDir);
         var loaded = await newService.LoadAsync();
 
-        Assert.AreEqual(3, loaded.FollowedTeams.Count);
+        Assert.AreEqual(1, loaded.FollowedTeams.Count);
         Assert.IsTrue(loaded.FollowedTeams.Any(t => t.Id == "team_42"));
     }
 
@@ -102,11 +114,15 @@ public class UserPreferencesAndRelevanceTests
     public async Task Test04_TeamUnfollow_RemovesTeamSuccessfully()
     {
         await _prefService.LoadAsync();
+        var team = new FollowedTeam(CanonicalEntityIds.Barcelona, "FC Barcelona", "BAR", "Spain");
+        await _prefService.FollowTeamAsync(team);
+        Assert.AreEqual(1, _prefService.GetPreferences().FollowedTeams.Count);
+
         await _prefService.UnfollowTeamAsync(CanonicalEntityIds.Barcelona);
 
         var prefs = _prefService.GetPreferences();
         Assert.IsFalse(prefs.FollowedTeams.Any(t => t.Id == CanonicalEntityIds.Barcelona));
-        Assert.AreEqual(1, prefs.FollowedTeams.Count);
+        Assert.AreEqual(0, prefs.FollowedTeams.Count);
     }
 
     [TestMethod]
@@ -124,10 +140,15 @@ public class UserPreferencesAndRelevanceTests
     public async Task Test06_CompetitionUnfollow_RemovesCompetitionSuccessfully()
     {
         await _prefService.LoadAsync();
+        var comp = new FollowedCompetition(CanonicalEntityIds.PremierLeague, "Premier League", "PL", "England");
+        await _prefService.FollowCompetitionAsync(comp);
+        Assert.AreEqual(1, _prefService.GetPreferences().FollowedCompetitions.Count);
+
         await _prefService.UnfollowCompetitionAsync(CanonicalEntityIds.PremierLeague);
 
         var prefs = _prefService.GetPreferences();
         Assert.IsFalse(prefs.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.PremierLeague));
+        Assert.AreEqual(0, prefs.FollowedCompetitions.Count);
     }
 
     [TestMethod]
@@ -136,9 +157,10 @@ public class UserPreferencesAndRelevanceTests
         await _prefService.LoadAsync();
         var team = new FollowedTeam(CanonicalEntityIds.Barcelona, "FC Barcelona duplicate", "BAR", "Spain");
         await _prefService.FollowTeamAsync(team);
+        await _prefService.FollowTeamAsync(team);
 
         var prefs = _prefService.GetPreferences();
-        Assert.AreEqual(2, prefs.FollowedTeams.Count);
+        Assert.AreEqual(1, prefs.FollowedTeams.Count);
     }
 
     [TestMethod]
@@ -149,7 +171,7 @@ public class UserPreferencesAndRelevanceTests
         await _prefService.UnfollowTeamAsync("team_nonexistent");
 
         var prefs = _prefService.GetPreferences();
-        Assert.AreEqual(2, prefs.FollowedTeams.Count);
+        Assert.AreEqual(0, prefs.FollowedTeams.Count);
     }
 
     [TestMethod]
@@ -196,8 +218,8 @@ public class UserPreferencesAndRelevanceTests
 
         Assert.IsNotNull(loaded);
         Assert.AreEqual(UserPreferences.CurrentSchemaVersion, loaded.PreferencesVersion);
-        Assert.AreEqual(2, loaded.FollowedTeams.Count);
-        Assert.AreEqual(6, loaded.FollowedCompetitions.Count);
+        Assert.AreEqual(0, loaded.FollowedTeams.Count);
+        Assert.AreEqual(0, loaded.FollowedCompetitions.Count);
     }
 
     [TestMethod]
@@ -209,7 +231,8 @@ public class UserPreferencesAndRelevanceTests
         var loaded = await _prefService.LoadAsync();
 
         Assert.IsNotNull(loaded);
-        Assert.AreEqual(2, loaded.FollowedTeams.Count);
+        Assert.AreEqual(0, loaded.FollowedTeams.Count);
+        Assert.AreEqual(0, loaded.FollowedCompetitions.Count);
     }
 
     [TestMethod]
@@ -306,10 +329,10 @@ public class UserPreferencesAndRelevanceTests
 
         var loaded = await _prefService.LoadAsync();
 
-        // Safely reverted to default schema version 1 and standard defaults
+        // Safely reverted to default schema version and standard defaults
         Assert.AreEqual(UserPreferences.CurrentSchemaVersion, loaded.PreferencesVersion);
-        Assert.AreEqual(2, loaded.FollowedTeams.Count);
-        Assert.IsTrue(loaded.FollowedTeams.Any(t => t.Id == CanonicalEntityIds.Barcelona));
+        Assert.AreEqual(0, loaded.FollowedTeams.Count);
+        Assert.AreEqual(0, loaded.FollowedCompetitions.Count);
     }
 
     [TestMethod]
@@ -331,6 +354,7 @@ public class UserPreferencesAndRelevanceTests
     {
         var service1 = new PreferencesService(_tempDir);
         await service1.LoadAsync();
+        await service1.FollowTeamAsync(DefaultPreferences.Barcelona);
         await service1.UnfollowTeamAsync(CanonicalEntityIds.Barcelona);
         await service1.SetNotificationTypeEnabledAsync(NotificationType.HalfTime, false);
 
@@ -350,7 +374,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test21_FollowedHomeTeam_IsRelevant()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var match = CreateMatch("fix_1", CanonicalEntityIds.Barcelona, "team_other", "comp_other", homeName: "FC Barcelona");
 
         var result = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
@@ -364,7 +388,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test22_FollowedAwayTeam_IsRelevant()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var match = CreateMatch("fix_2", "team_other", CanonicalEntityIds.AlAhly, "comp_other", "Other FC", "Al Ahly SC");
 
         var result = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
@@ -378,7 +402,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test23_FollowedCompetition_IsRelevant()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var match = CreateMatch("fix_3", "team_newcastle", "team_brighton", CanonicalEntityIds.PremierLeague, "Newcastle", "Brighton", "Premier League");
 
         var result = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
@@ -406,7 +430,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test25_TeamAndCompetitionMatch_SingleRelevantFixtureWithMultipleReasons()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         // Barcelona match in La Liga (both team and competition are followed)
         var match = CreateMatch("fix_5", CanonicalEntityIds.Barcelona, "team_valencia", CanonicalEntityIds.LaLiga, "FC Barcelona", "Valencia CF", "La Liga");
 
@@ -421,7 +445,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test26_StableIdMatching_WorksEvenWhenDisplayNamesDiffer()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         // ID matches 'team_529' but localized display name is 'Barca Custom Name'
         var match = CreateMatch("fix_6", CanonicalEntityIds.Barcelona, "team_unknown", "comp_unknown", "Barca Custom Name", "Other");
 
@@ -446,7 +470,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test28_MultipleRelevantFixtures_RemainDeterministicallyOrdered()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var matchA = CreateMatch("fix_a", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, state: "LIVE", elapsed: 75);
         var matchB = CreateMatch("fix_b", CanonicalEntityIds.AlAhly, "team_zamalek", CanonicalEntityIds.EgyptianPremierLeague, state: "LIVE", elapsed: 30);
 
@@ -461,7 +485,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test29_LiveFollowedTeamFixture_OutranksUpcomingFollowedTeamFixture()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var upcomingBarca = CreateMatch("fix_barca_up", CanonicalEntityIds.Barcelona, "team_sevilla", CanonicalEntityIds.LaLiga, state: "PREMATCH");
         var liveAhly = CreateMatch("fix_ahly_live", CanonicalEntityIds.AlAhly, "team_pyramids", CanonicalEntityIds.EgyptianPremierLeague, state: "LIVE", elapsed: 15);
 
@@ -475,7 +499,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test30_FollowedTeamLiveFixture_OutranksFollowedCompetitionLiveFixture()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         // Match 1: Followed competition (Premier League) but unfollowed teams
         var plLive = CreateMatch("fix_pl_live", "team_42", "team_49", CanonicalEntityIds.PremierLeague, state: "LIVE", elapsed: 85);
         // Match 2: Followed team (Barcelona in La Liga)
@@ -492,7 +516,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test31_DeterministicTieBreaking_Works()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var kickoff = DateTimeOffset.UtcNow;
         var match1 = CreateMatch("fix_z", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, state: "LIVE", elapsed: 50, kickoff: kickoff);
         var match2 = CreateMatch("fix_a", CanonicalEntityIds.AlAhly, "team_zamalek", CanonicalEntityIds.EgyptianPremierLeague, state: "LIVE", elapsed: 50, kickoff: kickoff);
@@ -514,7 +538,7 @@ public class UserPreferencesAndRelevanceTests
     {
         var renderer = new TestNotificationRenderer();
         var service = new NotificationService(renderer: renderer);
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
 
         var prev = CreateTrayData("fix_barca", "LIVE", 10, 0, 0, null, CanonicalEntityIds.Barcelona, "team_rma");
         var goalEvent = new List<TrayEventDto>
@@ -535,7 +559,7 @@ public class UserPreferencesAndRelevanceTests
     {
         var renderer = new TestNotificationRenderer();
         var service = new NotificationService(renderer: renderer);
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
 
         // Match in unfollowed competition with unfollowed teams
         var prev = CreateTrayData("fix_seriea", "LIVE", 10, 0, 0, null, "team_roma", "team_lazio", "comp_seriea");
@@ -556,7 +580,7 @@ public class UserPreferencesAndRelevanceTests
     {
         var renderer = new TestNotificationRenderer();
         var service = new NotificationService(renderer: renderer);
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
 
         // Premier League match (followed competition) with unfollowed teams
         var prev = CreateTrayData("fix_pl_1", "LIVE", 20, 0, 0, null, "team_tottenham", "team_chelsea", CanonicalEntityIds.PremierLeague);
@@ -626,7 +650,7 @@ public class UserPreferencesAndRelevanceTests
     {
         var renderer = new TestNotificationRenderer();
         var service = new NotificationService(renderer: renderer);
-        var prefs = DefaultPreferences.CreateDefault() with
+        var prefs = CreatePreferencesWithSampleFollows() with
         {
             Notifications = new NotificationPreferences
             {
@@ -651,7 +675,7 @@ public class UserPreferencesAndRelevanceTests
         var service = new NotificationService(renderer: renderer);
 
         // 1. Goal occurred while Goal notifications were disabled
-        var disabledPrefs = DefaultPreferences.CreateDefault() with
+        var disabledPrefs = CreatePreferencesWithSampleFollows() with
         {
             Notifications = new NotificationPreferences
             {
@@ -671,7 +695,7 @@ public class UserPreferencesAndRelevanceTests
         Assert.AreEqual(0, renderer.Rendered.Count);
 
         // 2. User re-enables Goal notifications
-        var enabledPrefs = DefaultPreferences.CreateDefault();
+        var enabledPrefs = CreatePreferencesWithSampleFollows();
 
         // Poll again with same data
         var alerts2 = await service.ProcessTrayUpdateAsync(curr1, curr1, enabledPrefs);
@@ -688,7 +712,8 @@ public class UserPreferencesAndRelevanceTests
         var store = new NotificationDeduplicationStore(_tempDir);
         var service = new NotificationService(renderer: renderer, store: store);
 
-        var prefs1 = DefaultPreferences.CreateDefault();
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        var prefs1 = _prefService.GetPreferences();
         var prev = CreateTrayData("fix_barca", "LIVE", 10, 0, 0, null, CanonicalEntityIds.Barcelona, "team_rma");
         var goalEvent = new List<TrayEventDto>
         {
@@ -747,6 +772,7 @@ public class UserPreferencesAndRelevanceTests
         var notificationService = new NotificationService(renderer: renderer, store: store);
         var cacheService = new LocalCacheService(_tempDir);
         await _prefService.LoadAsync();
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
 
         var initialData = CreateTrayData("fix_barca", "LIVE", 10, 0, 0, null, CanonicalEntityIds.Barcelona, "team_rma");
         await cacheService.SaveCacheAsync(WrapEnvelope(initialData), "\"etag_0\"");
@@ -793,7 +819,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test42_FollowedLiveTeamMatch_IsSelectedOverUnrelatedLiveMatch()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var unrelatedLive = CreateMatch("fix_unrel", "team_x", "team_y", "comp_z", state: "LIVE", elapsed: 80);
         var followedLive = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, state: "LIVE", elapsed: 20);
 
@@ -807,7 +833,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test43_FollowedUpcomingMatch_IsSelectedOverUnrelatedUpcomingMatch()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var now = DateTimeOffset.UtcNow;
         var unrelatedUpcoming = CreateMatch("fix_unrel", "team_x", "team_y", "comp_z", state: "PREMATCH", kickoff: now.AddHours(1));
         var followedUpcoming = CreateMatch("fix_ahly", CanonicalEntityIds.AlAhly, "team_zamalek", CanonicalEntityIds.EgyptianPremierLeague, state: "PREMATCH", kickoff: now.AddHours(2));
@@ -822,7 +848,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test44_FollowedCompetitionMatch_OutranksUnrelatedMatch()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var unrelatedMatch = CreateMatch("fix_unrel", "team_a", "team_b", "comp_unrelated", state: "LIVE", elapsed: 50);
         var plMatch = CreateMatch("fix_pl", "team_wolves", "team_everton", CanonicalEntityIds.PremierLeague, state: "LIVE", elapsed: 30);
 
@@ -856,7 +882,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test46_TwoEquallyRelevantMatches_ResolveDeterministically()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var now = DateTimeOffset.UtcNow;
         var barca = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, state: "LIVE", elapsed: 45, kickoff: now);
         var ahly = CreateMatch("fix_ahly", CanonicalEntityIds.AlAhly, "team_zamalek", CanonicalEntityIds.EgyptianPremierLeague, state: "LIVE", elapsed: 45, kickoff: now);
@@ -872,7 +898,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void Test47_StaleFollowedMatch_FormatsCleanlyWithOfflineBadge()
     {
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = CreatePreferencesWithSampleFollows();
         var match = CreateMatch("fix_barca", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, homeName: "FC Barcelona", awayName: "Real Madrid", state: "LIVE", elapsed: 65, homeScore: 2, awayScore: 1, homeShortName: "BAR", awayShortName: "RMA");
         var data = new TrayDataDto { Matches = new List<TrayMatchDto> { match } };
 
@@ -896,7 +922,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void TestA_CanonicalBarcelonaFixture_IsRelevant_WithDefaultPreferences()
     {
-        var defaultPrefs = DefaultPreferences.CreateDefault();
+        var defaultPrefs = CreatePreferencesWithSampleFollows();
 
         // 1. Production API-Football string format ('team_529')
         var prodMatch = CreateMatch("fix_barca_prod", "team_529", "team_541", "comp_140", homeName: "FC Barcelona", awayName: "Real Madrid");
@@ -921,7 +947,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void TestB_CanonicalAlAhlyFixture_IsRelevant_WithDefaultPreferences()
     {
-        var defaultPrefs = DefaultPreferences.CreateDefault();
+        var defaultPrefs = CreatePreferencesWithSampleFollows();
 
         // 1. Production API-Football string format ('team_1029')
         var prodMatch = CreateMatch("fix_ahly_prod", "team_other", "team_1029", "comp_233", homeName: "Zamalek", awayName: "Al Ahly SC");
@@ -946,7 +972,7 @@ public class UserPreferencesAndRelevanceTests
     [TestMethod]
     public void TestC_CanonicalPremierLeagueFixture_IsRelevant_WithDefaultPreferences()
     {
-        var defaultPrefs = DefaultPreferences.CreateDefault();
+        var defaultPrefs = CreatePreferencesWithSampleFollows();
 
         // 1. Production API-Football string format ('comp_39')
         var prodMatch = CreateMatch("fix_pl_prod", "team_42", "team_49", "comp_39", homeName: "Arsenal", awayName: "Chelsea", compName: "Premier League");
@@ -973,32 +999,11 @@ public class UserPreferencesAndRelevanceTests
     {
         var defaults = DefaultPreferences.CreateDefault();
 
-        // Teams match canonical provider IDs
-        Assert.AreEqual(CanonicalEntityIds.Barcelona, defaults.FollowedTeams[0].Id);
-        Assert.AreEqual("FC Barcelona", defaults.FollowedTeams[0].Name);
+        Assert.IsNotNull(defaults.FollowedTeams);
+        Assert.AreEqual(0, defaults.FollowedTeams.Count);
 
-        Assert.AreEqual(CanonicalEntityIds.AlAhly, defaults.FollowedTeams[1].Id);
-        Assert.AreEqual("Al Ahly SC", defaults.FollowedTeams[1].Name);
-
-        // Competitions match TARGET_COMPETITION_IDS (39, 140, 233, 2, 6, 1)
-        var compMap = defaults.FollowedCompetitions.ToDictionary(c => c.Id, c => c.Name);
-        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.PremierLeague));
-        Assert.AreEqual("Premier League", compMap[CanonicalEntityIds.PremierLeague]);
-
-        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.LaLiga));
-        Assert.AreEqual("La Liga", compMap[CanonicalEntityIds.LaLiga]);
-
-        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.EgyptianPremierLeague));
-        Assert.AreEqual("Egyptian Premier League", compMap[CanonicalEntityIds.EgyptianPremierLeague]);
-
-        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.ChampionsLeague));
-        Assert.AreEqual("UEFA Champions League", compMap[CanonicalEntityIds.ChampionsLeague]);
-
-        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.AfricaCupOfNations));
-        Assert.AreEqual("CAF Africa Cup of Nations", compMap[CanonicalEntityIds.AfricaCupOfNations]);
-
-        Assert.IsTrue(compMap.ContainsKey(CanonicalEntityIds.WorldCup));
-        Assert.AreEqual("FIFA World Cup", compMap[CanonicalEntityIds.WorldCup]);
+        Assert.IsNotNull(defaults.FollowedCompetitions);
+        Assert.AreEqual(0, defaults.FollowedCompetitions.Count);
     }
 
     [TestMethod]

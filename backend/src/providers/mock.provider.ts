@@ -140,6 +140,16 @@ export class MockFootballProvider implements FootballProvider {
   reset(): void {
     this.fixtures.clear();
 
+    const allowDevMocks = process.env.ALLOW_DEV_MOCKS === 'true';
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    // Strictly disable dev mock fixtures in production or unless explicitly opted in via ALLOW_DEV_MOCKS=true (or automated test runs)
+    if (isProduction || (!allowDevMocks && !isTest)) {
+      this.clearPersistentState();
+      return;
+    }
+
     // 1. Barcelona vs Real Madrid (LIVE 72', score 1-1)
     const elClasicoEvents: ProviderEvent[] = [
       {
@@ -408,6 +418,12 @@ export class MockFootballProvider implements FootballProvider {
   }
 
   async getCompetitions(): Promise<ProviderCompetition[]> {
+    const allowDevMocks = process.env.ALLOW_DEV_MOCKS === 'true';
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction || (!allowDevMocks && !isTest)) {
+      return [];
+    }
     return [this.compLaLiga, this.compInternational];
   }
 
@@ -443,6 +459,12 @@ export class MockFootballProvider implements FootballProvider {
   }
 
   async getStandings(competitionId: string, seasonYear: number): Promise<ProviderStanding[]> {
+    const allowDevMocks = process.env.ALLOW_DEV_MOCKS === 'true';
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction || (!allowDevMocks && !isTest)) {
+      return [];
+    }
     return [
       {
         competitionId: 'comp_laliga',

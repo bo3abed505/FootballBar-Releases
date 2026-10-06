@@ -227,8 +227,8 @@ public class DiagnosticsAndObservabilityTests
         var prefs = await service.LoadAsync();
 
         Assert.IsNotNull(prefs, "Preferences service should recover with defaults");
-        Assert.AreEqual(2, prefs.FollowedTeams.Count);
-        Assert.AreEqual(6, prefs.FollowedCompetitions.Count);
+        Assert.AreEqual(0, prefs.FollowedTeams.Count);
+        Assert.AreEqual(0, prefs.FollowedCompetitions.Count);
     }
 
     [TestMethod]
@@ -289,7 +289,10 @@ public class DiagnosticsAndObservabilityTests
             ]
         };
 
-        var prefs = DefaultPreferences.CreateDefault();
+        var prefs = DefaultPreferences.CreateDefault() with
+        {
+            FollowedTeams = [DefaultPreferences.Barcelona]
+        };
         var dispatched = await service.ProcessTrayUpdateAsync(prev, cur, prefs);
         Assert.AreEqual(1, dispatched.Count);
 

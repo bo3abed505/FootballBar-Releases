@@ -76,19 +76,9 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        // Standard teams
-        Assert.IsTrue(vm.AvailableTeams.Any(t => t.Id == CanonicalEntityIds.Barcelona && t.IsFollowed));
-        Assert.IsTrue(vm.AvailableTeams.Any(t => t.Id == CanonicalEntityIds.AlAhly && t.IsFollowed));
-
-        // Standard 6 competitions
-        Assert.AreEqual(6, vm.AvailableCompetitions.Count);
-        Assert.IsTrue(vm.AvailableCompetitions.All(c => c.IsFollowed));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.PremierLeague));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.LaLiga));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.EgyptianPremierLeague));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.ChampionsLeague));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.AfricaCupOfNations));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.WorldCup));
+        // Boot with empty followed lists
+        Assert.AreEqual(0, vm.AvailableTeams.Count);
+        Assert.AreEqual(0, vm.AvailableCompetitions.Count);
 
         // Global and all 7 categories enabled
         Assert.IsTrue(vm.IsGlobalNotificationsEnabled);
@@ -102,9 +92,13 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
+        // Follow Barcelona
+        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona, "FC Barcelona");
+        var barca = vm.AvailableTeams.First(t => t.Id == CanonicalEntityIds.Barcelona);
+        Assert.IsTrue(barca.IsFollowed);
+
         // Unfollow Barcelona then follow again
         await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona);
-        var barca = vm.AvailableTeams.First(t => t.Id == CanonicalEntityIds.Barcelona);
         Assert.IsFalse(barca.IsFollowed);
 
         await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona);
@@ -121,9 +115,13 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.AlAhly);
+        // Follow Al Ahly
+        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.AlAhly, "Al Ahly SC");
         var ahly = vm.AvailableTeams.First(t => t.Id == CanonicalEntityIds.AlAhly);
+        Assert.IsTrue(ahly.IsFollowed);
 
+        // Unfollow
+        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.AlAhly);
         Assert.IsFalse(ahly.IsFollowed);
         var persisted = _prefService.GetPreferences();
         Assert.IsFalse(persisted.FollowedTeams.Any(t => t.Id == CanonicalEntityIds.AlAhly));
@@ -135,9 +133,13 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        // Unfollow PL then re-follow
-        await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.PremierLeague);
+        // Follow Premier League
+        await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.PremierLeague, "Premier League", "PL");
         var pl = vm.AvailableCompetitions.First(c => c.Id == CanonicalEntityIds.PremierLeague);
+        Assert.IsTrue(pl.IsFollowed);
+
+        // Unfollow then re-follow
+        await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.PremierLeague);
         Assert.IsFalse(pl.IsFollowed);
 
         await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.PremierLeague);
@@ -153,9 +155,13 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.LaLiga);
+        // Follow La Liga
+        await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.LaLiga, "La Liga", "ESP_L1");
         var laliga = vm.AvailableCompetitions.First(c => c.Id == CanonicalEntityIds.LaLiga);
+        Assert.IsTrue(laliga.IsFollowed);
 
+        // Unfollow
+        await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.LaLiga);
         Assert.IsFalse(laliga.IsFollowed);
         var persisted = _prefService.GetPreferences();
         Assert.IsFalse(persisted.FollowedCompetitions.Any(c => c.Id == CanonicalEntityIds.LaLiga));
@@ -220,7 +226,7 @@ public class MainViewModelAndUiTests
         using (var vm1 = new MainViewModel(_prefService))
         {
             await vm1.InitializeAsync();
-            await vm1.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona); // unfollow
+            await vm1.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona, "FC Barcelona"); // follow
             await vm1.ToggleNotificationCategoryAsync(NotificationType.Goal, false);
         }
 
@@ -232,7 +238,7 @@ public class MainViewModelAndUiTests
             var barca = vm2.AvailableTeams.First(t => t.Id == CanonicalEntityIds.Barcelona);
             var goal = vm2.NotificationCategories.First(c => c.Type == NotificationType.Goal);
 
-            Assert.IsFalse(barca.IsFollowed);
+            Assert.IsTrue(barca.IsFollowed);
             Assert.IsFalse(goal.IsEnabled);
         }
     }
@@ -246,10 +252,10 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        // Must recover safely to default values
+        // Must recover safely to default values (empty followed lists)
         Assert.IsTrue(vm.IsGlobalNotificationsEnabled);
-        Assert.IsTrue(vm.AvailableTeams.Any(t => t.Id == CanonicalEntityIds.Barcelona && t.IsFollowed));
-        Assert.IsTrue(vm.AvailableCompetitions.Any(c => c.Id == CanonicalEntityIds.PremierLeague && c.IsFollowed));
+        Assert.AreEqual(0, vm.AvailableTeams.Count);
+        Assert.AreEqual(0, vm.AvailableCompetitions.Count);
     }
 
     // ============================================================
@@ -281,6 +287,9 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test13_FollowingFilter_DisplaysOnlyRelevantMatches()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.PremierLeague);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -415,6 +424,8 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test19_RelevanceReason_IsCorrectlyDisplayed()
     {
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.PremierLeague);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -432,6 +443,9 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test20_MultipleRelevanceReasons_ArePreserved()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.LaLiga);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -495,9 +509,12 @@ public class MainViewModelAndUiTests
         await syncService.StartAsync();
         await vm.InitializeAsync();
 
-        // Mutate preferences while offline
-        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona);
+        // Mutate preferences while offline: follow Barcelona, then unfollow
+        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona, "FC Barcelona");
         var barca = vm.AvailableTeams.First(t => t.Id == CanonicalEntityIds.Barcelona);
+        Assert.IsTrue(barca.IsFollowed);
+
+        await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona);
         Assert.IsFalse(barca.IsFollowed);
 
         // Verify locally persisted
@@ -581,6 +598,8 @@ public class MainViewModelAndUiTests
         using var client = new FootballApiClient(httpClient);
         using var syncService = new SyncService(client, cacheService, preferencesService: _prefService);
 
+        await _prefService.FollowTeamAsync(DefaultPreferences.AlAhly);
+
         using var vm = new MainViewModel(_prefService, syncService);
         await syncService.StartAsync();
         await vm.InitializeAsync();
@@ -621,6 +640,9 @@ public class MainViewModelAndUiTests
         using var client = new FootballApiClient(httpClient);
         using var syncService = new SyncService(client, cacheService, preferencesService: _prefService);
 
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.LaLiga);
+
         using var vm = new MainViewModel(_prefService, syncService);
         await syncService.StartAsync();
         await vm.InitializeAsync();
@@ -640,6 +662,9 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test27_FollowedLiveTeam_OutranksUnrelatedLiveMatch()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.LaLiga);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -655,6 +680,9 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test28_Unfollow_RemovesThatRelevance()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.LaLiga);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -700,6 +728,15 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test31_Complete_ManualInteraction_Sequence_A_Through_G()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowTeamAsync(DefaultPreferences.AlAhly);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.PremierLeague);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.LaLiga);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.EgyptianPremierLeague);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.ChampionsLeague);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.AfricaCupOfNations);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.WorldCup);
+
         // -------------------------------------------------------------
         // A. Main UI: Initialize VM and load default state
         // -------------------------------------------------------------
@@ -827,6 +864,9 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test32_MasterSorting_AllTab_FollowsStrictHierarchy()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.PremierLeague);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -878,6 +918,9 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test34_MasterSorting_FollowingTab_ExcludesOtherMatches()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.PremierLeague);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -949,6 +992,8 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test37_CollapsibleOtherMatches_ExpanderStateToggle()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
@@ -981,6 +1026,8 @@ public class MainViewModelAndUiTests
     [TestMethod]
     public async Task Test38_Strike21_AllTab_OtherMatchesAlwaysExpanded()
     {
+        await _prefService.FollowTeamAsync(DefaultPreferences.Barcelona);
+
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
