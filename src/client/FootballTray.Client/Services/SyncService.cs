@@ -279,9 +279,37 @@ public class SyncService : ISyncService
             var teamIdList = teamIds.ToList();
             var compIdList = compIds.ToList();
 
-            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {_targetDate:yyyy-MM-dd}, Teams: {teamIdList.Count}, Competitions: {compIdList.Count}, ETag: '{_lastKnownEtag ?? "none"}')...");
+            // Phase 1: Cache Desync Resiliency
+            // If local in-memory cache is null (meaning tray.json is missing, corrupt, or deleted),
+            // attempt a reload. If still null, ignore any saved ETag and pass null to the API client
+            // to force the backend to return a 200 OK with the full payload to rehydrate the client.
+            if (_currentTrayData == null)
+            {
+                try
+                {
+                    var reloaded = await _cacheService.LoadCacheAsync(cancellationToken);
+                    if (reloaded?.Envelope?.Data != null)
+                    {
+                        _currentTrayData = reloaded.Envelope.Data;
+                        _lastKnownVersion = reloaded.Envelope.Version;
+                        _lastKnownEtag = reloaded.ETag;
+                    }
+                }
+                catch
+                {
+                    // Ignore cache read failures; fall through to null ETag fetch
+                }
+            }
+
+            string? etagToSend = (_currentTrayData != null) ? _lastKnownEtag : null;
+            if (_currentTrayData == null)
+            {
+                _lastKnownEtag = null;
+            }
+
+            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {_targetDate:yyyy-MM-dd}, Teams: {teamIdList.Count}, Competitions: {compIdList.Count}, ETag: '{etagToSend ?? "none"}')...");
             var response = await _apiClient.GetTrayAsync(
-                _lastKnownEtag,
+                etagToSend,
                 _targetDate,
                 teamIdList,
                 compIdList,
@@ -291,29 +319,50 @@ public class SyncService : ISyncService
 
             if (response.IsNotModified)
             {
-                // 304 Not Modified: Server confirms cached representation is still current
-                _freshnessState = DataFreshnessState.NotModified;
-                _lastValidatedAt = DateTimeOffset.UtcNow;
-                _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
-                if (!string.IsNullOrWhiteSpace(response.ETag))
+                if (_currentTrayData == null)
                 {
-                    _lastKnownEtag = response.ETag;
-                }
+                    // Cache desync recovery: server returned 304 but local memory is null.
+                    // Invalidate ETag and force re-request with null ETag to rehydrate.
+                    _lastKnownEtag = null;
+                    AppLogger.Warn("Sync", "CacheDesyncDetected", "Received 304 Not Modified while local cache is null. Re-requesting with null ETag to force rehydration.");
+                    response = await _apiClient.GetTrayAsync(
+                        null,
+                        _targetDate,
+                        teamIdList,
+                        compIdList,
+                        cancellationToken);
 
-                // Update cache validation timestamp (secondary non-critical persistence)
-                try
-                {
-                    await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
+                    if (response.IsNotModified)
+                    {
+                        return _freshnessState;
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    AppLogger.Warn("Sync", "CacheTouchFailed", $"Failed to update cache validation timestamp on 304: [{ex.GetType().Name}] {ex.Message}", ex: ex);
-                }
+                    // 304 Not Modified: Server confirms cached representation is still current
+                    _freshnessState = DataFreshnessState.NotModified;
+                    _lastValidatedAt = DateTimeOffset.UtcNow;
+                    _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
+                    if (!string.IsNullOrWhiteSpace(response.ETag))
+                    {
+                        _lastKnownEtag = response.ETag;
+                    }
 
-                AppLogger.Info("Sync", "PollNotModified", $"Backend returned 304 Not Modified ({_lastRefreshDurationMs}ms). Cache revalidated.");
-                _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
-                PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
-                return _freshnessState;
+                    // Update cache validation timestamp (secondary non-critical persistence)
+                    try
+                    {
+                        await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Warn("Sync", "CacheTouchFailed", $"Failed to update cache validation timestamp on 304: [{ex.GetType().Name}] {ex.Message}", ex: ex);
+                    }
+
+                    AppLogger.Info("Sync", "PollNotModified", $"Backend returned 304 Not Modified ({_lastRefreshDurationMs}ms). Cache revalidated.");
+                    _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
+                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                    return _freshnessState;
+                }
             }
 
             if (response.IsSuccess && response.Envelope?.Data != null)

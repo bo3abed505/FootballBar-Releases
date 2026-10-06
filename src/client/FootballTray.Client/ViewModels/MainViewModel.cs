@@ -1041,7 +1041,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ManualPinnedMatchId = null;
         IsExplicitlyUnpinned = true;
         ActiveMatchId = null;
-        ActiveTickerText = "Taskbar match unpinned";
+        var prefs = _preferencesService?.GetPreferences();
+        ActiveTickerText = prefs?.EnableTickerCarousel == true
+            ? "📌 Auto-Rotate Ticker (Carousel Mode)"
+            : "📌 No pinned matches";
 
         foreach (var match in FilteredMatches)
         {
@@ -1215,7 +1218,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         else if (IsExplicitlyUnpinned)
         {
             ActiveMatchId = null;
-            ActiveTickerText = "Taskbar match unpinned";
+            ActiveTickerText = prefs?.EnableTickerCarousel == true
+                ? "📌 Auto-Rotate Ticker (Carousel Mode)"
+                : "📌 No pinned matches";
         }
         else
         {

@@ -14,6 +14,7 @@ using FootballTray.Client.Services;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.ViewModels;
 using FootballTray.Core.Dto;
+using System.Reflection;
 
 #pragma warning disable MSTEST0037
 
@@ -338,6 +339,49 @@ public class EtagAnd304RegressionTests
         Assert.AreEqual("Online (Live)", vm.ConnectionStatusText);
         Assert.AreEqual(4, vm.FilteredMatches.Count, "All 4 matches must remain present after 304.");
         Assert.IsTrue(vm.HasMatches);
+    }
+
+    [TestMethod]
+    public async Task Test_CacheDesync_WhenTrayJsonMissing_IgnoresEtagAndForcesRehydration()
+    {
+        var prefService = new PreferencesService(_tempDir);
+        var envelope = CreateFourMatchEnvelope();
+
+        string? receivedIfNoneMatch = null;
+        var mockHandler = new MockHttpMessageHandler
+        {
+            ResponseFactory = (req) =>
+            {
+                receivedIfNoneMatch = req.Headers.Contains("If-None-Match")
+                    ? req.Headers.IfNoneMatch.ToString()
+                    : null;
+                var resp = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(SerializeEnvelope(envelope), Encoding.UTF8, "application/json")
+                };
+                resp.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag_fresh\"");
+                return resp;
+            }
+        };
+
+        using var httpClient = new HttpClient(mockHandler) { BaseAddress = new Uri("http://localhost:4000") };
+        using var client = new FootballApiClient(httpClient);
+        var cacheService = new LocalCacheService(_tempDir); // Temp dir has no tray.json
+        using var syncService = new SyncService(client, cacheService, preferencesService: prefService);
+
+        // Precondition: Simulate that the service held a lingering ETag (e.g. from preferences or prior session)
+        typeof(SyncService).GetField("_lastKnownEtag", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.SetValue(syncService, "\"stale_lingering_etag\"");
+
+        // Execute poll when local cache is null
+        var freshness = await syncService.PollOnceAsync();
+
+        // Must NOT send If-None-Match when local memory cache is null, even if lingering ETag existed
+        Assert.IsNull(receivedIfNoneMatch, "If-None-Match header must NOT be sent when local cache is null.");
+        Assert.AreEqual(DataFreshnessState.Fresh, freshness);
+        Assert.IsNotNull(syncService.CurrentTrayData);
+        Assert.AreEqual(4, syncService.CurrentTrayData.Matches.Count);
+        Assert.AreEqual("\"etag_fresh\"", syncService.LastKnownETag);
     }
 
     private class FailingTouchLocalCacheService : LocalCacheService

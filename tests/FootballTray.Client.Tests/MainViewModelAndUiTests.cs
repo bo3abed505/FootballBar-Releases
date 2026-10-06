@@ -1084,13 +1084,13 @@ public class MainViewModelAndUiTests
         Assert.IsNull(vm.ManualPinnedMatchId);
         Assert.IsNull(vm.ActiveMatchId);
         Assert.IsTrue(vm.IsExplicitlyUnpinned);
-        Assert.AreEqual("Taskbar match unpinned", vm.ActiveTickerText);
+        Assert.AreEqual("📌 Auto-Rotate Ticker (Carousel Mode)", vm.ActiveTickerText);
 
         // Switch filter - must not auto-repin m_1
         vm.SetFilter(MatchFilterType.Live);
         Assert.IsNull(vm.ActiveMatchId);
         Assert.IsTrue(vm.IsExplicitlyUnpinned);
-        Assert.AreEqual("Taskbar match unpinned", vm.ActiveTickerText);
+        Assert.AreEqual("📌 Auto-Rotate Ticker (Carousel Mode)", vm.ActiveTickerText);
     }
 
     [TestMethod]
