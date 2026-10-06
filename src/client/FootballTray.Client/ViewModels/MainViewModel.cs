@@ -906,13 +906,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    private DateTime _lastEvaluatedToday = DateTime.Today;
+
     public void CheckAndExecuteSync()
     {
-        if (SelectedCalendarDate.Date == DateTime.Today.AddDays(-1).Date)
+        var currentToday = DateTime.Today;
+        if (currentToday != _lastEvaluatedToday)
         {
-            SelectedCalendarDate = DateTime.Today;
+            bool wasViewingToday = _selectedCalendarDate.Date == _lastEvaluatedToday.Date;
+            _lastEvaluatedToday = currentToday;
             RebuildCalendarDays();
-            ApplyCurrentFilter();
+
+            if (wasViewingToday)
+            {
+                SelectedCalendarDate = currentToday;
+            }
+            else
+            {
+                ApplyCurrentFilter();
+            }
         }
     }
 

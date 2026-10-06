@@ -485,12 +485,52 @@ export class AcquisitionScheduler {
         if (plan.action === 'RECOVER_STALE' && targetComps && targetComps.length === 0) {
           this.logger.warn('RECOVER_STALE plan triggered but no target competition IDs match stale fixtures. Skipping provider call.');
           syncSummary = null;
-        } else if ((plan.action as string) === 'POLL_SCHEDULE' || (plan.action as string) === 'BOOTSTRAP') {
-          syncSummary = await this.syncService.syncSchedule(
-            todayDateStr,
-            targetComps,
-            cycleId
-          );
+        } else if (
+          plan.action === 'DISCOVER_SCHEDULE' ||
+          (plan.action as string) === 'POLL_SCHEDULE' ||
+          (plan.action as string) === 'BOOTSTRAP'
+        ) {
+          // Pre-fetch the schedule for the entire 7-day client window (Yesterday through Today + 5)
+          const targetDates: string[] = [];
+          for (let offset = -1; offset <= 5; offset++) {
+            const d = new Date(currentDate.getTime() + offset * 86400000);
+            targetDates.push(d.toISOString().slice(0, 10));
+          }
+
+          let combinedSummary: SyncSummary = {
+            provider: this.providerName,
+            fixturesDiscovered: 0,
+            fixturesInserted: 0,
+            fixturesUpdated: 0,
+            eventsInserted: 0,
+            eventsSkippedDuplicates: 0,
+            hasChanges: false,
+          };
+
+          for (const targetDate of targetDates) {
+            try {
+              const daySummary = await this.syncService.syncSchedule(
+                targetDate,
+                targetComps,
+                cycleId
+              );
+              if (daySummary) {
+                combinedSummary.provider = daySummary.provider;
+                combinedSummary.fixturesDiscovered += daySummary.fixturesDiscovered ?? 0;
+                combinedSummary.fixturesInserted += daySummary.fixturesInserted ?? 0;
+                combinedSummary.fixturesUpdated += daySummary.fixturesUpdated ?? 0;
+                combinedSummary.eventsInserted += daySummary.eventsInserted ?? 0;
+                combinedSummary.eventsSkippedDuplicates += daySummary.eventsSkippedDuplicates ?? 0;
+                combinedSummary.hasChanges = combinedSummary.hasChanges || daySummary.hasChanges;
+              }
+              if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+                await this.fixturesRepo.markScheduleDiscovered(targetDate, currentDate, cycleId);
+              }
+            } catch (dayErr: any) {
+              this.logger.warn(`Failed schedule sync for date ${targetDate}: ${dayErr?.message}`);
+            }
+          }
+          syncSummary = combinedSummary;
         } else {
           syncSummary = await this.syncService.syncWithPlan(plan, {
             date: todayDateStr,
