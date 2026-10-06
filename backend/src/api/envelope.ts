@@ -7,6 +7,7 @@ export interface ApiResponseEnvelope<T> {
   stale: boolean;
   dataAgeSeconds: number;
   data: T | null;
+  quotaExhausted?: boolean;
   error?: {
     code: string;
     message: string;
@@ -28,6 +29,7 @@ export function createResponseEnvelope<T>(
     stale?: boolean;
     dataAgeSeconds?: number;
     schemaVersion?: string;
+    quotaExhausted?: boolean;
   }
 ): ApiResponseEnvelope<T> {
   const now = new Date();
@@ -43,6 +45,7 @@ export function createResponseEnvelope<T>(
     stale: options?.stale ?? false,
     dataAgeSeconds: options?.dataAgeSeconds ?? 0,
     data,
+    ...(options?.quotaExhausted !== undefined ? { quotaExhausted: options.quotaExhausted } : {}),
   };
 }
 

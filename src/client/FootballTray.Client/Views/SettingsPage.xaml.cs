@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -317,7 +320,50 @@ public sealed partial class SettingsPage : Page
 
         try
         {
-            string text = $"Health: {ViewModel.HealthStatus}\r\nLast Sync: {ViewModel.LastSync}\r\nETag: {ViewModel.LastEtag}";
+            var sb = new StringBuilder();
+            sb.AppendLine($"Health: {ViewModel.HealthStatus}");
+            sb.AppendLine($"Last Sync: {ViewModel.LastSync}");
+            sb.AppendLine($"ETag: {ViewModel.LastEtag}");
+
+            try
+            {
+                string logPath = AppLogger.FileSink.LogFilePath;
+                if (File.Exists(logPath))
+                {
+                    using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var reader = new StreamReader(fs, Encoding.UTF8);
+                    var lines = new List<string>();
+                    string? line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        lines.Add(line);
+                    }
+                    var last50 = lines.TakeLast(50);
+                    sb.AppendLine();
+                    sb.AppendLine("--- Recent Application Logs (Last 50 lines) ---");
+                    foreach (var l in last50)
+                    {
+                        sb.AppendLine(l);
+                    }
+                }
+                else
+                {
+                    var recent = AppLogger.GetRecentEntries().TakeLast(50);
+                    sb.AppendLine();
+                    sb.AppendLine("--- Recent Application Logs (In-Memory) ---");
+                    foreach (var entry in recent)
+                    {
+                        sb.AppendLine(entry.ToString());
+                    }
+                }
+            }
+            catch (Exception logEx)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"--- Could not read file log: {logEx.Message} ---");
+            }
+
+            string text = sb.ToString();
 
             bool copied = false;
             try

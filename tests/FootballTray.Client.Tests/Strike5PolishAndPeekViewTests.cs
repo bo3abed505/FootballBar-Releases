@@ -55,8 +55,8 @@ public class Strike5PolishAndPeekViewTests
         Assert.AreEqual(1, vm.TimelineItems.Count);
         var subItem = vm.TimelineItems[0];
         Assert.AreEqual("🔄", subItem.IconGlyph);
-        Assert.AreEqual("In: #10 (MID) Zizo Sayed", subItem.EventTitle);
-        Assert.AreEqual("Out: #8 (MID) Marwan Attia", subItem.EventSubtitle);
+        Assert.AreEqual("Out: #10 (MID) Zizo Sayed", subItem.EventTitle);
+        Assert.AreEqual("In: #8 (MID) Marwan Attia", subItem.EventSubtitle);
         Assert.IsTrue(subItem.IsHomeTeam);
         Assert.IsFalse(subItem.IsAwayTeam);
     }
@@ -89,8 +89,8 @@ public class Strike5PolishAndPeekViewTests
 
         Assert.AreEqual(1, vm.TimelineItems.Count);
         var subItem = vm.TimelineItems[0];
-        Assert.AreEqual("In: Zizo Sayed", subItem.EventTitle);
-        Assert.AreEqual("Out: Marwan Attia", subItem.EventSubtitle);
+        Assert.AreEqual("Out: Zizo Sayed", subItem.EventTitle);
+        Assert.AreEqual("In: Marwan Attia", subItem.EventSubtitle);
     }
 
     [TestMethod]

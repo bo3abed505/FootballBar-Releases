@@ -43,6 +43,7 @@ public partial class App : Application
     private readonly AppNotificationRegistrationManager _notificationRegistration = new();
     private volatile bool _updateHandoffExitRequested;
     private static System.Windows.Forms.NotifyIcon? _trayIcon;
+    private static System.Windows.Forms.Timer? _trayClickTimer;
     private static bool _isInitialColdStart = true;
 
 
@@ -240,6 +241,8 @@ public partial class App : Application
             {
                 Application.Current.Exit();
             }
+            _trayClickTimer?.Dispose();
+            _trayClickTimer = null;
             _trayIcon?.Dispose();
             _trayIcon = null;
         };
@@ -305,12 +308,33 @@ public partial class App : Application
                 {
                     _trayIcon.Icon = new System.Drawing.Icon(iconPath);
                 }
-                _trayIcon.DoubleClick += (s, e) => OpenMainWindow();
+                _trayClickTimer = new System.Windows.Forms.Timer { Interval = 250 };
+                _trayClickTimer.Tick += (s, args) =>
+                {
+                    _trayClickTimer.Stop();
+                    var activeId = CurrentMainViewModel?.ActiveMatchId;
+                    if (!string.IsNullOrEmpty(activeId))
+                    {
+                        _tickerCoordinator?.OpenMatchCenter(activeId);
+                    }
+                    else
+                    {
+                        OpenMainWindow();
+                    }
+                };
+
+                _trayIcon.DoubleClick += (s, e) =>
+                {
+                    _trayClickTimer.Stop();
+                    OpenMainWindow();
+                };
+
                 _trayIcon.MouseClick += (s, e) =>
                 {
                     if (e.Button == System.Windows.Forms.MouseButtons.Left)
                     {
-                        OpenMainWindow();
+                        _trayClickTimer.Stop();
+                        _trayClickTimer.Start();
                     }
                 };
 
@@ -598,6 +622,8 @@ public partial class App : Application
     {
         try
         {
+            _trayClickTimer?.Dispose();
+            _trayClickTimer = null;
             _trayIcon?.Dispose();
             _trayIcon = null;
         }

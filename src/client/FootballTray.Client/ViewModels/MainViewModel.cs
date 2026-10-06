@@ -50,7 +50,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _hasFollowedMatches;
     private bool _hasOtherMatches;
     private bool _isOtherMatchesVisible;
-    private bool _isOtherMatchesExpanded;
+    private bool _isOtherMatchesExpanded = true;
     private string _otherMatchesHeader = "Other Matches";
 
     private UpdateCheckState _updateCheckState = UpdateCheckState.NotChecked;
@@ -462,13 +462,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (IsSyncing) return "Syncing active calendar day & followed team fixtures...";
             if (IsOffline) return "Offline";
+            if (_latestTrayData?.QuotaExhausted == true) return "API Limit Reached (Resets Midnight)";
             if (_freshnessState == DataFreshnessState.Empty && FilteredMatches.Count == 0) return "No matches available";
             if (FilteredMatches.Count == 0) return "Up to date (No matches)";
             return "Up to date";
         }
     }
 
-    public string SyncIconGlyph => IsSyncing ? "\uE72C" : "\uE73E";
+    public string SyncIconGlyph => IsSyncing ? "\uE72C" : (_latestTrayData?.QuotaExhausted == true ? "\uE7BA" : "\uE73E");
 
     public bool IsSyncFooterVisible => true;
 
@@ -1021,6 +1022,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var pinnedMatch = allMatches?.FirstOrDefault(m => string.Equals(m.Id, matchId, StringComparison.Ordinal));
         if (pinnedMatch != null)
         {
+            if (_syncService is SyncService sync) sync.NotificationService?.Engine?.IngestMatchBaseline(pinnedMatch);
             string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
             string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
             string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
@@ -1066,6 +1068,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var pinnedMatch = _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, pinnedMatchId, StringComparison.Ordinal));
             if (pinnedMatch != null)
             {
+                if (_syncService is SyncService sync) sync.NotificationService?.Engine?.IngestMatchBaseline(pinnedMatch);
                 string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
                 string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
                 string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
@@ -1075,7 +1078,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
-            ActiveTickerText = "Taskbar match unpinned";
+            var prefs = _preferencesService.GetPreferences();
+            ActiveTickerText = prefs?.EnableTickerCarousel == true ? "📌 Auto-Rotate Ticker (Carousel Mode)" : "📌 No pinned matches";
         }
     }
 
@@ -1100,9 +1104,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             int matchCount = allMatches.Count(m =>
             {
-                var matchDate = m.KickoffTime.ToLocalTime().Date;
-                if (matchDate == targetDate) return true;
-                if (isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m) || m.KickoffTime.UtcDateTime.Date == DateTime.UtcNow.Date)) return true;
+                var localDate = m.KickoffTime.ToLocalTime().Date;
+                var utcDate = m.KickoffTime.UtcDateTime.Date;
+                var rawDate = m.KickoffTime.Date;
+                if (localDate == targetDate || utcDate == targetDate || rawDate == targetDate || m.KickoffTime.DateTime.Date == targetDate) return true;
+                if (isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
                 return false;
             });
 
@@ -1222,11 +1228,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
                 string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
                 string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : activeMatch.State);
-                ActiveTickerText = $"Taskbar Active: {home} {score} {away} ({time})";
+                ActiveTickerText = $"{home} {score} {away} ({time})";
             }
             else
             {
-                ActiveTickerText = allMatches.Count > 0 ? "No prioritized match for taskbar" : "No matches synchronized";
+                ActiveTickerText = prefs?.EnableTickerCarousel == true
+                    ? "📌 Auto-Rotate Ticker (Carousel Mode)"
+                    : "📌 No pinned matches";
             }
         }
 
@@ -1240,9 +1248,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return true;
             }
 
-            var matchDate = m.KickoffTime.ToLocalTime().Date;
-            if (matchDate == targetDate) return true;
-            if (targetDate == DateTime.Today && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m) || m.KickoffTime.UtcDateTime.Date == DateTime.UtcNow.Date)) return true;
+            var localDate = m.KickoffTime.ToLocalTime().Date;
+            var utcDate = m.KickoffTime.UtcDateTime.Date;
+            var rawDate = m.KickoffTime.Date;
+            if (localDate == targetDate || utcDate == targetDate || rawDate == targetDate || m.KickoffTime.DateTime.Date == targetDate) return true;
+            if (targetDate == DateTime.Today && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
             return false;
         }).ToList();
 
@@ -1295,68 +1305,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var bucket1 = viewModels.Where(m => m.FollowedByCompetition && !m.FollowedByTeam).ToList();
         var bucket2 = viewModels.Where(m => !m.FollowedByTeam && !m.FollowedByCompetition).ToList();
 
-        Func<MatchItemViewModel, int> statusRank = m =>
-        {
-            if (m.IsLive) return 0;
-            if (m.IsPrematch) return 1;
-            if (m.IsFinished) return 2;
-            return 3;
-        };
-
-        IOrderedEnumerable<MatchItemViewModel> SortFollowedBucket(IEnumerable<MatchItemViewModel> source)
-        {
-            if (_activeFilter == MatchFilterType.Live)
-            {
-                return source.OrderByDescending(m => m.ElapsedMinute)
-                             .ThenBy(m => m.KickoffTime)
-                             .ThenBy(m => m.Id, StringComparer.Ordinal);
-            }
-            if (_activeFilter == MatchFilterType.Upcoming)
-            {
-                return source.OrderBy(m => m.KickoffTime)
-                             .ThenBy(m => m.Id, StringComparer.Ordinal);
-            }
-            if (_activeFilter == MatchFilterType.Finished)
-            {
-                return source.OrderByDescending(m => m.KickoffTime)
-                             .ThenBy(m => m.Id, StringComparer.Ordinal);
-            }
-            // All or Following
-            return source.OrderBy(statusRank)
-                         .ThenByDescending(m => m.IsLive ? m.ElapsedMinute : 0)
-                         .ThenBy(m => m.KickoffTime)
-                         .ThenBy(m => m.Id, StringComparer.Ordinal);
-        }
-
-        IOrderedEnumerable<MatchItemViewModel> SortOtherBucket(IEnumerable<MatchItemViewModel> source)
-        {
-            if (_activeFilter == MatchFilterType.Live)
-            {
-                return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
-                             .ThenByDescending(m => m.ElapsedMinute)
-                             .ThenBy(m => m.KickoffTime)
-                             .ThenBy(m => m.Id, StringComparer.Ordinal);
-            }
-            if (_activeFilter == MatchFilterType.Upcoming)
-            {
-                return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
-                             .ThenBy(m => m.KickoffTime)
-                             .ThenBy(m => m.Id, StringComparer.Ordinal);
-            }
-            if (_activeFilter == MatchFilterType.Finished)
-            {
-                return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
-                             .ThenByDescending(m => m.KickoffTime)
-                             .ThenBy(m => m.Id, StringComparer.Ordinal);
-            }
-            // All Tab: Other matches sorted by popularity
-            return source.OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
-                         .ThenBy(statusRank)
-                         .ThenByDescending(m => m.IsLive ? m.ElapsedMinute : 0)
-                         .ThenBy(m => m.KickoffTime)
-                         .ThenBy(m => m.Id, StringComparer.Ordinal);
-        }
-
         IEnumerable<MatchItemViewModel> FilterByTab(IEnumerable<MatchItemViewModel> bucket)
         {
             return _activeFilter switch
@@ -1368,28 +1316,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             };
         }
 
-        var sortedBucket0 = SortFollowedBucket(FilterByTab(bucket0)).ToList();
-        var sortedBucket1 = SortFollowedBucket(FilterByTab(bucket1)).ToList();
-        var sortedBucket2 = _activeFilter == MatchFilterType.Following
-            ? new List<MatchItemViewModel>()
-            : SortOtherBucket(FilterByTab(bucket2)).ToList();
+        var filteredByTab = FilterByTab(viewModels).ToList();
 
-        var followedList = sortedBucket0.Concat(sortedBucket1).ToList();
-        var otherList = sortedBucket2;
+        // Sort rules: Followed matches at the top (or IsRelevant == true), grouped by CompetitionName, then sorted by KickoffTime ascending.
+        var sortedFollowed = filteredByTab
+            .Where(m => m.IsRelevant || m.FollowedByTeam || m.FollowedByCompetition)
+            .OrderByDescending(m => m.FollowedByTeam)
+            .ThenBy(m => m.CompetitionName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(m => m.KickoffTime)
+            .ThenBy(m => m.Id, StringComparer.Ordinal)
+            .ToList();
+
+        var sortedOther = _activeFilter == MatchFilterType.Following
+            ? new List<MatchItemViewModel>()
+            : filteredByTab
+                .Where(m => !m.IsRelevant && !m.FollowedByTeam && !m.FollowedByCompetition)
+                .OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
+                .ThenBy(m => m.CompetitionName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(m => m.KickoffTime)
+                .ThenBy(m => m.Id, StringComparer.Ordinal)
+                .ToList();
 
         FollowedMatches.Clear();
-        foreach (var item in followedList)
+        foreach (var item in sortedFollowed)
         {
             FollowedMatches.Add(item);
         }
 
         OtherMatches.Clear();
-        foreach (var item in otherList)
+        foreach (var item in sortedOther)
         {
             OtherMatches.Add(item);
         }
 
-        var completeFilteredList = followedList.Concat(otherList).ToList();
+        var completeFilteredList = sortedFollowed.Concat(sortedOther).ToList();
         FilteredMatches.Clear();
         foreach (var item in completeFilteredList)
         {
@@ -1403,23 +1363,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         bool filterChanged = _lastFilterApplied != _activeFilter;
         bool dateChanged = _lastDateApplied != _selectedCalendarDate.Date;
-        if (filterChanged || dateChanged)
-        {
-            _lastFilterApplied = _activeFilter;
-            _lastDateApplied = _selectedCalendarDate.Date;
+        _lastFilterApplied = _activeFilter;
+        _lastDateApplied = _selectedCalendarDate.Date;
 
-            if (_activeFilter == MatchFilterType.Following)
-            {
-                IsOtherMatchesExpanded = false;
-            }
-            else if (_activeFilter == MatchFilterType.All)
-            {
-                IsOtherMatchesExpanded = true;
-            }
-            else
-            {
-                IsOtherMatchesExpanded = !HasFollowedMatches;
-            }
+        if (_activeFilter == MatchFilterType.Following)
+        {
+            IsOtherMatchesExpanded = false;
+        }
+        else if (_activeFilter == MatchFilterType.All)
+        {
+            IsOtherMatchesExpanded = true;
+        }
+        else if (filterChanged || dateChanged)
+        {
+            IsOtherMatchesExpanded = !HasFollowedMatches;
         }
 
         HasMatches = FilteredMatches.Count > 0;

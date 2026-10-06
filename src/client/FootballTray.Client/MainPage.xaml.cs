@@ -116,7 +116,9 @@ public sealed partial class MainPage : Page
         }
 
         // Active Ticker Summary
-        ActiveTickerSummaryText.Text = $"📌 {_viewModel.ActiveTickerText}";
+        ActiveTickerSummaryText.Text = _viewModel.ActiveTickerText.StartsWith("📌")
+            ? _viewModel.ActiveTickerText
+            : $"📌 {_viewModel.ActiveTickerText}";
 
         // Empty state visibility
         if (_viewModel.IsEmpty)

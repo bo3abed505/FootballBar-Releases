@@ -250,8 +250,31 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       });
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
-      // Compute deterministic ETag based on v2 match data and query parameters
-      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(formattedMatches)}`;
+      let quotaExhausted = false;
+      try {
+        const scheduler: any = (fastify as any).scheduler;
+        const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
+        const gateway = new RequestGateway();
+        const quotaDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
+
+        if (
+          quotaDiag.mode === 'RESERVE_MODE' ||
+          quotaDiag.mode === 'HARD_STOP' ||
+          quotaDiag.remainingDaily <= 10 ||
+          quotaDiag.isExhausted ||
+          schedulerDiag?.currentState === 'IDLE_LIMIT' ||
+          schedulerDiag?.lastCycleOutcome === 'LIMIT_REACHED' ||
+          schedulerDiag?.lastCycleOutcome === 'EXHAUSTED' ||
+          schedulerDiag?.lastCycleAction?.includes('LIMIT')
+        ) {
+          quotaExhausted = true;
+        }
+      } catch {
+        // Non-critical fallback
+      }
+
+      // Compute deterministic ETag based on v2 match data, query parameters, and quotaExhausted state
+      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(formattedMatches)}_${quotaExhausted}`;
       const dataHash = createHash('md5').update(cacheKey).digest('hex');
       const etag = `"${dataHash}"`;
 
@@ -262,8 +285,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       }
 
       const envelope = createResponseEnvelope(
-        { matches: formattedMatches },
-        { schemaVersion: '2.0', version: 2 }
+        { matches: formattedMatches, quotaExhausted },
+        { schemaVersion: '2.0', version: 2, quotaExhausted }
       );
 
       reply.header('ETag', etag);

@@ -23,6 +23,8 @@ public sealed partial class TaskbarTicker : UserControl
     private bool _isDragging = false;
     private int _dragStartScreenX = 0;
     private int _initialOffsetX = 0;
+    private DispatcherTimer? _clickResolutionTimer;
+    private string? _pendingClickMatchId;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -438,6 +440,11 @@ public sealed partial class TaskbarTicker : UserControl
     private void RootBorder_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
         e.Handled = true;
+        if (_clickResolutionTimer != null && _clickResolutionTimer.IsEnabled)
+        {
+            _clickResolutionTimer.Stop();
+        }
+        _pendingClickMatchId = null;
         App.OpenMainWindow();
     }
 
@@ -626,8 +633,28 @@ public sealed partial class TaskbarTicker : UserControl
             return;
         }
 
-        var matchId = _currentDisplayedMatchId;
-        OpenMatchCenterForMatch(matchId);
+        _pendingClickMatchId = _currentDisplayedMatchId;
+
+        if (_clickResolutionTimer == null)
+        {
+            _clickResolutionTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            _clickResolutionTimer.Tick += (s, args) =>
+            {
+                _clickResolutionTimer.Stop();
+                var id = _pendingClickMatchId;
+                _pendingClickMatchId = null;
+                OpenMatchCenterForMatch(id);
+            };
+        }
+        else
+        {
+            _clickResolutionTimer.Stop();
+        }
+
+        _clickResolutionTimer.Start();
     }
 
     public void OpenMatchCenterForMatch(string? matchId)

@@ -272,6 +272,8 @@ public class SyncService : ISyncService
             compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.WorldCup);
             compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.EuroChampionship);
             compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.NationsLeague);
+            compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.LegacyNationsLeague);
+            compIds.Add("ft_comp_01M467Y24DRWPKFG9AX4XX88ZE");
             compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.CopaAmerica);
 
             var teamIdList = teamIds.ToList();

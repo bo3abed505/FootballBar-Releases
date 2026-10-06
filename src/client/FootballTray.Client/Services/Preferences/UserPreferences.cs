@@ -169,6 +169,11 @@ public sealed record UserPreferences
             var id = comp.Id.Trim();
             set.Add(id);
 
+            if (!string.IsNullOrWhiteSpace(comp.Name))
+            {
+                set.Add(comp.Name.Trim());
+            }
+
             if (id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
             {
                 var raw = id["provisional:".Length..].Trim();
@@ -242,6 +247,38 @@ public sealed record UserPreferences
                 set.Add(CanonicalEntityIds.LegacyWorldCup);
                 set.Add(CanonicalEntityIds.WorldCupMockAlias);
                 set.Add(CanonicalEntityIds.WorldCupNumericId.ToString());
+            }
+            else if (id.Equals(CanonicalEntityIds.NationsLeague, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals("ft_comp_01M467Y24DRWPKFG9AX4XX88ZE", StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.LegacyNationsLeague, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.NationsLeagueMockAlias, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.NationsLeagueNumericId.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CanonicalEntityIds.NationsLeague);
+                set.Add("ft_comp_01M467Y24DRWPKFG9AX4XX88ZE");
+                set.Add(CanonicalEntityIds.LegacyNationsLeague);
+                set.Add(CanonicalEntityIds.NationsLeagueMockAlias);
+                set.Add(CanonicalEntityIds.NationsLeagueNumericId.ToString());
+            }
+            else if (id.Equals(CanonicalEntityIds.EuroChampionship, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.LegacyEuroChampionship, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.EuroChampionshipMockAlias, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.EuroChampionshipNumericId.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CanonicalEntityIds.EuroChampionship);
+                set.Add(CanonicalEntityIds.LegacyEuroChampionship);
+                set.Add(CanonicalEntityIds.EuroChampionshipMockAlias);
+                set.Add(CanonicalEntityIds.EuroChampionshipNumericId.ToString());
+            }
+            else if (id.Equals(CanonicalEntityIds.CopaAmerica, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.LegacyCopaAmerica, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.CopaAmericaMockAlias, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.CopaAmericaNumericId.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CanonicalEntityIds.CopaAmerica);
+                set.Add(CanonicalEntityIds.LegacyCopaAmerica);
+                set.Add(CanonicalEntityIds.CopaAmericaMockAlias);
+                set.Add(CanonicalEntityIds.CopaAmericaNumericId.ToString());
             }
             else if (id.StartsWith("comp_", StringComparison.OrdinalIgnoreCase) && int.TryParse(id[5..], out int num))
             {

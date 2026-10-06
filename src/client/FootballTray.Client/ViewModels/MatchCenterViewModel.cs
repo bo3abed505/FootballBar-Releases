@@ -1100,15 +1100,15 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
                 if (isSub)
                 {
-                    string inPlayer = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
-                    string outPlayer = FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups);
+                    string outPlayer = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
+                    string inPlayer = FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups);
 
-                    eventTitle = !string.IsNullOrWhiteSpace(inPlayer)
-                        ? $"In: {inPlayer}"
+                    eventTitle = !string.IsNullOrWhiteSpace(outPlayer)
+                        ? $"Out: {outPlayer}"
                         : (!string.IsNullOrWhiteSpace(cleanedDesc) ? cleanedDesc : "Substitution");
 
-                    eventSubtitle = !string.IsNullOrWhiteSpace(outPlayer)
-                        ? $"Out: {outPlayer}"
+                    eventSubtitle = !string.IsNullOrWhiteSpace(inPlayer)
+                        ? $"In: {inPlayer}"
                         : (!string.Equals(cleanedDesc, eventTitle, StringComparison.OrdinalIgnoreCase) ? cleanedDesc : string.Empty);
                 }
                 else if (isMissedPen)

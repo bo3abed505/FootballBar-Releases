@@ -137,6 +137,8 @@ public static class CanonicalEntityIds
         { "comp_5", NationsLeague },
         { "5", NationsLeague },
         { "comp_unl", NationsLeague },
+        { "ft_comp_01M467Y24DRWPKFG9AX4XX88ZE", NationsLeague },
+        { "ft_comp_01M3Y7E15Z5X08Y7S7K0JPAGE6", NationsLeague },
         { "comp_9", CopaAmerica },
         { "9", CopaAmerica },
         { "comp_ca", CopaAmerica },

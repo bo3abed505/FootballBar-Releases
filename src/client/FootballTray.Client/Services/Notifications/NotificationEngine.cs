@@ -76,7 +76,12 @@ public sealed class NotificationEngine
 
         foreach (var curr in current.Matches)
         {
-            prevMap.TryGetValue(curr.Id, out var prev);
+            if (!prevMap.TryGetValue(curr.Id, out var prev) || prev == null)
+            {
+                // Silently ingest initial baseline snapshot for newly observed or pinned matches to prevent zombie alerts
+                IngestMatchBaseline(curr);
+                continue;
+            }
 
             // A. State Transition Evaluation
             EvaluateStateTransitions(prev, curr, candidates);
@@ -99,43 +104,53 @@ public sealed class NotificationEngine
         return candidates;
     }
 
+    /// <summary>
+    /// Silently ingests the state and events of a match into the deduplication store
+    /// so that historical state transitions or existing goals do not trigger alerts.
+    /// </summary>
+    public void IngestMatchBaseline(TrayMatchDto match)
+    {
+        if (match == null) return;
+        string state = (match.State ?? string.Empty).ToUpperInvariant();
+
+        if (LiveStates.Contains(state) || HalftimeStates.Contains(state) || FinishedStates.Contains(state))
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:started");
+        }
+        if (HalftimeStates.Contains(state))
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:halftime");
+        }
+        if (FinishedStates.Contains(state))
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:finished");
+        }
+        if (PostponedStates.Contains(state))
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:postponed");
+        }
+        if (CancelledStates.Contains(state))
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:cancelled");
+        }
+
+        if (match.RecentEvents != null)
+        {
+            foreach (var ev in match.RecentEvents)
+            {
+                if (IsGoalEvent(ev) && !string.IsNullOrWhiteSpace(ev.Id))
+                {
+                    _deduplicationStore.MarkNotified($"match:{match.Id}:event:{ev.Id}");
+                }
+            }
+        }
+    }
+
     private void EstablishBaseline(TrayDataDto current)
     {
         foreach (var match in current.Matches)
         {
-            string state = (match.State ?? string.Empty).ToUpperInvariant();
-
-            if (LiveStates.Contains(state) || HalftimeStates.Contains(state) || FinishedStates.Contains(state))
-            {
-                _deduplicationStore.MarkNotified($"match:{match.Id}:started");
-            }
-            if (HalftimeStates.Contains(state))
-            {
-                _deduplicationStore.MarkNotified($"match:{match.Id}:halftime");
-            }
-            if (FinishedStates.Contains(state))
-            {
-                _deduplicationStore.MarkNotified($"match:{match.Id}:finished");
-            }
-            if (PostponedStates.Contains(state))
-            {
-                _deduplicationStore.MarkNotified($"match:{match.Id}:postponed");
-            }
-            if (CancelledStates.Contains(state))
-            {
-                _deduplicationStore.MarkNotified($"match:{match.Id}:cancelled");
-            }
-
-            if (match.RecentEvents != null)
-            {
-                foreach (var ev in match.RecentEvents)
-                {
-                    if (IsGoalEvent(ev) && !string.IsNullOrWhiteSpace(ev.Id))
-                    {
-                        _deduplicationStore.MarkNotified($"match:{match.Id}:event:{ev.Id}");
-                    }
-                }
-            }
+            IngestMatchBaseline(match);
         }
     }
 

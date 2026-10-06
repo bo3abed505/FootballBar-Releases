@@ -30,6 +30,9 @@ public class ApiResponseEnvelope<T>
     [JsonPropertyName("data")]
     public T? Data { get; set; }
 
+    [JsonPropertyName("quotaExhausted")]
+    public bool QuotaExhausted { get; set; }
+
     [JsonPropertyName("error")]
     public ApiErrorDto? Error { get; set; }
 }
@@ -50,6 +53,9 @@ public class TrayDataDto
 {
     [JsonPropertyName("matches")]
     public List<TrayMatchDto> Matches { get; set; } = new();
+
+    [JsonPropertyName("quotaExhausted")]
+    public bool QuotaExhausted { get; set; }
 }
 
 public class TrayMatchDto

@@ -177,6 +177,9 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         IsHomeTeamFollowed = homeFollowed;
         IsAwayTeamFollowed = awayFollowed;
         IsCompetitionFollowed = compFollowed;
+        FollowedByTeam = homeFollowed || awayFollowed;
+        FollowedByCompetition = compFollowed;
+        IsRelevant = FollowedByTeam || FollowedByCompetition;
     }
 
     public static MatchItemViewModel FromDto(
