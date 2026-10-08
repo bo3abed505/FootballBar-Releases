@@ -17,6 +17,8 @@ export interface UpdatePreferencesPayload {
   followedCompetitions?: Array<{ id: string; name?: string; code?: string }>;
   teamIds?: Array<string | number>;
   followedTeams?: Array<{ id: string; name?: string; code?: string }>;
+  pinnedMatchIds?: Array<string | number>;
+  pinnedMatchId?: string | number | null;
 }
 
 export interface DaemonPreferencesState {
@@ -24,12 +26,14 @@ export interface DaemonPreferencesState {
   followedTeams: string[];
   effectiveCompetitionNumericIds: number[];
   effectiveTeamNumericIds: number[];
+  pinnedMatchIds: string[];
   lastUpdatedAt: string;
 }
 
 export class DaemonPreferencesService {
   private followedCompetitions: Set<string> = new Set();
   private followedTeams: Set<string> = new Set();
+  private pinnedMatchIds: Set<string> = new Set();
   private effectiveCompetitionNumericIds: number[] = [];
   private effectiveTeamNumericIds: number[] = [];
   private lastUpdatedAt: Date = new Date();
@@ -47,12 +51,22 @@ export class DaemonPreferencesService {
 
   public bindScheduler(scheduler: AcquisitionScheduler): void {
     this.scheduler = scheduler;
+    if (scheduler && typeof (scheduler as any).bindPreferencesService === 'function') {
+      (scheduler as any).bindPreferencesService(this);
+    }
     if (
       this.effectiveCompetitionNumericIds.length > 0 &&
       scheduler &&
       typeof (scheduler as any).setTargetCompetitionIds === 'function'
     ) {
       scheduler.setTargetCompetitionIds(this.effectiveCompetitionNumericIds);
+    }
+    if (
+      this.pinnedMatchIds.size > 0 &&
+      scheduler &&
+      typeof (scheduler as any).setPinnedMatchIds === 'function'
+    ) {
+      (scheduler as any).setPinnedMatchIds(Array.from(this.pinnedMatchIds));
     }
   }
 
@@ -62,6 +76,7 @@ export class DaemonPreferencesService {
       followedTeams: Array.from(this.followedTeams),
       effectiveCompetitionNumericIds: this.effectiveCompetitionNumericIds,
       effectiveTeamNumericIds: this.effectiveTeamNumericIds,
+      pinnedMatchIds: Array.from(this.pinnedMatchIds),
       lastUpdatedAt: this.lastUpdatedAt.toISOString(),
     };
   }
@@ -170,6 +185,14 @@ export class DaemonPreferencesService {
       teamInputs.push(...payload.followedTeams.map((t) => t.id));
     }
 
+    const pinnedInputs: string[] = [];
+    if (payload.pinnedMatchIds) {
+      pinnedInputs.push(...payload.pinnedMatchIds.map(String));
+    }
+    if (payload.pinnedMatchId) {
+      pinnedInputs.push(String(payload.pinnedMatchId));
+    }
+
     // Resolve numeric provider IDs
     const resolvedCompIds = await this.resolveCompetitionNumericIds(compInputs);
     const resolvedTeamIds = await this.resolveTeamNumericIds(teamInputs);
@@ -177,15 +200,21 @@ export class DaemonPreferencesService {
     // Update state
     this.followedCompetitions = new Set(compInputs);
     this.followedTeams = new Set(teamInputs);
+    this.pinnedMatchIds = new Set(pinnedInputs);
     this.effectiveCompetitionNumericIds = resolvedCompIds;
     this.effectiveTeamNumericIds = resolvedTeamIds;
     this.lastUpdatedAt = new Date();
 
     // Propagate to background scheduler
-    if (this.scheduler && typeof (this.scheduler as any).setTargetCompetitionIds === 'function') {
-      this.scheduler.setTargetCompetitionIds(
-        resolvedCompIds.length > 0 ? resolvedCompIds : undefined
-      );
+    if (this.scheduler) {
+      if (typeof (this.scheduler as any).setTargetCompetitionIds === 'function') {
+        this.scheduler.setTargetCompetitionIds(
+          resolvedCompIds.length > 0 ? resolvedCompIds : undefined
+        );
+      }
+      if (typeof (this.scheduler as any).setPinnedMatchIds === 'function') {
+        (this.scheduler as any).setPinnedMatchIds(Array.from(this.pinnedMatchIds));
+      }
     }
 
     return this.getPreferences();

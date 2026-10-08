@@ -37,7 +37,12 @@ export class AcquisitionService {
 
     const promise = (async () => {
       try {
-        const rawFixtures: ProviderFixture[] = await this.provider.getFixtures(filter);
+        let rawFixtures: ProviderFixture[];
+        if (filter?.fromDate && filter?.toDate && typeof (this.provider as any).getFixturesByDateRange === 'function') {
+          rawFixtures = await (this.provider as any).getFixturesByDateRange(filter.fromDate, filter.toDate, filter.cycleId);
+        } else {
+          rawFixtures = await this.provider.getFixtures(filter);
+        }
 
         const compMap = new Map<string, CanonicalCompetition>();
         const seasonMap = new Map<string, CanonicalSeason>();
@@ -99,6 +104,13 @@ export class AcquisitionService {
    */
   async acquireScheduled(date: string, competitionIds?: number[], cycleId?: string): Promise<NormalizedAcquisitionBatch> {
     return this.acquireAll({ date, competitionIds, cycleId });
+  }
+
+  /**
+   * Acquires full match schedule for a date range across target competitions.
+   */
+  async acquireScheduledRange(fromDate: string, toDate: string, competitionIds?: number[], cycleId?: string): Promise<NormalizedAcquisitionBatch> {
+    return this.acquireAll({ fromDate, toDate, competitionIds, cycleId });
   }
 
   /**

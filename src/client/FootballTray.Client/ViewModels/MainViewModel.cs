@@ -92,6 +92,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<MatchItemViewModel> FollowedMatches { get; } = new();
     public ObservableCollection<MatchItemViewModel> OtherMatches { get; } = new();
     public ObservableCollection<CalendarDayItemViewModel> CalendarDays { get; } = new();
+    public ObservableCollection<CompetitionGroupViewModel> CompetitionGroups { get; } = new();
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
@@ -378,8 +379,34 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ActiveTickerText
     {
         get => _activeTickerText;
-        private set => SetProperty(ref _activeTickerText, value);
+        private set
+        {
+            if (SetProperty(ref _activeTickerText, value))
+            {
+                OnPropertyChanged(nameof(TickerMatchDisplay));
+                OnPropertyChanged(nameof(HasActiveTicker));
+            }
+        }
     }
+
+    public string TickerMatchDisplay
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_activeTickerText) ||
+                _activeTickerText.Equals("No active match", StringComparison.OrdinalIgnoreCase) ||
+                _activeTickerText.Equals("📌 No pinned matches", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return _activeTickerText.StartsWith("📌") || _activeTickerText.StartsWith("⚽")
+                ? _activeTickerText
+                : $"📌 {_activeTickerText}";
+        }
+    }
+
+    public bool HasActiveTicker => !string.IsNullOrWhiteSpace(TickerMatchDisplay);
 
     public string? ActiveMatchId
     {
@@ -389,6 +416,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string? ManualPinnedMatchId { get; private set; }
     public bool IsExplicitlyUnpinned { get; private set; }
+    public string? GoalJumpMatchId { get; private set; }
+    private readonly Dictionary<string, (int Home, int Away)> _previousScores = new(StringComparer.OrdinalIgnoreCase);
 
     public bool IsGlobalNotificationsEnabled
     {
@@ -1102,7 +1131,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var existingMap = CalendarDays.ToDictionary(d => d.Date.Date);
 
-        var days = new List<CalendarDayItemViewModel>();
+        var targetDates = new List<(DateTime Date, bool IsToday, bool IsSelected, int MatchCount)>();
         for (int offset = -1; offset <= 5; offset++)
         {
             var targetDate = today.AddDays(offset).Date;
@@ -1119,24 +1148,61 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return false;
             });
 
-            if (existingMap.TryGetValue(targetDate, out var existing))
+            if (matchCount == 0 && targetDate != _selectedCalendarDate.Date && existingMap.TryGetValue(targetDate, out var prevDay) && prevDay.MatchCount > 0)
             {
-                existing.IsSelected = isSelected;
-                existing.MatchCount = matchCount;
-                days.Add(existing);
+                matchCount = prevDay.MatchCount;
             }
-            else
-            {
-                days.Add(new CalendarDayItemViewModel(targetDate, isToday, isSelected, matchCount));
-            }
+
+            targetDates.Add((targetDate, isToday, isSelected, matchCount));
         }
 
-        if (CalendarDays.Count != days.Count || !CalendarDays.SequenceEqual(days))
+        // Fast path: if CalendarDays already matches target 7 days, update in place without .Clear()
+        if (CalendarDays.Count == targetDates.Count && CalendarDays.Select(d => d.Date.Date).SequenceEqual(targetDates.Select(t => t.Date)))
         {
-            CalendarDays.Clear();
-            foreach (var d in days)
+            for (int i = 0; i < CalendarDays.Count; i++)
             {
-                CalendarDays.Add(d);
+                var dayVm = CalendarDays[i];
+                var target = targetDates[i];
+                dayVm.IsSelected = target.IsSelected;
+                dayVm.MatchCount = target.MatchCount;
+            }
+            return;
+        }
+
+        // Slow path: cold boot or date boundary shifted past midnight
+        if (CalendarDays.Count == 0)
+        {
+            foreach (var t in targetDates)
+            {
+                CalendarDays.Add(new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.MatchCount));
+            }
+        }
+        else
+        {
+            for (int i = 0; i < targetDates.Count; i++)
+            {
+                var t = targetDates[i];
+                if (i < CalendarDays.Count)
+                {
+                    if (CalendarDays[i].Date.Date == t.Date)
+                    {
+                        CalendarDays[i].IsSelected = t.IsSelected;
+                        CalendarDays[i].MatchCount = t.MatchCount;
+                    }
+                    else
+                    {
+                        CalendarDays[i] = new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.MatchCount);
+                    }
+                }
+                else
+                {
+                    CalendarDays.Add(new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.MatchCount));
+                }
+            }
+
+            while (CalendarDays.Count > targetDates.Count)
+            {
+                CalendarDays.RemoveAt(CalendarDays.Count - 1);
             }
         }
     }
@@ -1205,6 +1271,34 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Rebuild/update calendar days match counts
         RebuildCalendarDays();
 
+        // Check for score change across followed live matches
+        string? goalJumpId = null;
+        if (allMatches.Count > 0 && prefs != null)
+        {
+            var teamIds = prefs.GetFollowedTeamIdSet();
+            var compIds = prefs.GetFollowedCompetitionIdSet();
+            foreach (var m in allMatches)
+            {
+                if (m == null || string.IsNullOrWhiteSpace(m.Id)) continue;
+                int h = m.Score?.Home ?? 0;
+                int a = m.Score?.Away ?? 0;
+                if (_previousScores.TryGetValue(m.Id, out var prevScore))
+                {
+                    bool isLive = FixtureRelevanceEngine.IsLive(m);
+                    bool isFollowed = FixtureRelevanceEngine.EvaluateRelevance(m, teamIds, compIds).IsRelevant;
+                    if (isLive && isFollowed && (h != prevScore.Home || a != prevScore.Away))
+                    {
+                        goalJumpId ??= m.Id;
+                    }
+                }
+                _previousScores[m.Id] = (h, a);
+            }
+        }
+        if (!string.IsNullOrEmpty(goalJumpId))
+        {
+            GoalJumpMatchId = goalJumpId;
+        }
+
         // Prioritize and determine active taskbar match: respect explicit user pin or explicit unpin
         if (!string.IsNullOrEmpty(ManualPinnedMatchId))
         {
@@ -1222,6 +1316,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 ActiveTickerText = "📌 Pinned match";
             }
+        }
+        else if (!string.IsNullOrEmpty(GoalJumpMatchId) && allMatches.Any(m => string.Equals(m.Id, GoalJumpMatchId, StringComparison.Ordinal)))
+        {
+            ActiveMatchId = GoalJumpMatchId;
+            var goalMatch = allMatches.First(m => string.Equals(m.Id, GoalJumpMatchId, StringComparison.Ordinal));
+            string home = goalMatch.HomeTeam?.ShortName ?? goalMatch.HomeTeam?.Name ?? "Home";
+            string away = goalMatch.AwayTeam?.ShortName ?? goalMatch.AwayTeam?.Name ?? "Away";
+            string score = $"{goalMatch.Score?.Home ?? 0}–{goalMatch.Score?.Away ?? 0}";
+            string time = goalMatch.State == "HT" ? "HT" : (goalMatch.ElapsedMinute > 0 ? $"{goalMatch.ElapsedMinute}'" : goalMatch.State);
+            ActiveTickerText = $"⚽ GOAL: {home} {score} {away} ({time})";
         }
         else if (IsExplicitlyUnpinned)
         {
@@ -1367,6 +1471,109 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         foreach (var item in completeFilteredList)
         {
             FilteredMatches.Add(item);
+        }
+
+        // Smart Merge expandable competition accordion groups (Anti-Blink UX)
+        var groupedData = completeFilteredList
+            .GroupBy(m => !string.IsNullOrWhiteSpace(m.CompetitionId) ? m.CompetitionId : m.CompetitionName)
+            .Select(g =>
+            {
+                var first = g.First();
+                string compId = first.CompetitionId;
+                string compName = first.CompetitionName;
+                string? country = !string.IsNullOrWhiteSpace(first.CompetitionCountry)
+                    ? first.CompetitionCountry
+                    : first.CompetitionCode;
+                string? logoUrl = first.CompetitionLogoUrl;
+                if (string.IsNullOrWhiteSpace(logoUrl) && !string.IsNullOrWhiteSpace(first.CompetitionCode))
+                {
+                    logoUrl = $"https://media.api-sports.io/flags/{first.CompetitionCode.ToLowerInvariant()}.svg";
+                }
+                bool hasFollowedTeams = g.Any(m => m.FollowedByTeam);
+                bool isFollowedCompetition = g.Any(m => m.FollowedByCompetition);
+                string key = !string.IsNullOrWhiteSpace(compId) ? compId : compName;
+                var matchesList = g.ToList();
+
+                return new
+                {
+                    Key = key,
+                    CompId = compId,
+                    CompName = compName,
+                    Country = country,
+                    LogoUrl = logoUrl,
+                    HasFollowedTeams = hasFollowedTeams,
+                    IsFollowedCompetition = isFollowedCompetition,
+                    IsFollowed = hasFollowedTeams || isFollowedCompetition,
+                    Matches = matchesList
+                };
+            })
+            .OrderByDescending(g => g.IsFollowed)
+            .ThenBy(g => GetCompetitionPopularityRank(g.CompId, g.CompName))
+            .ThenBy(g => g.CompName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var incomingKeys = new HashSet<string>(groupedData.Select(g => g.Key), StringComparer.OrdinalIgnoreCase);
+
+        // 1. Remove groups that are no longer present in incoming data
+        for (int i = CompetitionGroups.Count - 1; i >= 0; i--)
+        {
+            if (!incomingKeys.Contains(CompetitionGroups[i].CompetitionKey))
+            {
+                CompetitionGroups.RemoveAt(i);
+            }
+        }
+
+        // 2. Insert new groups or update existing groups in-place using Smart Merge
+        for (int i = 0; i < groupedData.Count; i++)
+        {
+            var data = groupedData[i];
+            int existingIndex = -1;
+            for (int j = 0; j < CompetitionGroups.Count; j++)
+            {
+                if (string.Equals(CompetitionGroups[j].CompetitionKey, data.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex < 0)
+            {
+                // New group: construct and set initial expansion
+                var newGroup = new CompetitionGroupViewModel(
+                    data.CompId,
+                    data.CompName,
+                    data.Country,
+                    data.LogoUrl,
+                    data.HasFollowedTeams,
+                    data.IsFollowedCompetition);
+
+                foreach (var match in data.Matches)
+                {
+                    newGroup.AddMatch(match);
+                }
+
+                if (i <= CompetitionGroups.Count)
+                {
+                    CompetitionGroups.Insert(i, newGroup);
+                }
+                else
+                {
+                    CompetitionGroups.Add(newGroup);
+                }
+            }
+            else
+            {
+                // Existing group: update metadata and sync matches in-place without touching IsExpanded!
+                var existingGroup = CompetitionGroups[existingIndex];
+                existingGroup.UpdateMetadata(data.Country, data.LogoUrl, data.HasFollowedTeams, data.IsFollowedCompetition);
+                existingGroup.SyncMatches(data.Matches);
+
+                if (existingIndex != i && i < CompetitionGroups.Count)
+                {
+                    CompetitionGroups.Move(existingIndex, i);
+                }
+            }
         }
 
         HasFollowedMatches = FollowedMatches.Count > 0;
@@ -2024,5 +2231,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return true;
         }
         return false;
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }

@@ -120,6 +120,41 @@
                             Header="Global Desktop Toast Notifications"
                             Toggled="OnGlobalNotificationsToggled" />
 
+                        <!-- Granular Alert Categories -->
+                        <TextBlock Text="Alert Categories" FontWeight="Medium" FontSize="13" Margin="0,4,0,0" />
+                        <StackPanel x:Name="NotificationCategoriesPanel" Spacing="6" Margin="4,0,0,0">
+                            <ToggleSwitch
+                                x:Name="GoalNotificationsToggle"
+                                Header="Goal Alerts (Scores &amp; Scorers)"
+                                Toggled="OnGoalNotificationsToggled" />
+                            <ToggleSwitch
+                                x:Name="CardNotificationsToggle"
+                                Header="Red Cards &amp; Ejections"
+                                Toggled="OnCardNotificationsToggled" />
+                            <ToggleSwitch
+                                x:Name="MatchStartNotificationsToggle"
+                                Header="Match Kickoff / Start"
+                                Toggled="OnMatchStartNotificationsToggled" />
+                            <ToggleSwitch
+                                x:Name="HalfTimeNotificationsToggle"
+                                Header="Half-Time (HT)"
+                                Toggled="OnHalfTimeNotificationsToggled" />
+                            <ToggleSwitch
+                                x:Name="FullTimeNotificationsToggle"
+                                Header="Full-Time (FT)"
+                                Toggled="OnFullTimeNotificationsToggled" />
+                            <ToggleSwitch
+                                x:Name="PostponedNotificationsToggle"
+                                Header="Match Postponed / Rescheduled"
+                                Toggled="OnPostponedNotificationsToggled" />
+                            <ToggleSwitch
+                                x:Name="CancelledNotificationsToggle"
+                                Header="Match Cancelled"
+                                Toggled="OnCancelledNotificationsToggled" />
+                        </StackPanel>
+
+                        <MenuFlyoutSeparator Margin="0,4,0,4" />
+
                         <!-- Sound Mode Selector -->
                         <StackPanel Spacing="6">
                             <TextBlock Text="Notification Sound Alert" FontWeight="Medium" FontSize="13" />
@@ -356,7 +391,8 @@
                             <ListView
                                 x:Name="FollowedTeamsListView"
                                 SelectionMode="None"
-                                MaxHeight="180">
+                                ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                ScrollViewer.VerticalScrollMode="Disabled">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="prefs:FollowedTeam">
                                         <Grid Padding="4,4,4,4" ColumnSpacing="12">
@@ -389,7 +425,8 @@
                             <ListView
                                 x:Name="FollowedCompetitionsListView"
                                 SelectionMode="None"
-                                MaxHeight="180">
+                                ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                ScrollViewer.VerticalScrollMode="Disabled">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="prefs:FollowedCompetition">
                                         <Grid Padding="4,4,4,4" ColumnSpacing="12">

@@ -173,6 +173,9 @@ public class CompetitionSummaryDto
     [JsonPropertyName("code")]
     public string? Code { get; set; }
 
+    [JsonPropertyName("country")]
+    public string? Country { get; set; }
+
     [JsonPropertyName("logoUrl")]
     public string? LogoUrl { get; set; }
 }

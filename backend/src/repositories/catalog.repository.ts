@@ -6,10 +6,6 @@ import {
   formatV2CatalogTeam,
   formatV2CatalogCompetition,
 } from '../api/v2-dto.js';
-import {
-  PRIORITY_COMPETITIONS,
-  CANONICAL_COMPETITION_MAP,
-} from '../acquisition/priority-competitions.js';
 
 /**
  * Escapes SQL LIKE / ILIKE wildcard characters (%, _) and backslash (\)
@@ -17,6 +13,30 @@ import {
  */
 export function escapeLikeWildcards(input: string): string {
   return input.replace(/([\\%_])/g, '\\$1');
+}
+
+/**
+ * Checks whether an entity is a dev mock artifact.
+ */
+export function isDevMockEntity(record: { id?: string | null; name?: string | null; code?: string | null }): boolean {
+  if (!record) return false;
+  const name = (record.name || '').toLowerCase();
+  const id = (record.id || '').toLowerCase();
+  const code = (record.code || '').toLowerCase();
+  return (
+    name.includes('(dev mock)') ||
+    name.includes('mock') ||
+    id.includes('mock') ||
+    code.includes('mock') ||
+    id === 'comp_laliga' ||
+    id === 'comp_egypt_pl' ||
+    id === 'comp_international' ||
+    id === 'team_barcelona' ||
+    id === 'team_realmadrid' ||
+    id === 'team_alahly' ||
+    id === 'team_egypt' ||
+    id === 'team_spain'
+  );
 }
 
 export class CatalogRepository {
@@ -60,7 +80,7 @@ export class CatalogRepository {
     const deduplicatedMap = new Map<string, typeof rows[0]>();
 
     for (const row of rows) {
-      if (row.name && row.name.toLowerCase().includes('(dev mock)')) {
+      if (isDevMockEntity(row)) {
         continue;
       }
       const normKey = row.name.trim().toLowerCase();
@@ -100,9 +120,9 @@ export class CatalogRepository {
   }
 
   /**
-   * Performs case-insensitive partial search for competitions across name and code.
-   * Merges database competitions with curated priority global competitions to guarantee
-   * full coverage for world leagues (e.g. Premier League, Champions League, La Liga, Serie A).
+   * Performs case-insensitive partial search for competitions across name, code, and country.
+   * Strictly searches SQLite database records populated by actual API-Football payloads.
+   * Zero hardcoded fallback arrays or synthetic entities.
    */
   async searchCompetitions(query: string, limit: number = 20): Promise<V2CatalogCompetition[]> {
     const trimmed = query.trim();
@@ -131,61 +151,22 @@ export class CatalogRepository {
           like(schema.competitions.country, searchPattern)
         )
       )
-      .limit(clampedLimit);
+      .limit(clampedLimit * 2);
 
-    const resultsMap = new Map<string, V2CatalogCompetition>();
+    const deduplicatedMap = new Map<string, typeof rows[0]>();
 
-    // 1. Add database matches
     for (const row of rows) {
-      if (row.name && row.name.toLowerCase().includes('(dev mock)')) {
+      if (isDevMockEntity(row)) {
         continue;
       }
-      const formatted = formatV2CatalogCompetition(row);
-      const normKey = formatted.name.trim().toLowerCase();
-      resultsMap.set(normKey, formatted);
-    }
-
-    // 2. Add matching priority competitions
-    const lowerQuery = trimmed.toLowerCase();
-    const matchingPriority = PRIORITY_COMPETITIONS.filter((prio) => {
-      const name = prio.name.toLowerCase();
-      const code = (prio.code || '').toLowerCase();
-      const country = (prio.country || '').toLowerCase();
-      return name.includes(lowerQuery) || code.includes(lowerQuery) || country.includes(lowerQuery);
-    });
-
-    for (const prio of matchingPriority) {
-      const normKey = prio.name.trim().toLowerCase();
-      const existing = resultsMap.get(normKey);
-
-      const canonicalId = CANONICAL_COMPETITION_MAP[prio.id] || `ft_comp_${prio.id}`;
-      const legacyId = `comp_${prio.id}`;
-      const logoUrl = `https://media.api-sports.io/football/leagues/${prio.id}.png`;
-
-      if (!existing) {
-        resultsMap.set(normKey, {
-          id: canonicalId,
-          legacyId,
-          name: prio.name,
-          code: prio.code || null,
-          country: prio.country || null,
-          logo: logoUrl,
-          logoUrl,
-        });
-      } else {
-        // Enhance existing if missing canonical or logo/code metadata
-        if (CANONICAL_COMPETITION_MAP[prio.id] && (!existing.id || existing.id.startsWith('comp_'))) {
-          existing.id = CANONICAL_COMPETITION_MAP[prio.id];
-        }
-        if (!existing.legacyId) existing.legacyId = legacyId;
-        if (!existing.code && prio.code) existing.code = prio.code;
-        if (!existing.country && prio.country) existing.country = prio.country;
-        if (!existing.logoUrl) existing.logoUrl = logoUrl;
-        if (!existing.logo) existing.logo = logoUrl;
+      const normKey = row.name.trim().toLowerCase();
+      if (!deduplicatedMap.has(normKey)) {
+        deduplicatedMap.set(normKey, row);
       }
     }
 
-    return Array.from(resultsMap.values()).slice(0, clampedLimit);
+    const deduplicatedRows = Array.from(deduplicatedMap.values()).slice(0, clampedLimit);
+    return deduplicatedRows.map(formatV2CatalogCompetition);
   }
 }
 

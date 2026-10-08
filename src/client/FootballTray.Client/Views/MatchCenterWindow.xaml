@@ -272,10 +272,11 @@
 
                     <TextBlock
                         Grid.Row="0"
+                        Margin="2,0,0,4"
                         Text="⏱️ Match Events"
                         FontSize="14"
                         FontWeight="SemiBold"
-                        Margin="2,0,0,4" />
+                        VerticalAlignment="Center" />
 
                     <ListView
                         Grid.Row="1"

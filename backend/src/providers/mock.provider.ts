@@ -438,6 +438,10 @@ export class MockFootballProvider implements FootballProvider {
     return list;
   }
 
+  async getFixturesByDateRange(fromDate: string, toDate: string, cycleId?: string): Promise<ProviderFixture[]> {
+    return Array.from(this.fixtures.values());
+  }
+
   async getFixtureDetails(fixtureId: string): Promise<ProviderFixtureDetail | null> {
     return this.fixtures.get(fixtureId) ?? null;
   }

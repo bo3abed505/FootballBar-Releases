@@ -32,7 +32,7 @@ public sealed class NotificationEngine
 
     private static readonly HashSet<string> PostponedStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "POSTPONED", "SUSP", "INT"
+        "POSTPONED", "SUSP", "INT", "PST"
     };
 
     private static readonly HashSet<string> CancelledStates = new(StringComparer.OrdinalIgnoreCase)
@@ -88,6 +88,9 @@ public sealed class NotificationEngine
 
             // B. Event-Based Goal Evaluation
             EvaluateGoalEvents(prev, curr, candidates);
+
+            // C. Event-Based Red Card Evaluation
+            EvaluateCardEvents(prev, curr, candidates);
         }
 
         // Defensive threshold cap specifically for pathological/corrupt payload storms
@@ -141,6 +144,10 @@ public sealed class NotificationEngine
                 if (IsGoalEvent(ev) && !string.IsNullOrWhiteSpace(ev.Id))
                 {
                     _deduplicationStore.MarkNotified($"match:{match.Id}:event:{ev.Id}");
+                }
+                if (IsRedCardEvent(ev) && !string.IsNullOrWhiteSpace(ev.Id))
+                {
+                    _deduplicationStore.MarkNotified($"match:{match.Id}:card:{ev.Id}");
                 }
             }
         }
@@ -225,9 +232,40 @@ public sealed class NotificationEngine
         }
     }
 
+    /// <summary>
+    /// Evaluates match updates for an individual match between previous and current snapshots.
+    /// Strictly suppresses event-based notifications (goals, cards, penalties) if curr is over and prev was null.
+    /// </summary>
+    public List<NotificationCandidate> EvaluateMatch(TrayMatchDto? prev, TrayMatchDto curr)
+    {
+        var candidates = new List<NotificationCandidate>();
+        if (curr == null) return candidates;
+
+        string currState = (curr.State ?? string.Empty).ToUpperInvariant();
+        if (prev == null && (FinishedStates.Contains(currState) || CancelledStates.Contains(currState) || PostponedStates.Contains(currState)))
+        {
+            IngestMatchBaseline(curr);
+            return candidates;
+        }
+
+        EvaluateStateTransitions(prev, curr, candidates);
+        EvaluateGoalEvents(prev, curr, candidates);
+        EvaluateCardEvents(prev, curr, candidates);
+
+        return candidates;
+    }
+
     private void EvaluateGoalEvents(TrayMatchDto? prev, TrayMatchDto curr, List<NotificationCandidate> candidates)
     {
         if (curr.RecentEvents == null || curr.RecentEvents.Count == 0)
+        {
+            return;
+        }
+
+        // Strictly suppress event-based notifications (goals, cards, penalties) if the incoming curr state
+        // indicates the match is over (FT, FINISHED, etc.) AND prev was null (initial hydration).
+        string currState = (curr.State ?? string.Empty).ToUpperInvariant();
+        if (prev == null && (FinishedStates.Contains(currState) || CancelledStates.Contains(currState) || PostponedStates.Contains(currState)))
         {
             return;
         }
@@ -279,6 +317,78 @@ public sealed class NotificationEngine
                 EventDescription = ev.Description
             });
         }
+    }
+
+    private void EvaluateCardEvents(TrayMatchDto? prev, TrayMatchDto curr, List<NotificationCandidate> candidates)
+    {
+        if (curr.RecentEvents == null || curr.RecentEvents.Count == 0)
+        {
+            return;
+        }
+
+        // Strictly suppress event-based notifications (goals, cards, penalties) if the incoming curr state
+        // indicates the match is over (FT, FINISHED, etc.) AND prev was null (initial hydration).
+        string currState = (curr.State ?? string.Empty).ToUpperInvariant();
+        if (prev == null && (FinishedStates.Contains(currState) || CancelledStates.Contains(currState) || PostponedStates.Contains(currState)))
+        {
+            return;
+        }
+
+        var prevEventIds = prev?.RecentEvents != null
+            ? new HashSet<string>(prev.RecentEvents.Select(e => e.Id), StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var ev in curr.RecentEvents)
+        {
+            if (!IsRedCardEvent(ev))
+            {
+                continue;
+            }
+
+            if (prevEventIds.Contains(ev.Id))
+            {
+                continue;
+            }
+
+            string key = $"match:{curr.Id}:card:{ev.Id}";
+            if (_deduplicationStore.IsAlreadyNotified(key))
+            {
+                continue;
+            }
+
+            candidates.Add(new NotificationCandidate
+            {
+                FixtureId = curr.Id,
+                Type = NotificationType.RedCard,
+                DeduplicationKey = key,
+                EventUid = ev.Id,
+                PreviousState = prev?.State,
+                NewState = curr.State ?? "LIVE",
+                HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
+                AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
+                CompetitionId = curr.Competition?.Id,
+                CompetitionLegacyId = curr.Competition?.LegacyId,
+                HomeTeamId = curr.HomeTeam?.Id,
+                HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
+                AwayTeamId = curr.AwayTeam?.Id,
+                AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
+                HomeScore = curr.Score?.Home ?? 0,
+                AwayScore = curr.Score?.Away ?? 0,
+                ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
+                ExtraMinute = ev.ExtraMinute > 0 ? ev.ExtraMinute : curr.ExtraMinute,
+                EventPlayerName = ev.PlayerName,
+                EventDescription = ev.Description ?? "Red Card"
+            });
+        }
+    }
+
+    private static bool IsRedCardEvent(TrayEventDto ev)
+    {
+        if (string.IsNullOrWhiteSpace(ev.Type)) return false;
+        var t = ev.Type.Trim().ToLowerInvariant();
+        var d = (ev.Detail ?? string.Empty).ToLowerInvariant();
+        return t.Contains("redcard") || t.Contains("red_card") || t.Contains("secondyellow") ||
+               (t.Contains("card") && (d.Contains("red") || d.Contains("second yellow")));
     }
 
     private static bool IsGoalEvent(TrayEventDto ev)

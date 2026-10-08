@@ -26,7 +26,7 @@
                 Text="{Binding HomeTeamName}"
                 FontSize="12"
                 FontWeight="Bold"
-                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                Foreground="{Binding HomeTeamStatsForeground, FallbackValue={ThemeResource TextFillColorPrimaryBrush}}"
                 HorizontalAlignment="Left" />
 
             <TextBlock
@@ -41,7 +41,7 @@
                 Text="{Binding AwayTeamName}"
                 FontSize="12"
                 FontWeight="Bold"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Foreground="{Binding AwayTeamStatsForeground, FallbackValue={ThemeResource TextFillColorPrimaryBrush}}"
                 HorizontalAlignment="Right" />
         </Grid>
 

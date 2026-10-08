@@ -611,7 +611,7 @@ public partial class WindowsNotificationEngineTests
     [TestMethod]
     public void Test26_WindowsAppNotificationRenderer_ConstructsPayloadSafely()
     {
-        var renderer = new WindowsAppNotificationRenderer();
+        var renderer = new WindowsAppNotificationRenderer(() => null!);
         var payload = new NotificationPayload
         {
             Title = "Arsenal FC 1–0 Chelsea FC",
@@ -622,8 +622,9 @@ public partial class WindowsNotificationEngineTests
             FixtureId = "fix_001"
         };
 
-        // In test runner without registered AUMID, RenderNotification catches and safely returns false without throwing
+        // In test runner with isolated null managerProvider, RenderNotification catches and safely returns false without invoking real Windows toast
         bool rendered = renderer.RenderNotification(payload);
+        Assert.IsFalse(rendered);
         Assert.IsNotNull(payload.Title);
         Assert.IsNotNull(payload.Body);
     }
@@ -775,54 +776,69 @@ public sealed class TestAppNotificationManagerBridge : IAppNotificationManagerBr
 public partial class WindowsNotificationEngineTests
 {
     [TestMethod]
+    public void Test_EvaluateMatch_WhenPrevIsNullAndMatchIsFinished_SuppressesGhostNotifications()
+    {
+        var finishedMatch = new TrayMatchDto
+        {
+            Id = "fix_moawad_finished",
+            State = "FT",
+            Score = new ScoreDto { Home = 2, Away = 1 },
+            RecentEvents = new List<TrayEventDto>
+            {
+                new() { Id = "evt_goal_1", Type = "Goal", Minute = 86, PlayerName = "O. Moawad" }
+            }
+        };
+
+        var candidates = _engine.EvaluateMatch(null, finishedMatch);
+        Assert.AreEqual(0, candidates.Count, "Should completely suppress ghost notifications when prev is null and match state is FT/FINISHED");
+    }
+
+    [TestMethod]
+    public void Test_EvaluateMatch_WhenPrevIsNullAndMatchIsPostponedPST_SuppressesGhostNotifications()
+    {
+        var pstMatch = new TrayMatchDto
+        {
+            Id = "fix_pst_match",
+            State = "PST",
+            Score = new ScoreDto { Home = 0, Away = 0 },
+            RecentEvents = new List<TrayEventDto>
+            {
+                new() { Id = "evt_card_1", Type = "Card", Detail = "Red Card", Minute = 12, PlayerName = "J. Smith" }
+            }
+        };
+
+        var candidates = _engine.EvaluateMatch(null, pstMatch);
+        Assert.AreEqual(0, candidates.Count, "Should completely suppress ghost notifications when prev is null and match state is PST");
+    }
+    [TestMethod]
     public void Test34_RealWindowsAppNotificationSmoke_AttemptShow()
     {
-        try
+        // Strictly isolated mock bridge and renderer to prevent real Windows toast notifications from firing during dotnet test
+        var bridge = new TestAppNotificationManagerBridge();
+        Assert.IsTrue(bridge.IsSupported);
+
+        var regManager = new AppNotificationRegistrationManager(bridge);
+        bool regSuccess = regManager.Initialize(activation =>
         {
-            // Attempt Windows App SDK Bootstrapper initialization if unpackaged
-            try
-            {
-                var initSuccess = Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap.TryInitialize(0x00020004, out int hr);
-                Console.WriteLine($"[SMOKE] Bootstrap.TryInitialize = {initSuccess}, HResult = 0x{hr:X8}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SMOKE] Bootstrap exception: {ex.Message}");
-            }
+            Console.WriteLine($"[TEST34] Notification invoked callback received: {activation.Action}");
+        });
+        Assert.IsTrue(regSuccess);
 
-            var bridge = new WindowsAppNotificationManagerBridge();
-            bool isSupported = bridge.IsSupported;
-            Console.WriteLine($"[SMOKE] AppNotificationManager.IsSupported = {isSupported}");
-
-            var regManager = new AppNotificationRegistrationManager(bridge);
-            bool regSuccess = regManager.Initialize(activation =>
-            {
-                Console.WriteLine($"[SMOKE] Notification invoked callback received: {activation.Action}");
-            });
-
-            Console.WriteLine($"[SMOKE] AppNotificationRegistrationManager.Initialize = {regSuccess}");
-
-            var renderer = new WindowsAppNotificationRenderer();
-            var payload = new NotificationPayload
-            {
-                Title = "Arsenal FC 1–0 Chelsea FC",
-                Body = "15' B. Saka",
-                ActivationArguments = "action=viewMatch&fixtureId=fix_smoke_001&eventUid=evt_smoke_1",
-                DeduplicationKey = "match:fix_smoke_001:event:evt_smoke_1",
-                Type = NotificationType.Goal,
-                FixtureId = "fix_smoke_001"
-            };
-
-            bool showResult = renderer.RenderNotification(payload);
-            Console.WriteLine($"[SMOKE] RenderNotification Show() returned = {showResult}");
-
-            regManager.Unregister();
-            Console.WriteLine($"[SMOKE] Unregister completed.");
-        }
-        catch (Exception ex)
+        var renderer = new WindowsAppNotificationRenderer(() => null!);
+        var payload = new NotificationPayload
         {
-            Console.WriteLine($"[SMOKE EXCEPTION] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-        }
+            Title = "Arsenal FC 1–0 Chelsea FC",
+            Body = "15' B. Saka",
+            ActivationArguments = "action=viewMatch&fixtureId=fix_smoke_001&eventUid=evt_smoke_1",
+            DeduplicationKey = "match:fix_smoke_001:event:evt_smoke_1",
+            Type = NotificationType.Goal,
+            FixtureId = "fix_smoke_001"
+        };
+
+        bool showResult = renderer.RenderNotification(payload);
+        Assert.IsFalse(showResult);
+
+        regManager.Unregister();
     }
 }
 

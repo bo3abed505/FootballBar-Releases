@@ -21,6 +21,8 @@ export interface V2TrayMatch {
     legacyId?: string;
     name?: string;
     code?: string;
+    country?: string;
+    logoUrl?: string;
   };
   homeTeam: {
     id: string; // canonical_id e.g. 'ft_team_...'
@@ -217,6 +219,8 @@ export function formatV2TrayMatch(m: any, now: Date = new Date()): V2TrayMatch {
       legacyId: m.competition?.id,
       name: m.competition?.name,
       code: m.competition?.code,
+      country: m.competition?.country,
+      logoUrl: m.competition?.logoUrl,
     },
     homeTeam: {
       id: m.homeTeam?.canonicalId || m.homeTeam?.id,

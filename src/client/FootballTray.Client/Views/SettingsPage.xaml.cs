@@ -79,6 +79,13 @@ public sealed partial class SettingsPage : Page
             SelectLeadTime(ViewModel.KickoffReminderOffsetMinutes);
 
             GlobalNotificationsToggle.IsOn = ViewModel.GlobalNotificationsEnabled;
+            GoalNotificationsToggle.IsOn = ViewModel.IsGoalsAlertEnabled;
+            CardNotificationsToggle.IsOn = ViewModel.IsCardsAlertEnabled;
+            MatchStartNotificationsToggle.IsOn = ViewModel.IsMatchStartAlertEnabled;
+            HalfTimeNotificationsToggle.IsOn = ViewModel.IsHalfTimeAlertEnabled;
+            FullTimeNotificationsToggle.IsOn = ViewModel.IsFullTimeAlertEnabled;
+            PostponedNotificationsToggle.IsOn = ViewModel.IsPostponedAlertEnabled;
+            CancelledNotificationsToggle.IsOn = ViewModel.IsCancelledAlertEnabled;
             SelectSoundMode(ViewModel.SoundMode);
 
             // 3. System
@@ -255,6 +262,48 @@ public sealed partial class SettingsPage : Page
     {
         if (_isInitializing || ViewModel == null) return;
         await ViewModel.SetGlobalNotificationsEnabledAsync(GlobalNotificationsToggle.IsOn);
+    }
+
+    private async void OnGoalNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.Goal, GoalNotificationsToggle.IsOn);
+    }
+
+    private async void OnCardNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.RedCard, CardNotificationsToggle.IsOn);
+    }
+
+    private async void OnMatchStartNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.MatchStarted, MatchStartNotificationsToggle.IsOn);
+    }
+
+    private async void OnHalfTimeNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.HalfTime, HalfTimeNotificationsToggle.IsOn);
+    }
+
+    private async void OnFullTimeNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.MatchFinished, FullTimeNotificationsToggle.IsOn);
+    }
+
+    private async void OnPostponedNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.MatchPostponed, PostponedNotificationsToggle.IsOn);
+    }
+
+    private async void OnCancelledNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        await ViewModel.SetNotificationTypeEnabledAsync(FootballTray.Client.Services.Notifications.NotificationType.MatchCancelled, CancelledNotificationsToggle.IsOn);
     }
 
     private async void OnSoundModeChanged(object sender, SelectionChangedEventArgs e)

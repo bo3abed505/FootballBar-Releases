@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Services;
@@ -127,6 +129,30 @@ public sealed class TickerRotationState
         return false;
     }
 
+    public bool PromoteToTop(string matchId)
+    {
+        if (string.IsNullOrEmpty(matchId) || _candidates.Count == 0)
+        {
+            return false;
+        }
+
+        int foundIndex = _candidates.FindIndex(m => string.Equals(m.Id, matchId, StringComparison.Ordinal));
+        if (foundIndex >= 0)
+        {
+            var match = _candidates[foundIndex];
+            if (foundIndex > 0)
+            {
+                _candidates.RemoveAt(foundIndex);
+                _candidates.Insert(0, match);
+            }
+            CurrentIndex = 0;
+            CurrentCandidate = match;
+            return true;
+        }
+
+        return false;
+    }
+
     public TrayMatchDto? Advance()
     {
         if (_candidates.Count == 0)
@@ -180,10 +206,13 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
     public static readonly TimeSpan RotationInterval = TimeSpan.FromSeconds(10);
 
+    public ObservableCollection<TrayMatchDto> TickerMatches { get; } = new();
     public TickerRotationState State => _state;
     public bool IsCycling => _timer.IsRunning;
     public string? PinnedMatchId => _pinnedMatchId;
     public bool IsPinned => !string.IsNullOrEmpty(_pinnedMatchId);
+    private readonly Dictionary<string, (int Home, int Away)> _previousScores = new(StringComparer.OrdinalIgnoreCase);
+    public string? LastGoalJumpMatchId { get; private set; }
 
     public TaskbarTickerCoordinator(
         DispatcherQueue dispatcherQueue,
@@ -274,7 +303,45 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     public void UnpinMatch()
     {
         if (_isDisposed) return;
+        var unpinnedId = _pinnedMatchId;
         _pinnedMatchId = null;
+
+        if (!string.IsNullOrEmpty(unpinnedId))
+        {
+            // Recompute natural candidates without the pinned match override
+            var naturalCandidates = _currentConnectionState == TickerConnectionState.NoCacheOffline
+                ? (IReadOnlyList<TrayMatchDto>)Array.Empty<TrayMatchDto>()
+                : TrayTickerFormatter.GetTickerCandidates(_latestTrayData, _currentPreferences);
+
+            bool isNaturalCandidate = naturalCandidates.Any(m => string.Equals(m.Id, unpinnedId, StringComparison.Ordinal));
+            if (!isNaturalCandidate)
+            {
+                // Unpinned match was only present because it was pinned: purge immediately from rotation
+                var remaining = _state.Candidates.Where(m => !string.Equals(m.Id, unpinnedId, StringComparison.Ordinal)).ToList();
+                _state.ApplyCandidates(remaining);
+                SmartMergeTickerMatches(remaining);
+            }
+            else
+            {
+                // It is a natural candidate: sync and retain in rotation
+                SmartMergeTickerMatches(_state.Candidates);
+            }
+
+            // Notify backend daemon asynchronously to clear pinnedMatchIds immediately (ending 90s burst cycle)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var client = new FootballApiClient();
+                    await client.UpdatePinnedMatchAsync(null);
+                }
+                catch
+                {
+                    // Ignore background preference notification errors
+                }
+            });
+        }
+
         EmitCurrentDisplay();
     }
 
@@ -315,6 +382,34 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         _currentConnectionState = connectionState;
         _currentPreferences = preferences;
         _latestTrayData = trayData;
+
+        // Detect if any followed live match experienced a score change since previous poll
+        string? goalJumpMatchId = null;
+        if (trayData?.Matches != null && preferences != null)
+        {
+            var teamIds = preferences.GetFollowedTeamIdSet();
+            var compIds = preferences.GetFollowedCompetitionIdSet();
+
+            foreach (var match in trayData.Matches)
+            {
+                if (match == null || string.IsNullOrWhiteSpace(match.Id)) continue;
+                int currentHome = match.Score?.Home ?? 0;
+                int currentAway = match.Score?.Away ?? 0;
+
+                if (_previousScores.TryGetValue(match.Id, out var prevScore))
+                {
+                    bool isLive = FixtureRelevanceEngine.IsLive(match);
+                    bool isFollowed = FixtureRelevanceEngine.EvaluateRelevance(match, teamIds, compIds).IsRelevant;
+
+                    if (isLive && isFollowed && (currentHome != prevScore.Home || currentAway != prevScore.Away))
+                    {
+                        goalJumpMatchId ??= match.Id;
+                    }
+                }
+
+                _previousScores[match.Id] = (currentHome, currentAway);
+            }
+        }
 
         IReadOnlyList<TrayMatchDto> candidates;
         if (connectionState == TickerConnectionState.NoCacheOffline)
@@ -389,6 +484,48 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         }
 
         _state.ApplyCandidates(candidates);
+        SmartMergeTickerMatches(candidates);
+
+        // Carousel Goal-Triggered Jump:
+        // If any followed live match experienced a score change, instantly interrupt rotation timer,
+        // jump active carousel index to that match, promote it to the top of the queue for its full display cycle,
+        // and resume normal rotation thereafter.
+        if (!string.IsNullOrEmpty(goalJumpMatchId))
+        {
+            LastGoalJumpMatchId = goalJumpMatchId;
+            if (_state.PromoteToTop(goalJumpMatchId))
+            {
+                if (_timer.IsRunning)
+                {
+                    _timer.Stop();
+                    _timer.Start();
+                }
+                else if (_state.CanCycle)
+                {
+                    _timer.Start();
+                }
+            }
+            else
+            {
+                var goalMatch = trayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, goalJumpMatchId, StringComparison.Ordinal));
+                if (goalMatch != null)
+                {
+                    var combined = new List<TrayMatchDto>(_state.Candidates);
+                    combined.Insert(0, goalMatch);
+                    _state.ApplyCandidates(combined);
+                    _state.SetCurrentMatch(goalJumpMatchId);
+                    if (_timer.IsRunning)
+                    {
+                        _timer.Stop();
+                        _timer.Start();
+                    }
+                    else if (_state.CanCycle)
+                    {
+                        _timer.Start();
+                    }
+                }
+            }
+        }
 
         // If a match was pinned, retain it if still in candidates, or keep from trayData if still valid
         if (!string.IsNullOrEmpty(_pinnedMatchId))
@@ -457,6 +594,59 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         else
         {
             _displayCallback(displayState.FixtureId, displayState.FormattedText);
+        }
+    }
+
+    /// <summary>
+    /// Performs in-place smart merge on the TickerMatches collection instead of calling .Clear().
+    /// Prevents the ticker UI from visually emptying and flashing upon background poll updates.
+    /// </summary>
+    public void SmartMergeTickerMatches(IReadOnlyList<TrayMatchDto> incoming)
+    {
+        var incomingIds = new HashSet<string>(incoming.Where(m => !string.IsNullOrEmpty(m?.Id)).Select(m => m!.Id), StringComparer.Ordinal);
+
+        // 1. Remove matches no longer in candidate list
+        for (int i = TickerMatches.Count - 1; i >= 0; i--)
+        {
+            if (!incomingIds.Contains(TickerMatches[i].Id))
+            {
+                TickerMatches.RemoveAt(i);
+            }
+        }
+
+        // 2. Insert or update in-place
+        for (int i = 0; i < incoming.Count; i++)
+        {
+            var item = incoming[i];
+            int existingIndex = -1;
+            for (int j = 0; j < TickerMatches.Count; j++)
+            {
+                if (string.Equals(TickerMatches[j].Id, item.Id, StringComparison.Ordinal))
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex < 0)
+            {
+                if (i <= TickerMatches.Count)
+                {
+                    TickerMatches.Insert(i, item);
+                }
+                else
+                {
+                    TickerMatches.Add(item);
+                }
+            }
+            else
+            {
+                TickerMatches[existingIndex] = item;
+                if (existingIndex != i && i < TickerMatches.Count)
+                {
+                    TickerMatches.Move(existingIndex, i);
+                }
+            }
         }
     }
 

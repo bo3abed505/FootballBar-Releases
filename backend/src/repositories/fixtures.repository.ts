@@ -1,4 +1,4 @@
-import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql } from 'drizzle-orm';
+import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql, notLike, notInArray } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
 import { generateCanonicalId } from '../db/canonical-id.js';
@@ -11,7 +11,47 @@ export interface GetTrayMatchesOptions {
   limit?: number | null;
 }
 
+export interface ActiveSummaryOptions {
+  followedTeamIds?: Array<string | number>;
+  followedCompetitionIds?: Array<string | number>;
+  pinnedMatchIds?: Array<string | number>;
+}
+
 export class FixturesRepository {
+  async countTotalFixtures(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(schema.fixtures);
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async countNonMockFixtures(): Promise<number> {
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.fixtures)
+      .where(
+        and(
+          notLike(schema.fixtures.id, '%mock%'),
+          notInArray(schema.fixtures.id, ['fix_elclasico_2026', 'fix_spain_egypt_2026'])
+        )
+      );
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async hasFixturesForDate(dateStr: string): Promise<boolean> {
+    const startOfDate = new Date(`${dateStr}T00:00:00.000Z`);
+    const endOfDate = new Date(startOfDate.getTime() + 24 * 60 * 60 * 1000);
+    const rows = await db
+      .select({ id: schema.fixtures.id })
+      .from(schema.fixtures)
+      .where(
+        and(
+          gte(schema.fixtures.kickoffTime, startOfDate),
+          lt(schema.fixtures.kickoffTime, endOfDate)
+        )
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+
   async getAll(limit = 50) {
     return await db.query.fixtures.findMany({
       columns: {
@@ -172,16 +212,14 @@ export class FixturesRepository {
       ? endOfActiveDay
       : new Date(Math.max(endOfActiveDay.getTime(), nowMs + AcquisitionPolicyEngine.APPROACHING_WINDOW_MS));
 
-    // Prematch schedule: ALWAYS include all scheduled matches for the active day
+    // Prematch schedule: include active day and approaching prematch window (+24h)
     const prematchPastCutoff = startOfActiveDay;
     const prematchFutureCutoff = targetDate
       ? endOfActiveDay
       : new Date(Math.max(nowMs + 24 * 60 * 60 * 1000, endOfActiveDay.getTime()));
 
-    // Finished matches: active day, plus graceful buffer for midnight rollover so evening matches (e.g. 3-12h ago) don't disappear at 00:01 UTC
-    const finishedPastCutoff = targetDate
-      ? startOfActiveDay
-      : new Date(Math.min(startOfActiveDay.getTime(), nowMs - 12 * 60 * 60 * 1000));
+    // Finished matches: bounded to active day
+    const finishedPastCutoff = startOfActiveDay;
     const finishedFutureCutoff = endOfActiveDay;
 
     // Expand teams to include legacy IDs, stripped numeric prefixes, and resolve canonical IDs
@@ -537,7 +575,7 @@ export class FixturesRepository {
    * Retrieves active summary counts (live, approaching, recently finished, stale prematch)
    * by evaluating candidate database fixtures through AcquisitionPolicyEngine.
    */
-  async getActiveSummary(now: Date = new Date()): Promise<FixturesSummary> {
+  async getActiveSummary(now: Date = new Date(), options?: ActiveSummaryOptions): Promise<FixturesSummary> {
     // Automatically sweep and clean up any ancient LIVE fixtures without external calls
     await this.reconcileExpiredLiveFixtures(now);
 
@@ -563,10 +601,51 @@ export class FixturesRepository {
 
     const todayUtcPrefix = now.toISOString().slice(0, 10);
     let liveCount = 0;
+    let pinnedOrFollowedLiveCount = 0;
+    let totalLiveHalftimeCount = 0;
+    let pinnedOrFollowedHalftimeCount = 0;
+    let minHalftimeRemainingMs: number | null = null;
     let approachingCount = 0;
     let recentlyFinishedCount = 0;
     let stalePrematchCount = 0;
     const staleCompetitionIds: number[] = [];
+
+    // Build followed/pinned lookups
+    const followedTeams = new Set<string>();
+    if (options?.followedTeamIds) {
+      for (const id of options.followedTeamIds) {
+        const s = String(id).trim();
+        if (s) {
+          followedTeams.add(s);
+          if (/^\d+$/.test(s)) followedTeams.add(`team_${s}`);
+          if (s.startsWith('team_')) followedTeams.add(s.slice(5));
+        }
+      }
+    }
+
+    const followedComps = new Set<string>();
+    if (options?.followedCompetitionIds) {
+      for (const id of options.followedCompetitionIds) {
+        const s = String(id).trim();
+        if (s) {
+          followedComps.add(s);
+          if (/^\d+$/.test(s)) followedComps.add(`comp_${s}`);
+          if (s.startsWith('comp_')) followedComps.add(s.slice(5));
+        }
+      }
+    }
+
+    const pinnedMatches = new Set<string>();
+    if (options?.pinnedMatchIds) {
+      for (const id of options.pinnedMatchIds) {
+        const s = String(id).trim();
+        if (s) {
+          pinnedMatches.add(s);
+          if (/^\d+$/.test(s)) pinnedMatches.add(`fix_${s}`);
+          if (s.startsWith('fix_')) pinnedMatches.add(s.slice(4));
+        }
+      }
+    }
 
     // Authoritative schedule resolution (persists across restarts)
     const scheduleState = await this.resolveScheduleState(todayUtcPrefix, now);
@@ -588,6 +667,41 @@ export class FixturesRepository {
 
       if (classification === 'LIVE_WINDOW') {
         liveCount++;
+
+        const isPinned = pinnedMatches.size > 0 && (
+          pinnedMatches.has(f.id) ||
+          (f.canonicalId ? pinnedMatches.has(f.canonicalId) : false)
+        );
+
+        const isTeamFollowed = followedTeams.size > 0 && (
+          (f.homeTeamId ? followedTeams.has(f.homeTeamId) : false) ||
+          (f.awayTeamId ? followedTeams.has(f.awayTeamId) : false)
+        );
+
+        const isCompFollowed = followedComps.size > 0 && (
+          f.competitionId ? followedComps.has(f.competitionId) : false
+        );
+
+        const isFollowedOrPinned = isPinned || isTeamFollowed || isCompFollowed;
+        const stateUpper = (f.state || '').toUpperCase().trim();
+        const isHalftime = ['HALFTIME', 'HT', 'BT'].includes(stateUpper);
+
+        if (isFollowedOrPinned) {
+          pinnedOrFollowedLiveCount++;
+          if (isHalftime) {
+            pinnedOrFollowedHalftimeCount++;
+          }
+        }
+
+        if (isHalftime) {
+          totalLiveHalftimeCount++;
+          const updateTime = f.updatedAt ? new Date(f.updatedAt).getTime() : (f.lastPolledAt ? new Date(f.lastPolledAt).getTime() : now.getTime());
+          const elapsedSinceHt = Math.max(0, now.getTime() - updateTime);
+          const remaining = Math.max(0, AcquisitionPolicyEngine.HALFTIME_SUSPEND_MS - elapsedSinceHt);
+          if (minHalftimeRemainingMs === null || remaining > minHalftimeRemainingMs) {
+            minHalftimeRemainingMs = remaining;
+          }
+        }
       } else if (classification === 'APPROACHING') {
         approachingCount++;
       } else if (classification === 'RECENTLY_FINISHED') {
@@ -608,8 +722,21 @@ export class FixturesRepository {
       await this.markScheduleDiscovered(todayUtcPrefix, now);
     }
 
+    const hasPinnedOrFollowedLive = pinnedOrFollowedLiveCount > 0;
+    const allLiveInHalftime = liveCount > 0 && totalLiveHalftimeCount === liveCount;
+    const pinnedOrFollowedInHalftime = hasPinnedOrFollowedLive && pinnedOrFollowedHalftimeCount === pinnedOrFollowedLiveCount;
+    const halftimeRemainingMs = minHalftimeRemainingMs !== null && minHalftimeRemainingMs > 0
+      ? minHalftimeRemainingMs
+      : AcquisitionPolicyEngine.HALFTIME_SUSPEND_MS;
+
     return {
       liveCount,
+      hasPinnedOrFollowedLive: options ? hasPinnedOrFollowedLive : undefined,
+      pinnedOrFollowedLiveCount,
+      unpinnedLiveCount: liveCount - pinnedOrFollowedLiveCount,
+      allLiveInHalftime,
+      pinnedOrFollowedInHalftime,
+      halftimeRemainingMs,
       approachingCount,
       recentlyFinishedCount,
       stalePrematchCount,

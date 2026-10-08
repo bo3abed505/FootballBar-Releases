@@ -72,8 +72,7 @@ public sealed partial class MainPage : Page
     {
         if (_viewModel == null) return;
 
-        FollowedMatchesList.ItemsSource = _viewModel.FollowedMatches;
-        OtherMatchesList.ItemsSource = _viewModel.OtherMatches;
+        CompetitionGroupsList.ItemsSource = _viewModel.CompetitionGroups;
         CalendarDaysList.ItemsSource = _viewModel.CalendarDays;
         TeamsList.ItemsSource = _viewModel.SearchCatalog.FollowedTeams;
         CompetitionsList.ItemsSource = _viewModel.SearchCatalog.FollowedCompetitions;
@@ -116,9 +115,8 @@ public sealed partial class MainPage : Page
         }
 
         // Active Ticker Summary
-        ActiveTickerSummaryText.Text = _viewModel.ActiveTickerText.StartsWith("📌")
-            ? _viewModel.ActiveTickerText
-            : $"📌 {_viewModel.ActiveTickerText}";
+        ActiveTickerSummaryText.Text = _viewModel.TickerMatchDisplay;
+        ActiveTickerSummaryText.Visibility = _viewModel.HasActiveTicker ? Visibility.Visible : Visibility.Collapsed;
 
         // Empty state visibility
         if (_viewModel.IsEmpty)
@@ -126,18 +124,12 @@ public sealed partial class MainPage : Page
             EmptyStateBorder.Visibility = Visibility.Visible;
             EmptyStateTitleText.Text = _viewModel.EmptyStateTitle;
             EmptyStateSubtitleText.Text = _viewModel.EmptyStateMessage;
+            CompetitionGroupsList.Visibility = Visibility.Collapsed;
         }
         else
         {
             EmptyStateBorder.Visibility = Visibility.Collapsed;
-        }
-
-        // Collapsible Other Matches Expander
-        if (OtherMatchesExpander != null)
-        {
-            OtherMatchesExpander.Header = _viewModel.OtherMatchesHeader;
-            OtherMatchesExpander.Visibility = _viewModel.IsOtherMatchesVisible ? Visibility.Visible : Visibility.Collapsed;
-            OtherMatchesExpander.IsExpanded = _viewModel.IsOtherMatchesExpanded;
+            CompetitionGroupsList.Visibility = Visibility.Visible;
         }
 
         // 7-Day Calendar Navigation Bar visibility
@@ -277,6 +269,14 @@ public sealed partial class MainPage : Page
     private void OnFilterLiveClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Live);
     private void OnFilterUpcomingClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Upcoming);
     private void OnFilterFinishedClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.Finished);
+
+    private void OnCompetitionHeaderClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CompetitionGroupViewModel group)
+        {
+            group.ToggleExpanded();
+        }
+    }
 
     private void OnCalendarDayClicked(object sender, RoutedEventArgs e)
     {

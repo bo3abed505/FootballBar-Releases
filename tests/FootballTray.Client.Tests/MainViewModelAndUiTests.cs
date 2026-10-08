@@ -894,6 +894,42 @@ public class MainViewModelAndUiTests
     }
 
     [TestMethod]
+    public async Task Test_CompetitionGroups_RendersExpandableAccordionsWithCorrectCounts()
+    {
+        await _prefService.FollowCompetitionAsync(DefaultPreferences.PremierLeague);
+
+        using var vm = new MainViewModel(_prefService);
+        await vm.InitializeAsync();
+
+        var plMatch1 = CreateMatch("fix_pl_1", "team_1", "team_2", "comp_39", compName: "Premier League", state: "PREMATCH");
+        var plMatch2 = CreateMatch("fix_pl_2", "team_3", "team_4", "comp_39", compName: "Premier League", state: "PREMATCH");
+        var laligaMatch = CreateMatch("fix_ll_1", "team_5", "team_6", "comp_140", compName: "La Liga", state: "PREMATCH");
+
+        var data = new TrayDataDto { Matches = new List<TrayMatchDto> { plMatch1, plMatch2, laligaMatch } };
+        vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+        vm.SetFilter(MatchFilterType.All);
+
+        Assert.AreEqual(2, vm.CompetitionGroups.Count, "Should group 3 matches into 2 competition accordion groups");
+
+        var plGroup = vm.CompetitionGroups.FirstOrDefault(g => g.CompetitionName == "Premier League");
+        Assert.IsNotNull(plGroup);
+        Assert.AreEqual(2, plGroup.MatchCount);
+        Assert.AreEqual("2", plGroup.MatchCountText);
+        Assert.IsTrue(plGroup.IsExpanded, "Followed competition accordion starts expanded by default");
+        Assert.AreEqual("\uE70E", plGroup.ChevronGlyph);
+
+        // Test accordion toggle
+        plGroup.ToggleExpanded();
+        Assert.IsFalse(plGroup.IsExpanded);
+        Assert.AreEqual("\uE70D", plGroup.ChevronGlyph);
+
+        var llGroup = vm.CompetitionGroups.FirstOrDefault(g => g.CompetitionName == "La Liga");
+        Assert.IsNotNull(llGroup);
+        Assert.AreEqual(1, llGroup.MatchCount);
+        Assert.IsFalse(llGroup.IsExpanded, "Unfollowed competition accordion starts collapsed by default");
+    }
+
+    [TestMethod]
     public async Task Test33_MasterSorting_OtherMatchesSortedByPopularity()
     {
         using var vm = new MainViewModel(_prefService);
@@ -987,6 +1023,47 @@ public class MainViewModelAndUiTests
         Assert.AreEqual("fix_tomorrow", vm.FilteredMatches[0].Id);
         Assert.IsTrue(vm.CalendarDays.First(d => d.Date == today.AddDays(1)).IsSelected);
         Assert.IsFalse(vm.CalendarDays.First(d => d.Date == today).IsSelected);
+    }
+
+    [TestMethod]
+    public async Task Test36b_Strike24D_CalendarDays_7DayWindow_PreservesMatchCounts_AndTriggersSync()
+    {
+        var mockSync = new MockSyncService();
+        using var vm = new MainViewModel(_prefService, syncService: mockSync);
+        await vm.InitializeAsync();
+
+        var today = DateTime.Today;
+        // Verify 7 tabs: Yesterday through Today + 5
+        Assert.AreEqual(7, vm.CalendarDays.Count);
+        for (int i = 0; i < 7; i++)
+        {
+            Assert.AreEqual(today.AddDays(i - 1).Date, vm.CalendarDays[i].Date);
+        }
+
+        // Simulate initial payload with 1 match today
+        var todayKickoff = new DateTimeOffset(today.Year, today.Month, today.Day, 15, 0, 0, TimeSpan.Zero);
+        var matchToday = CreateMatch("fix_today", CanonicalEntityIds.Barcelona, "team_rma", CanonicalEntityIds.LaLiga, kickoff: todayKickoff);
+        vm.RefreshMatches(new TrayDataDto { Matches = new List<TrayMatchDto> { matchToday } }, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        var todayItem = vm.CalendarDays.First(d => d.Date == today);
+        Assert.AreEqual(1, todayItem.MatchCount);
+
+        // Select Tomorrow (+1) -> SyncService target date must update and trigger sync
+        var tomorrow = today.AddDays(1);
+        vm.SelectCalendarDate(tomorrow);
+        Assert.AreEqual(tomorrow.Date, mockSync.TargetDate.Date);
+        Assert.IsTrue(mockSync.ImmediateSyncTriggerCount > 0);
+
+        // Simulate returning 2 matches for tomorrow
+        var tomorrowKickoff = todayKickoff.AddDays(1);
+        var matchTomorrow1 = CreateMatch("fix_tom_1", "team_chelsea", "team_arsenal", CanonicalEntityIds.PremierLeague, kickoff: tomorrowKickoff);
+        var matchTomorrow2 = CreateMatch("fix_tom_2", "team_liverpool", "team_everton", CanonicalEntityIds.PremierLeague, kickoff: tomorrowKickoff);
+        vm.RefreshMatches(new TrayDataDto { Matches = new List<TrayMatchDto> { matchTomorrow1, matchTomorrow2 } }, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+        // Tomorrow has 2 matches, and Today's match count (1) remains preserved rather than being zeroed out!
+        var tomorrowItem = vm.CalendarDays.First(d => d.Date == tomorrow);
+        Assert.AreEqual(2, tomorrowItem.MatchCount);
+        Assert.AreEqual(1, todayItem.MatchCount);
     }
 
     [TestMethod]

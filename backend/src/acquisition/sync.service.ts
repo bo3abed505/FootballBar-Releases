@@ -392,9 +392,6 @@ export class SyncService {
         where: inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
       });
 
-      let detailLookupsPerformed = 0;
-      const MAX_DETAIL_LOOKUPS_PER_CYCLE = 3;
-
       for (const localFix of activeLocalFixtures) {
         if (incomingLiveIds.has(localFix.id)) {
           continue;
@@ -403,92 +400,27 @@ export class SyncService {
         const kickoffMs = new Date(localFix.kickoffTime).getTime();
         const elapsedSinceKickoffMs = nowMs - kickoffMs;
 
-        // Candidate for reconciliation: elapsed time >= SAFE_VANISHED_MATCH_AGE_MS (105m)
+        // Quota-Shield Global Batch: exactly 1 API call per live poll cycle (GET /fixtures?live=all).
+        // Absent fixtures past regulation match duration (>= 105m) are transitioned locally to FINISHED
+        // without burning additional API requests on individual detail lookups.
         if (elapsedSinceKickoffMs >= SyncService.SAFE_VANISHED_MATCH_AGE_MS) {
-          let detailsConfirmed = false;
+          await db
+            .update(schema.fixtures)
+            .set({
+              state: 'FINISHED',
+              lastPolledAt: now,
+              updatedAt: now,
+            })
+            .where(eq(schema.fixtures.id, localFix.id));
 
-          if (detailLookupsPerformed < MAX_DETAIL_LOOKUPS_PER_CYCLE) {
-            detailLookupsPerformed++;
-            try {
-              const details = await this.provider.getFixtureDetails(localFix.id);
-              if (details) {
-                detailsConfirmed = true;
-                const mappedState = (details.state || '').toUpperCase().trim();
-                let targetState = 'FINISHED';
-                if (['POSTPONED', 'CANCELLED', 'SUSP', 'INT', 'ABD', 'AWD', 'WO'].includes(mappedState)) {
-                  targetState = mappedState;
-                }
-
-                await db
-                  .update(schema.fixtures)
-                  .set({
-                    state: targetState,
-                    homeScore: details.score.home,
-                    awayScore: details.score.away,
-                    homeScoreHt: details.score.homeHt ?? localFix.homeScoreHt,
-                    awayScoreHt: details.score.awayHt ?? localFix.awayScoreHt,
-                    lastPolledAt: now,
-                    updatedAt: now,
-                  })
-                  .where(eq(schema.fixtures.id, localFix.id));
-
-                if (details.events && details.events.length > 0) {
-                  const incomingUids = details.events.map((e) => e.eventUid);
-                  const existingEvents = await db
-                    .select({ eventUid: schema.events.eventUid })
-                    .from(schema.events)
-                    .where(inArray(schema.events.eventUid, incomingUids));
-
-                  const existingUidSet = new Set(existingEvents.map((e) => e.eventUid));
-                  const newEvents = details.events
-                    .filter((e) => !existingUidSet.has(e.eventUid))
-                    .map(normalizeEvent);
-                  if (newEvents.length > 0) {
-                    await db.insert(schema.events).values(newEvents).onConflictDoNothing();
-                    summary.eventsInserted += newEvents.length;
-                  }
-                }
-
-                if (details.lineups && details.lineups.length > 0) {
-                  await this.upsertLineups(localFix.id, details.lineups);
-                }
-                if (details.statistics && details.statistics.length > 0) {
-                  await this.upsertFixtureStatistics(localFix.id, details.statistics);
-                }
-
-                summary.fixturesUpdated++;
-                summary.hasChanges = true;
-                continue;
-              }
-            } catch {
-              // Bounded detail lookup failed; proceed to fallback below
-            }
-          }
-
-          // Fallback when details are unavailable or not confirmed:
-          // 1. If elapsed time exceeds MAX_LIVE_MATCH_AGE_MS (3.5h), the match is definitively past
-          //    any possible in-play window. Transition to FINISHED to prevent permanent live lock.
-          if (elapsedSinceKickoffMs >= AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS) {
-            await db
-              .update(schema.fixtures)
-              .set({
-                state: 'FINISHED',
-                lastPolledAt: now,
-                updatedAt: now,
-              })
-              .where(eq(schema.fixtures.id, localFix.id));
-
-            summary.fixturesUpdated++;
-            summary.hasChanges = true;
-          } else if (!detailsConfirmed) {
-            // 2. If elapsed time is between 105m and 210m, and details were unconfirmed:
-            //    Touch lastPolledAt but keep state = 'LIVE' to prevent prematurely finalizing
-            //    delayed, unusually long, or temporarily omitted matches.
-            await db
-              .update(schema.fixtures)
-              .set({ lastPolledAt: now })
-              .where(eq(schema.fixtures.id, localFix.id));
-          }
+          summary.fixturesUpdated++;
+          summary.hasChanges = true;
+        } else {
+          // Under 105m: touch lastPolledAt but preserve LIVE state
+          await db
+            .update(schema.fixtures)
+            .set({ lastPolledAt: now })
+            .where(eq(schema.fixtures.id, localFix.id));
         }
       }
     }
@@ -539,11 +471,99 @@ export class SyncService {
       for (const pId of effectiveProviderIds) {
         allowedCompIds.add(pId);
         allowedCompIds.add(`comp_${pId}`);
+        allowedCompIds.add(`ft_comp_${pId}`);
+      }
+      for (const a of activeAliases) {
+        if (a.canonicalCompetitionId) {
+          allowedCompIds.add(a.canonicalCompetitionId);
+        }
       }
 
       const compProviderMap = new Map<string, string>();
       for (const c of batch.competitions) {
         if (c.providerId) compProviderMap.set(c.id, c.providerId);
+        if (c.canonicalId && c.providerId) compProviderMap.set(c.canonicalId, c.providerId);
+      }
+
+      const isCompAllowed = (compId: string): boolean => {
+        if (allowedCompIds.has(compId)) return true;
+        const pId = compProviderMap.get(compId);
+        return !!pId && (effectiveProviderIds.has(pId) || allowedCompIds.has(pId));
+      };
+
+      const filteredFixtures = batch.fixtures.filter((f) => isCompAllowed(f.competitionId));
+      const filteredCompetitions = batch.competitions.filter((c) => isCompAllowed(c.id));
+      const filteredSeasons = batch.seasons.filter((s) => isCompAllowed(s.competitionId));
+
+      const retainedTeamIds = new Set<string>();
+      for (const f of filteredFixtures) {
+        retainedTeamIds.add(f.homeTeamId);
+        retainedTeamIds.add(f.awayTeamId);
+      }
+      const filteredTeams = batch.teams.filter((t) => retainedTeamIds.has(t.id));
+
+      const retainedFixtureIds = new Set(filteredFixtures.map((f) => f.id));
+      const filteredEvents = batch.events.filter((e) => retainedFixtureIds.has(e.fixtureId));
+
+      const filteredBatch: NormalizedAcquisitionBatch = {
+        competitions: filteredCompetitions,
+        seasons: filteredSeasons,
+        teams: filteredTeams,
+        fixtures: filteredFixtures,
+        events: filteredEvents,
+      };
+
+      return this.processBatch(filteredBatch, false);
+    }
+
+    return this.processBatch(batch, false);
+  }
+
+  /**
+   * Performs a single date-range discovery query across the entire window (e.g. Yesterday to +5 days)
+   * and filters in-memory using competition_provider_aliases. Exactly 1 quota request.
+   */
+  async syncScheduleRange(fromDate: string, toDate: string, competitionIds?: number[], cycleId?: string): Promise<SyncSummary> {
+    const batch = await this.acquisitionService.acquireScheduledRange(fromDate, toDate, competitionIds, cycleId);
+
+    const activeAliases = await db
+      .select({
+        providerId: schema.competitionProviderAliases.providerId,
+        canonicalCompetitionId: schema.competitionProviderAliases.canonicalCompetitionId,
+      })
+      .from(schema.competitionProviderAliases)
+      .where(eq(schema.competitionProviderAliases.provider, this.provider.providerName));
+
+    const activeProviderIds = new Set(activeAliases.map((a) => a.providerId));
+
+    let effectiveProviderIds = activeProviderIds;
+    if (activeProviderIds.size === 0 && competitionIds && competitionIds.length > 0) {
+      effectiveProviderIds = new Set(competitionIds.map(String));
+    } else if (activeProviderIds.size > 0 && competitionIds && competitionIds.length > 0) {
+      const requested = new Set(competitionIds.map(String));
+      const intersected = new Set([...activeProviderIds].filter((id) => requested.has(id)));
+      if (intersected.size > 0) {
+        effectiveProviderIds = intersected;
+      }
+    }
+
+    if (effectiveProviderIds.size > 0) {
+      const allowedCompIds = new Set<string>();
+      for (const pId of effectiveProviderIds) {
+        allowedCompIds.add(pId);
+        allowedCompIds.add(`comp_${pId}`);
+        allowedCompIds.add(`ft_comp_${pId}`);
+      }
+      for (const a of activeAliases) {
+        if (a.canonicalCompetitionId) {
+          allowedCompIds.add(a.canonicalCompetitionId);
+        }
+      }
+
+      const compProviderMap = new Map<string, string>();
+      for (const c of batch.competitions) {
+        if (c.providerId) compProviderMap.set(c.id, c.providerId);
+        if (c.canonicalId && c.providerId) compProviderMap.set(c.canonicalId, c.providerId);
       }
 
       const isCompAllowed = (compId: string): boolean => {

@@ -12,7 +12,7 @@
  *   - Never contains provider-specific logic, direct fetch, or hard-coded cadence thresholds.
  */
 
-import { and, desc, eq, gte, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, notInArray, notLike, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   AcquisitionPolicyEngine,
@@ -81,6 +81,7 @@ export interface SchedulerDependencies {
   syncService: SyncService;
   fixturesRepository: FixturesRepository;
   schedulerCyclesRepository?: SchedulerCyclesRepository;
+  preferencesService?: import('./daemon-preferences.service.js').DaemonPreferencesService;
   getBudgetContext?: (provider?: string, now?: Date) => Promise<BudgetContext>;
   nowFn?: () => Date;
   sleepFn?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -182,6 +183,14 @@ export class AcquisitionScheduler {
   private readonly onErrorCallback?: (error: Error) => void;
   private readonly logger: SchedulerLogger;
 
+  // Dynamic user preferences & pinned matches
+  private preferencesService?: import('./daemon-preferences.service.js').DaemonPreferencesService;
+  private pinnedMatchIds: Set<string> = new Set();
+
+  // Twice-daily schedule sync slot tracking
+  private lastScheduleSyncSlot: string | null = null;
+  private lastScheduleSyncAt: Date | null = null;
+
   // Single-instance and lifecycle state
   private running = false;
   private executingCycle = false;
@@ -222,6 +231,7 @@ export class AcquisitionScheduler {
     this.syncService = deps.syncService;
     this.fixturesRepo = deps.fixturesRepository;
     this.cyclesRepo = deps.schedulerCyclesRepository ?? new SchedulerCyclesRepository();
+    this.preferencesService = deps.preferencesService;
     this.getBudget = deps.getBudgetContext ?? getDatabaseBudgetContext;
     this.now = deps.nowFn ?? (() => new Date());
     this.sleep = deps.sleepFn ?? defaultSleep;
@@ -234,6 +244,25 @@ export class AcquisitionScheduler {
       warn: (msg, meta) => console.warn(`[SCHEDULER:WARN] ${msg}`, meta ? JSON.stringify(meta) : ''),
       error: (msg, meta) => console.error(`[SCHEDULER:ERROR] ${msg}`, meta ? JSON.stringify(meta) : ''),
     };
+  }
+
+  public bindPreferencesService(service: import('./daemon-preferences.service.js').DaemonPreferencesService): void {
+    this.preferencesService = service;
+  }
+
+  public setPinnedMatchIds(ids: Array<string | number>): void {
+    this.pinnedMatchIds = new Set(ids.map(String));
+  }
+
+  public getPinnedMatchIds(): string[] {
+    return Array.from(this.pinnedMatchIds);
+  }
+
+  public isTwiceDailyScheduleSyncDue(now: Date = this.now()): boolean {
+    const todayStr = now.toISOString().slice(0, 10);
+    const slotHour = now.getUTCHours() < 12 ? '00' : '12';
+    const currentSlot = `${todayStr}-${slotHour}`;
+    return this.lastScheduleSyncSlot !== currentSlot;
   }
 
   public setTargetCompetitionIds(ids?: number[]): void {
@@ -377,10 +406,85 @@ export class AcquisitionScheduler {
   }
 
   /**
+   * Executes the 7-day schedule synchronization routine (Yesterday through Today + 5).
+   * Runs strictly twice a day (midnight UTC and midday UTC) to capture postponed matches,
+   * kickoff adjustments, and finalize past results without wasting daily quota.
+   * Fetches days -1 through +5 individually using the date= parameter, paced by 9 seconds between queries
+   * to guarantee never exceeding the MINUTE_CEILING (8 requests/minute).
+   */
+  async sync7DaySchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
+    const todayDateStr = currentDate.toISOString().slice(0, 10);
+    const targetComps = this.targetCompetitionIds;
+
+    const combinedSummary: SyncSummary = {
+      provider: 'unknown',
+      fixturesDiscovered: 0,
+      fixturesInserted: 0,
+      fixturesUpdated: 0,
+      eventsInserted: 0,
+      eventsSkippedDuplicates: 0,
+      hasChanges: false,
+    };
+
+    this.logger.info(`[7-DAY-SLIDING-WINDOW] Starting paced 7-day schedule sync (-1 to +5 days) for base date ${todayDateStr}...`);
+
+    for (let offset = -1; offset <= 5; offset++) {
+      const d = new Date(Date.UTC(
+        currentDate.getUTCFullYear(),
+        currentDate.getUTCMonth(),
+        currentDate.getUTCDate() + offset
+      ));
+      const targetDateStr = d.toISOString().slice(0, 10);
+      const offsetLabel = offset === 0 ? 'today' : (offset > 0 ? `+${offset}` : `${offset}`);
+
+      try {
+        const daySummary = await this.syncService.syncSchedule(targetDateStr, targetComps, cycleId);
+        if (daySummary) {
+          combinedSummary.provider = daySummary.provider || combinedSummary.provider;
+          combinedSummary.fixturesDiscovered += daySummary.fixturesDiscovered ?? 0;
+          combinedSummary.fixturesInserted += daySummary.fixturesInserted ?? 0;
+          combinedSummary.fixturesUpdated += daySummary.fixturesUpdated ?? 0;
+          combinedSummary.eventsInserted += daySummary.eventsInserted ?? 0;
+          combinedSummary.eventsSkippedDuplicates += daySummary.eventsSkippedDuplicates ?? 0;
+          if (daySummary.hasChanges) {
+            combinedSummary.hasChanges = true;
+          }
+        }
+
+        if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+          await this.fixturesRepo.markScheduleDiscovered(targetDateStr, currentDate, cycleId);
+        }
+
+        this.logger.info(`Fetched day ${offsetLabel} (${targetDateStr})... waiting 9s`);
+
+        // Pacing delay: exactly 9 seconds between each of the 7 iterations
+        await new Promise((resolve) => setTimeout(resolve, 9000));
+      } catch (err: any) {
+        this.logger.warn(`Failed schedule sync for day ${offsetLabel} (${targetDateStr}): ${err?.message || err}`);
+        throw err;
+      }
+    }
+
+    const slotKey = `${todayDateStr}-${currentDate.getUTCHours() < 12 ? '00' : '12'}`;
+    this.lastScheduleSyncSlot = slotKey;
+    this.lastScheduleSyncAt = currentDate;
+
+    return combinedSummary;
+  }
+
+  /**
+   * Public trigger for the twice-daily schedule sync routine.
+   */
+  async executeScheduleSyncRoutine(now?: Date): Promise<SyncSummary> {
+    const targetDate = now ?? this.now();
+    return this.sync7DaySchedule(targetDate);
+  }
+
+  /**
    * Executes a single evaluation and sync cycle.
    * Can be called directly for testing or one-shot sync execution.
    */
-  async executeSingleCycle(): Promise<{ plan: SyncPlan; summary: SyncSummary | null }> {
+  async executeSingleCycle(options?: { sync7Days?: boolean }): Promise<{ plan: SyncPlan; summary: SyncSummary | null }> {
     if (this.executingCycle) {
       throw new Error('Cannot execute cycle: another cycle is already in progress.');
     }
@@ -399,8 +503,13 @@ export class AcquisitionScheduler {
       // 1. Fetch current budget state
       const budget = await this.getBudget(this.providerName, currentDate);
 
-      // 2. Fetch fixture summary from repository
-      const summary = await this.fixturesRepo.getActiveSummary(currentDate);
+      // 2. Fetch fixture summary from repository with dynamic user preferences
+      const prefState = this.preferencesService?.getPreferences();
+      const summary = await this.fixturesRepo.getActiveSummary(currentDate, {
+        followedTeamIds: prefState?.followedTeams,
+        followedCompetitionIds: prefState?.followedCompetitions ?? this.targetCompetitionIds,
+        pinnedMatchIds: prefState?.pinnedMatchIds ?? Array.from(this.pinnedMatchIds),
+      });
 
       // 3. Evaluate pure acquisition policy
       plan = AcquisitionPolicyEngine.evaluateSyncPlan(budget, summary, currentDate);
@@ -408,7 +517,7 @@ export class AcquisitionScheduler {
       // 3b. Scheduler Bootstrapping: If policy evaluates to IDLE but database has zero fixtures
       // for the active target date (e.g. freshly seeded catalog or purged fixtures), generate a
       // POLL_SCHEDULE / bootstrap discovery plan to immediately download today's fixtures rather than idling.
-      if (plan.action === 'IDLE' && budget.remainingDaily > 10) {
+      if (plan.action === 'IDLE' && !summary.scheduleKnownForToday && budget.remainingDaily > 10) {
         let hasFixturesToday = false;
         try {
           if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
@@ -490,53 +599,45 @@ export class AcquisitionScheduler {
           (plan.action as string) === 'POLL_SCHEDULE' ||
           (plan.action as string) === 'BOOTSTRAP'
         ) {
-          // Pre-fetch the schedule for the entire 7-day client window (Yesterday through Today + 5)
-          const targetDates: string[] = [];
-          for (let offset = -1; offset <= 5; offset++) {
-            const d = new Date(currentDate.getTime() + offset * 86400000);
-            targetDates.push(d.toISOString().slice(0, 10));
-          }
-
-          let combinedSummary: SyncSummary = {
-            provider: this.providerName,
-            fixturesDiscovered: 0,
-            fixturesInserted: 0,
-            fixturesUpdated: 0,
-            eventsInserted: 0,
-            eventsSkippedDuplicates: 0,
-            hasChanges: false,
-          };
-
-          for (const targetDate of targetDates) {
-            try {
-              const daySummary = await this.syncService.syncSchedule(
-                targetDate,
-                targetComps,
-                cycleId
-              );
-              if (daySummary) {
-                combinedSummary.provider = daySummary.provider;
-                combinedSummary.fixturesDiscovered += daySummary.fixturesDiscovered ?? 0;
-                combinedSummary.fixturesInserted += daySummary.fixturesInserted ?? 0;
-                combinedSummary.fixturesUpdated += daySummary.fixturesUpdated ?? 0;
-                combinedSummary.eventsInserted += daySummary.eventsInserted ?? 0;
-                combinedSummary.eventsSkippedDuplicates += daySummary.eventsSkippedDuplicates ?? 0;
-                combinedSummary.hasChanges = combinedSummary.hasChanges || daySummary.hasChanges;
-              }
-              if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
-                await this.fixturesRepo.markScheduleDiscovered(targetDate, currentDate, cycleId);
-              }
-            } catch (dayErr: any) {
-              this.logger.warn(`Failed schedule sync for date ${targetDate}: ${dayErr?.message}`);
+          if (plan.reason.includes('Twice-daily') || plan.reason.includes('Bootstrapping') || (options && options.sync7Days)) {
+            syncSummary = await this.sync7DaySchedule(currentDate, cycleId);
+          } else {
+            syncSummary = await this.syncService.syncWithPlan(plan, {
+              date: todayDateStr,
+              competitionIds: targetComps,
+              cycleId,
+            });
+            if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+              await this.fixturesRepo.markScheduleDiscovered(todayDateStr, currentDate, cycleId);
             }
           }
-          syncSummary = combinedSummary;
         } else {
           syncSummary = await this.syncService.syncWithPlan(plan, {
             date: todayDateStr,
             competitionIds: targetComps,
             cycleId,
           });
+
+          if (plan.action === 'POLL_LIVE') {
+            // The Halftime (HT) Suspend Detection:
+            // If live match just entered HT status, pause polling/burst timer for 15-minute break
+            const postSyncSummary = await this.fixturesRepo.getActiveSummary(currentDate, {
+              followedTeamIds: prefState?.followedTeams,
+              followedCompetitionIds: prefState?.followedCompetitions ?? this.targetCompetitionIds,
+              pinnedMatchIds: prefState?.pinnedMatchIds ?? Array.from(this.pinnedMatchIds),
+            });
+
+            const isHtSuspended = postSyncSummary.hasPinnedOrFollowedLive
+              ? (postSyncSummary.pinnedOrFollowedInHalftime ?? postSyncSummary.allLiveInHalftime)
+              : postSyncSummary.allLiveInHalftime;
+
+            if (isHtSuspended && postSyncSummary.liveCount > 0) {
+              const remainingBreak = postSyncSummary.halftimeRemainingMs ?? AcquisitionPolicyEngine.HALFTIME_SUSPEND_MS;
+              plan.recommendedNextPollMs = remainingBreak;
+              plan.reason = 'Live match entered HT (Halftime). Polling suspended for 15-minute break.';
+              this.logger.info(`Halftime suspend activated: live match is in HT. Pausing polling for ${Math.round(remainingBreak / 1000)}s.`);
+            }
+          }
         }
 
         if (plan.action === 'DISCOVER_SCHEDULE' || (plan.action as string) === 'POLL_SCHEDULE' || (plan.action as string) === 'BOOTSTRAP') {
@@ -693,16 +794,108 @@ export class AcquisitionScheduler {
   }
 
   /**
+   * Checks whether a cold-boot 7-day bootstrap sync is required.
+   * Returns true if database has 0 fixtures overall or lacks fixtures for the current date,
+   * definitively triggering the mandatory 7-day schedule sync routine.
+   */
+  async isBootstrapSyncNeeded(currentDate: Date = this.now()): Promise<boolean> {
+    const todayStr = currentDate.toISOString().slice(0, 10);
+    try {
+      // 1. Total fixtures count check
+      let totalFixtures = 0;
+      if (typeof (this.fixturesRepo as any).countTotalFixtures === 'function') {
+        totalFixtures = await (this.fixturesRepo as any).countTotalFixtures();
+      } else {
+        const result = await db.select({ count: sql<number>`count(*)` }).from(schema.fixtures);
+        totalFixtures = Number(result[0]?.count ?? 0);
+      }
+
+      if (totalFixtures === 0) {
+        this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Database fixtures table is empty (0 fixtures).');
+        return true;
+      }
+
+      // 1b. Mock eradication safeguard: check non-mock fixtures if repo supports it
+      if (typeof (this.fixturesRepo as any).countNonMockFixtures === 'function') {
+        const nonMock = await (this.fixturesRepo as any).countNonMockFixtures();
+        if (nonMock === 0) {
+          this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Zero real non-mock fixtures present in database.');
+          return true;
+        }
+      }
+
+      // 2. Check if fixtures exist for today's date
+      let hasToday = false;
+      if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
+        hasToday = await (this.fixturesRepo as any).hasFixturesForDate(todayStr);
+      } else {
+        const startOfToday = new Date(`${todayStr}T00:00:00.000Z`);
+        const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+        const rows = await db
+          .select({ id: schema.fixtures.id })
+          .from(schema.fixtures)
+          .where(
+            and(
+              gte(schema.fixtures.kickoffTime, startOfToday),
+              lt(schema.fixtures.kickoffTime, endOfToday),
+              notLike(schema.fixtures.id, '%mock%'),
+              notInArray(schema.fixtures.id, ['fix_elclasico_2026', 'fix_spain_egypt_2026'])
+            )
+          )
+          .limit(1);
+        hasToday = rows.length > 0;
+      }
+
+      if (!hasToday) {
+        this.logger.info(`[DEBUG] Executing mandatory 7-day bootstrap sync: No fixtures found for today (${todayStr}).`);
+        return true;
+      }
+
+      return false;
+    } catch (err: any) {
+      this.logger.warn(`Could not verify bootstrap fixtures status: ${err?.message}`);
+      this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Fallback triggered on verification error.');
+      return true;
+    }
+  }
+
+  /**
    * Internal autonomous background loop.
    */
   private async runLoop(signal: AbortSignal): Promise<void> {
     // 1. Initial hydration and recovery on boot
     await this.hydrateStateFromDatabase();
 
+    // 2. Cold-boot check: if database is empty or current day lacks data,
+    // sync7DaySchedule() runs immediately and synchronously before standard live loop starts.
+    if (this.running && !signal.aborted) {
+      const needsBootstrap = await this.isBootstrapSyncNeeded(this.now());
+      if (needsBootstrap) {
+        this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Cold boot detected (empty or missing today data). Running immediate 7-day schedule sync (-1 to +5 days)...');
+        try {
+          await this.sync7DaySchedule(this.now());
+          this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Completed successfully.');
+        } catch (coldBootErr: any) {
+          this.logger.warn(`Cold-boot 7-day schedule sync encountered an error: ${coldBootErr?.message}`);
+        }
+      }
+    }
+
     while (this.running && !signal.aborted) {
       let nextWaitMs = AcquisitionScheduler.DEFAULT_IDLE_DELAY_MS;
 
       try {
+        // Twice-Daily Schedule Sync Background Routine:
+        // Strictly twice a day (midnight UTC and midday), fetch and cache 7-day schedule (-1 to +5).
+        if (this.isTwiceDailyScheduleSyncDue(this.now())) {
+          this.logger.info('Executing twice-daily 7-day schedule sync routine (midnight/midday UTC).');
+          try {
+            await this.sync7DaySchedule(this.now());
+          } catch (syncErr: any) {
+            this.logger.warn(`Twice-daily schedule sync routine encountered an error: ${syncErr?.message}`);
+          }
+        }
+
         const { plan } = await this.executeSingleCycle();
 
         // Calculate next polling delay from policy recommendation

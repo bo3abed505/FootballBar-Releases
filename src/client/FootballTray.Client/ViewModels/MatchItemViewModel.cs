@@ -44,6 +44,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     public string CompetitionId { get; init; } = string.Empty;
     public string CompetitionName { get; init; } = string.Empty;
     public string CompetitionCode { get; init; } = string.Empty;
+    public string? CompetitionCountry { get; init; }
     public string? CompetitionLogoUrl { get; init; }
     public bool IsLive { get; init; }
     public bool IsFinished { get; init; }
@@ -300,7 +301,8 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
             CompetitionId = match.Competition?.Id ?? string.Empty,
             CompetitionName = match.Competition?.Name ?? "Competition",
             CompetitionCode = match.Competition?.Code ?? "COMP",
-            CompetitionLogoUrl = null,
+            CompetitionCountry = match.Competition?.Country,
+            CompetitionLogoUrl = match.Competition?.LogoUrl,
             IsLive = isLive,
             IsFinished = isFinished,
             IsPrematch = isPrematch

@@ -51,7 +51,7 @@ export class ApiFootballClient {
       try {
         const url = `${this.baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
-        return await this.gateway.execute<ApiFootballEnvelope<T>>(
+        const gatewayResponse = await this.gateway.execute<ApiFootballEnvelope<T>>(
           {
             provider: 'api_football',
             endpoint,
@@ -70,6 +70,14 @@ export class ApiFootballClient {
             });
 
             const data = (await response.json()) as ApiFootballEnvelope<T>;
+            if (data?.errors) {
+              const hasErrors = Array.isArray(data.errors)
+                ? data.errors.length > 0
+                : typeof data.errors === 'object' && Object.keys(data.errors).length > 0;
+              if (hasErrors) {
+                throw new Error("API-Football Error: " + JSON.stringify(data.errors));
+              }
+            }
             return {
               status: response.status,
               headers: response.headers,
@@ -77,6 +85,12 @@ export class ApiFootballClient {
             };
           }
         );
+
+        if (!gatewayResponse.success && gatewayResponse.error?.startsWith('API-Football Error:')) {
+          throw new Error(gatewayResponse.error);
+        }
+
+        return gatewayResponse;
       } finally {
         this.inFlight.delete(key);
       }
@@ -119,6 +133,21 @@ export class ApiFootballClient {
   }
 
   /**
+   * Fetches fixtures for a date range via GET /fixtures?from=YYYY-MM-DD&to=YYYY-MM-DD.
+   */
+  async getFixturesByDateRange(
+    fromDate: string,
+    toDate: string,
+    priority: RequestPriority = 'NORMAL',
+    cycleId?: string
+  ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
+    const fromStr = fromDate.slice(0, 10);
+    const toStr = toDate.slice(0, 10);
+    const endpoint = `/fixtures?from=${fromStr}&to=${toStr}`;
+    return this.executeRequest<ApiFootballFixtureItem[]>(endpoint, 'get_fixtures_range', priority, cycleId);
+  }
+
+  /**
    * Fetches multiple fixtures in a single batch request via GET /fixtures?ids={id1}-{id2}-...-{idN}
    * Supports up to 20 fixture IDs per request.
    */
@@ -155,16 +184,21 @@ export class ApiFootballClient {
   }
 
   async getFixtures(
-    params: { id?: number; ids?: string | (number | string)[]; date?: string; league?: number; season?: number; live?: string },
+    params: { id?: number; ids?: string | (number | string)[]; date?: string; from?: string; to?: string; league?: number; season?: number; live?: string },
     priority: RequestPriority = 'NORMAL',
     cycleId?: string,
     competitionId?: string
   ): Promise<GatewayResponse<ApiFootballEnvelope<ApiFootballFixtureItem[]>>> {
+    if (params.from && params.to && !params.league && !params.id && !params.ids && !params.season && !params.live) {
+      return this.getFixturesByDateRange(params.from, params.to, priority, cycleId);
+    }
     if (params.date && !params.league && !params.id && !params.ids && !params.season && !params.live) {
       return this.getFixturesByDate(params.date, priority, cycleId);
     }
 
     const query = new URLSearchParams();
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
     if (params.id) query.set('id', params.id.toString());
     if (params.ids) {
       const idsStr = Array.isArray(params.ids)

@@ -15,6 +15,12 @@ public sealed partial class MatchCenterWindow : Window
 
     public ObservableCollection<MatchTimelineItem> TimelineItems => ViewModel.TimelineItems;
 
+    private DispatcherTimer? _liveRefreshTimer;
+    private bool _isRefreshing;
+
+    public DispatcherTimer? LiveRefreshTimer => _liveRefreshTimer;
+    public bool IsLiveRefreshTimerRunning => _liveRefreshTimer?.IsEnabled == true;
+
     public MatchCenterWindow()
     {
         InitializeComponent();
@@ -81,9 +87,96 @@ public sealed partial class MatchCenterWindow : Window
 
         UpdateStarAndPinVisuals();
 
+        // Check terminal state upon load and after every refresh to prevent quota drain
+        string stateUpper = (match.State ?? string.Empty).Trim().ToUpperInvariant();
+        bool isTerminalState = stateUpper is "FT" or "FINISHED" or "AET" or "PEN" or "PST" or "CANC" or "POSTMATCH";
+        if (isTerminalState)
+        {
+            StopLiveRefreshTimer();
+        }
+        else
+        {
+            // Start active live refresh timer (~12s) while Match Center window remains open for in-flight matches
+            StartLiveRefreshTimer();
+        }
+
         // Asynchronously load team crests on background thread without blocking UI
         _ = LoadLogosAsync(match);
     }
+
+    public void StartLiveRefreshTimer()
+    {
+        if (_liveRefreshTimer == null)
+        {
+            _liveRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(12)
+            };
+            _liveRefreshTimer.Tick += OnLiveRefreshTick;
+        }
+
+        if (!_liveRefreshTimer.IsEnabled)
+        {
+            _liveRefreshTimer.Start();
+        }
+    }
+
+    public void StopLiveRefreshTimer()
+    {
+        if (_liveRefreshTimer != null)
+        {
+            _liveRefreshTimer.Tick -= OnLiveRefreshTick;
+            _liveRefreshTimer.Stop();
+            _liveRefreshTimer = null;
+        }
+    }
+
+    private async void OnLiveRefreshTick(object? sender, object e)
+    {
+        await RefreshMatchDetailsAsync();
+    }
+
+    public async Task<bool> RefreshMatchDetailsAsync(FootballApiClient? client = null)
+    {
+        if (_isRefreshing || string.IsNullOrWhiteSpace(ViewModel.MatchId))
+        {
+            return false;
+        }
+
+        _isRefreshing = true;
+        bool created = false;
+        if (client == null)
+        {
+            client = new FootballApiClient();
+            created = true;
+        }
+
+        try
+        {
+            var response = await client.GetMatchDetailsAsync(ViewModel.MatchId);
+            if (response.IsSuccess && response.Envelope?.Data != null)
+            {
+                Populate(response.Envelope.Data);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[MATCH_CENTER] Live refresh tick error: {ex.Message}");
+        }
+        finally
+        {
+            if (created)
+            {
+                client.Dispose();
+            }
+            _isRefreshing = false;
+        }
+
+        return false;
+    }
+
+
 
     private async void OnToggleHomeStarClicked(object sender, RoutedEventArgs e)
     {
@@ -205,6 +298,7 @@ public sealed partial class MatchCenterWindow : Window
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         Closed -= OnWindowClosed;
+        StopLiveRefreshTimer();
 
         if (HomeTeamLogo != null)
         {

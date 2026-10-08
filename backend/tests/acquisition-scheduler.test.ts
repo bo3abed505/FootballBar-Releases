@@ -670,4 +670,168 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       expect(mockSyncService.syncWithPlan).not.toHaveBeenCalled();
     });
   });
+
+  // ============================================================
+  // 9. Mandatory 7-Day Bootstrap Sync & isBootstrapSyncNeeded
+  // ============================================================
+  describe('Mandatory 7-Day Bootstrap Sync & isBootstrapSyncNeeded', () => {
+    it('isBootstrapSyncNeeded returns true when total fixtures count is 0', async () => {
+      const mockSyncService: any = { syncSchedule: vi.fn() };
+      const mockRepo: any = {
+        countTotalFixtures: vi.fn().mockResolvedValue(0),
+        hasFixturesForDate: vi.fn().mockResolvedValue(false),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        logger: silentLogger,
+      });
+
+      const needed = await scheduler.isBootstrapSyncNeeded(new Date('2026-10-08T12:00:00Z'));
+      expect(needed).toBe(true);
+    });
+
+    it('isBootstrapSyncNeeded returns true when surviving ghost mocks exist but zero non-mock fixtures', async () => {
+      const mockSyncService: any = { syncSchedule: vi.fn() };
+      const mockRepo: any = {
+        countTotalFixtures: vi.fn().mockResolvedValue(5), // 5 ghost mocks
+        countNonMockFixtures: vi.fn().mockResolvedValue(0), // 0 real fixtures
+        hasFixturesForDate: vi.fn().mockResolvedValue(true),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        logger: silentLogger,
+      });
+
+      const needed = await scheduler.isBootstrapSyncNeeded(new Date('2026-10-08T12:00:00Z'));
+      expect(needed).toBe(true);
+    });
+
+    it('isBootstrapSyncNeeded returns true when today has no fixtures even if other days do', async () => {
+      const mockSyncService: any = { syncSchedule: vi.fn() };
+      const mockRepo: any = {
+        countTotalFixtures: vi.fn().mockResolvedValue(10),
+        hasFixturesForDate: vi.fn().mockResolvedValue(false),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        logger: silentLogger,
+      });
+
+      const needed = await scheduler.isBootstrapSyncNeeded(new Date('2026-10-08T12:00:00Z'));
+      expect(needed).toBe(true);
+      expect(mockRepo.hasFixturesForDate).toHaveBeenCalledWith('2026-10-08');
+    });
+
+    it('isBootstrapSyncNeeded returns false when real fixtures exist for today', async () => {
+      const mockSyncService: any = { syncSchedule: vi.fn() };
+      const mockRepo: any = {
+        countTotalFixtures: vi.fn().mockResolvedValue(10),
+        hasFixturesForDate: vi.fn().mockResolvedValue(true),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        logger: silentLogger,
+      });
+
+      const needed = await scheduler.isBootstrapSyncNeeded(new Date('2026-10-08T12:00:00Z'));
+      expect(needed).toBe(false);
+    });
+
+    it('sync7DaySchedule executes paced daily schedule queries across 7 days (-1 to +5)', async () => {
+      vi.useFakeTimers();
+      try {
+        const syncedDates: string[] = [];
+        const mockSyncService: any = {
+          syncSchedule: vi.fn().mockImplementation(async (date: string, comps?: number[], cycleId?: string) => {
+            syncedDates.push(date);
+            return {
+              provider: 'api_football',
+              fixturesDiscovered: 2,
+              fixturesInserted: 1,
+              fixturesUpdated: 1,
+              eventsInserted: 0,
+              eventsSkippedDuplicates: 0,
+              hasChanges: true,
+            };
+          }),
+        };
+
+        const markedDates: string[] = [];
+        const mockRepo: any = {
+          markScheduleDiscovered: vi.fn().mockImplementation(async (date: string) => {
+            markedDates.push(date);
+          }),
+        };
+
+        const scheduler = new AcquisitionScheduler({
+          syncService: mockSyncService,
+          fixturesRepository: mockRepo,
+          logger: silentLogger,
+          targetCompetitionIds: [39, 140],
+        });
+
+        const baseDate = new Date('2026-10-08T12:00:00.000Z');
+        const syncPromise = scheduler.sync7DaySchedule(baseDate, 'cycle_bootstrap_test');
+        await vi.runAllTimersAsync();
+        const summary = await syncPromise;
+
+        // Assert 7 separate daily queries spanning -1 (2026-10-07) to +5 (2026-10-13)
+        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(7);
+        expect(syncedDates).toEqual([
+          '2026-10-07',
+          '2026-10-08',
+          '2026-10-09',
+          '2026-10-10',
+          '2026-10-11',
+          '2026-10-12',
+          '2026-10-13',
+        ]);
+        // All 7 dates marked discovered
+        expect(markedDates).toHaveLength(7);
+        expect(markedDates[0]).toBe('2026-10-07');
+        expect(markedDates[6]).toBe('2026-10-13');
+        expect(summary.fixturesDiscovered).toBe(14);
+        expect(summary.fixturesInserted).toBe(7);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sync7DaySchedule throws error when daily schedule request fails', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockSyncService: any = {
+          syncSchedule: vi.fn().mockRejectedValue(new Error('API Rate Limit or Gateway Error')),
+        };
+
+        const mockRepo: any = {
+          markScheduleDiscovered: vi.fn().mockResolvedValue(undefined),
+        };
+
+        const scheduler = new AcquisitionScheduler({
+          syncService: mockSyncService,
+          fixturesRepository: mockRepo,
+          logger: silentLogger,
+        });
+
+        const baseDate = new Date('2026-10-08T12:00:00.000Z');
+        const syncPromise = scheduler.sync7DaySchedule(baseDate);
+        const assertion = expect(syncPromise).rejects.toThrow('API Rate Limit or Gateway Error');
+        await vi.runAllTimersAsync();
+        await assertion;
+        expect(mockRepo.markScheduleDiscovered).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
+

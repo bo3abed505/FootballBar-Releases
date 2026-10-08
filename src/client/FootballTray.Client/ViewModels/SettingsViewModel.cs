@@ -164,6 +164,102 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(GlobalNotificationsEnabled));
     }
 
+    public bool IsGoalsAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.Goal);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.Goal) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.Goal, value);
+            }
+        }
+    }
+
+    public bool IsCardsAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.RedCard);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.RedCard) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.RedCard, value);
+            }
+        }
+    }
+
+    public bool IsMatchStartAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchStarted);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchStarted) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.MatchStarted, value);
+            }
+        }
+    }
+
+    public bool IsHalfTimeAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.HalfTime);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.HalfTime) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.HalfTime, value);
+            }
+        }
+    }
+
+    public bool IsFullTimeAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchFinished);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchFinished) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.MatchFinished, value);
+            }
+        }
+    }
+
+    public bool IsPostponedAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchPostponed);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchPostponed) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.MatchPostponed, value);
+            }
+        }
+    }
+
+    public bool IsCancelledAlertEnabled
+    {
+        get => _preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchCancelled);
+        set
+        {
+            if (_preferencesService.Current.Notifications.IsTypeEnabled(NotificationType.MatchCancelled) != value)
+            {
+                _ = SetNotificationTypeEnabledAsync(NotificationType.MatchCancelled, value);
+            }
+        }
+    }
+
+    public async Task SetNotificationTypeEnabledAsync(NotificationType type, bool enabled)
+    {
+        await _preferencesService.SetNotificationTypeEnabledAsync(type, enabled);
+        OnPropertyChanged(nameof(IsGoalsAlertEnabled));
+        OnPropertyChanged(nameof(IsCardsAlertEnabled));
+        OnPropertyChanged(nameof(IsMatchStartAlertEnabled));
+        OnPropertyChanged(nameof(IsHalfTimeAlertEnabled));
+        OnPropertyChanged(nameof(IsFullTimeAlertEnabled));
+        OnPropertyChanged(nameof(IsPostponedAlertEnabled));
+        OnPropertyChanged(nameof(IsCancelledAlertEnabled));
+    }
+
     public NotificationSoundMode SoundMode
     {
         get => _preferencesService.Current.SoundMode;

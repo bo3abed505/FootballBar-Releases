@@ -599,13 +599,36 @@ public sealed class PreferencesService : IPreferencesService
 
     private async Task<UserPreferences> LoadFromDiskAsync(CancellationToken cancellationToken)
     {
-        UserPreferences? primary = null;
         bool primaryExists = File.Exists(_filePath);
 
-        if (primaryExists)
+        // Missing preferences file: initialize with strict empty collections ([]), preventing silent ghost re-injection
+        if (!primaryExists)
         {
-            primary = await TryReadPreferencesFileAsync(_filePath, cancellationToken);
+            var missingDefaults = DefaultPreferences.CreateDefault();
+            try
+            {
+                if (File.Exists(_backupFilePath)) File.Delete(_backupFilePath);
+                await SaveToDiskAsync(missingDefaults, cancellationToken);
+            }
+            catch { }
+            return missingDefaults;
         }
+
+        // Empty or 0-byte preferences file: initialize with strict empty collections ([])
+        try
+        {
+            var fileInfo = new FileInfo(_filePath);
+            if (fileInfo.Length == 0)
+            {
+                var emptyDefaults = DefaultPreferences.CreateDefault();
+                if (File.Exists(_backupFilePath)) File.Delete(_backupFilePath);
+                await SaveToDiskAsync(emptyDefaults, cancellationToken);
+                return emptyDefaults;
+            }
+        }
+        catch { }
+
+        UserPreferences? primary = await TryReadPreferencesFileAsync(_filePath, cancellationToken);
 
         if (primary != null)
         {
@@ -648,10 +671,24 @@ public sealed class PreferencesService : IPreferencesService
             return normalizedPrimary;
         }
 
-        // Primary is missing, corrupted, or unreadable — attempt recovery from backup
+        // If primary exists and is whitespace-only, treat as empty preferences
+        try
+        {
+            string rawContent = await File.ReadAllTextAsync(_filePath, cancellationToken);
+            if (string.IsNullOrWhiteSpace(rawContent))
+            {
+                var emptyDefaults = DefaultPreferences.CreateDefault();
+                if (File.Exists(_backupFilePath)) File.Delete(_backupFilePath);
+                await SaveToDiskAsync(emptyDefaults, cancellationToken);
+                return emptyDefaults;
+            }
+        }
+        catch { }
+
+        // Primary is corrupted (non-empty unparseable JSON) — attempt recovery from backup
         if (File.Exists(_backupFilePath))
         {
-            System.Diagnostics.Debug.WriteLine("[PREFERENCES] Primary file invalid or missing. Attempting recovery from backup.");
+            System.Diagnostics.Debug.WriteLine("[PREFERENCES] Primary file corrupted. Attempting recovery from backup.");
             var backup = await TryReadPreferencesFileAsync(_backupFilePath, cancellationToken);
             if (backup != null)
             {
@@ -832,6 +869,7 @@ public sealed class PreferencesService : IPreferencesService
             foreach (var team in raw.FollowedTeams)
             {
                 if (team == null || string.IsNullOrWhiteSpace(team.Id)) continue;
+                if (IsMockEntity(team.Id, team.Name)) continue;
 
                 string id = team.Id.Trim();
                 string canonicalId = CanonicalEntityIds.TryTranslateLegacyId(id, out var cId) ? cId : id;
@@ -868,6 +906,7 @@ public sealed class PreferencesService : IPreferencesService
             foreach (var comp in raw.FollowedCompetitions)
             {
                 if (comp == null || string.IsNullOrWhiteSpace(comp.Id)) continue;
+                if (IsMockEntity(comp.Id, comp.Name, comp.Code)) continue;
 
                 string id = comp.Id.Trim();
                 string canonicalId = CanonicalEntityIds.TryTranslateLegacyId(id, out var cId) ? cId : id;
@@ -923,5 +962,25 @@ public sealed class PreferencesService : IPreferencesService
             KickoffReminderOffsetMinutes = raw.KickoffReminderOffsetMinutes >= 0 ? raw.KickoffReminderOffsetMinutes : 15,
             ExtensionData = raw.ExtensionData
         };
+    }
+
+    private static bool IsMockEntity(string? id, string? name, string? code = null)
+    {
+        if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(name)) return false;
+        var n = (name ?? string.Empty).ToLowerInvariant();
+        var i = (id ?? string.Empty).ToLowerInvariant();
+        var c = (code ?? string.Empty).ToLowerInvariant();
+        return n.Contains("(dev mock)") ||
+               n.Contains("mock") ||
+               i.Contains("mock") ||
+               c.Contains("mock") ||
+               i == "comp_laliga" ||
+               i == "comp_egypt_pl" ||
+               i == "comp_international" ||
+               i == "team_barcelona" ||
+               i == "team_realmadrid" ||
+               i == "team_alahly" ||
+               i == "team_egypt" ||
+               i == "team_spain";
     }
 }

@@ -60,6 +60,15 @@ export interface FixturesSummary {
   staleCompetitionIds?: number[];
   scheduleKnownForToday: boolean;
   lastScheduleDiscoveryAt?: Date | string | null;
+
+  // Strike 24A Quota-Shield fields
+  hasPinnedOrFollowedLive?: boolean;
+  pinnedOrFollowedLiveCount?: number;
+  unpinnedLiveCount?: number;
+  allLiveInHalftime?: boolean;
+  pinnedOrFollowedInHalftime?: boolean;
+  halftimeRemainingMs?: number | null;
+  isScheduleSyncDue?: boolean;
 }
 
 export interface FixtureClassificationInput {
@@ -79,10 +88,18 @@ export class AcquisitionPolicyEngine {
   static readonly SLOW_CADENCE_BUDGET_MIN = 11; // 11..19
   static readonly CRITICAL_RESERVE_CEILING = 10; // <= 10
 
-  // Polling intervals in milliseconds
+  // Strike 24A Quota-Shield Cadence Constants
+  // Idle / No Live Matches: Check every 4–6 hours (4h = 14,400s)
+  static readonly IDLE_NO_LIVE_CADENCE_MS = 4 * 60 * 60 * 1000;
+  // Unpinned Live Matches: Broad 15–20 minute interval (15m = 900s)
+  static readonly UNPINNED_LIVE_CADENCE_MS = 15 * 60 * 1000;
+  // Pinned / Followed Live Matches: Strict 90-second Live Burst Mode (90s)
+  static readonly PINNED_LIVE_BURST_CADENCE_MS = 90 * 1000;
+  // The Halftime (HT) Suspend: Pause polling for the 15-minute break (15m = 900s)
+  static readonly HALFTIME_SUSPEND_MS = 15 * 60 * 1000;
+
+  // Fallback Polling intervals in milliseconds
   // Calibrated for API-Football 100/day free-tier quota (90 operational daily ceiling).
-  // A 110-minute match at 180s (3m) consumes ~36 requests (vs 55 at 120s), saving 33% quota
-  // and allowing 2-3 full match windows per day without quota exhaustion.
   static readonly FAST_CADENCE_MS = 180_000; // 180s (3m)
   static readonly STANDARD_CADENCE_MS = 300_000; // 300s (5m)
   static readonly SLOW_CADENCE_MS = 600_000; // 600s (10m)
@@ -97,12 +114,45 @@ export class AcquisitionPolicyEngine {
   static readonly APPROACHING_WINDOW_MS = 15 * 60 * 1000;
 
   // Maximum duration a match can remain in a LIVE/in-play state before being considered expired/stale.
-  // Normal regulation match = 90 min + 15 min halftime + 10 min stoppage (~115 min).
-  // Knockout extra time (30 min + 5 min break) + penalty shootout (15 min) extends this to ~165 min.
-  // 210 minutes (3.5 hours) provides a generous 45-minute safety buffer for extraordinary match delays
-  // (e.g. VAR, severe injury, weather interruption) while firmly preventing orphaned/stale fixtures
-  // from pinning the scheduler indefinitely.
   static readonly MAX_LIVE_MATCH_AGE_MS = 210 * 60 * 1000; // 3.5 hours (210 minutes)
+
+  /**
+   * Returns the UTC start timestamp of the current twice-daily schedule slot:
+   * Slot 0: 00:00:00.000Z (Midnight UTC)
+   * Slot 1: 12:00:00.000Z (Midday UTC)
+   */
+  static getScheduleSyncSlotStart(now: Date): Date {
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth();
+    const day = now.getUTCDate();
+    const slotHour = now.getUTCHours() < 12 ? 0 : 12;
+    return new Date(Date.UTC(year, month, day, slotHour, 0, 0, 0));
+  }
+
+  /**
+   * Returns the UTC start timestamp of the next upcoming twice-daily schedule slot.
+   */
+  static getNextScheduleSyncSlotStart(now: Date): Date {
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth();
+    const day = now.getUTCDate();
+    if (now.getUTCHours() < 12) {
+      return new Date(Date.UTC(year, month, day, 12, 0, 0, 0));
+    }
+    return new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
+  }
+
+  /**
+   * Deterministically evaluates whether twice-daily schedule discovery is due.
+   * Due if never discovered, or if the last discovery was before the start of the current slot.
+   */
+  static isScheduleSyncDue(now: Date, lastDiscovery?: Date | string | null): boolean {
+    if (!lastDiscovery) return true;
+    const lastDate = lastDiscovery instanceof Date ? lastDiscovery : new Date(lastDiscovery);
+    if (isNaN(lastDate.getTime())) return true;
+    const currentSlotStart = this.getScheduleSyncSlotStart(now);
+    return lastDate.getTime() < currentSlotStart.getTime();
+  }
 
   /**
    * Calculates recommended polling interval based on remaining daily budget.
@@ -237,18 +287,65 @@ export class AcquisitionPolicyEngine {
       };
     }
 
-    // 2. Undiscovered Daily Schedule Priority (Prevents live matches from starving schedule discovery)
-    if (!fixturesSummary.scheduleKnownForToday) {
+    // 2. Twice-Daily Schedule Sync Priority
+    // Fetch and cache the 7-day fixture schedule strictly twice a day (midnight UTC and midday)
+    const scheduleSyncDue = fixturesSummary.isScheduleSyncDue ??
+      this.isScheduleSyncDue(now, fixturesSummary.lastScheduleDiscoveryAt);
+
+    if (!fixturesSummary.scheduleKnownForToday || (fixturesSummary.isScheduleSyncDue === true)) {
       return {
         action: 'DISCOVER_SCHEDULE',
         priority: 'NORMAL',
         recommendedNextPollMs: 3600_000,
-        reason: "Today's match schedule has not been discovered yet.",
+        reason: !fixturesSummary.scheduleKnownForToday
+          ? "Today's match schedule has not been discovered yet."
+          : "Twice-daily schedule sync due (midnight/midday UTC).",
       };
     }
 
-    // 3. Live Fixtures Priority (Consolidated poll for all live matches)
+    // 3. Live Fixtures Priority (Dynamic Priority Scaling, Live Burst Mode, & The Halftime (HT) Suspend)
     if (fixturesSummary.liveCount > 0) {
+      // 3a. The Halftime (HT) Suspend:
+      // If all active live matches (or all followed live matches) are in HT,
+      // pause polling for the 15-minute break to eliminate wasted requests.
+      const isHtSuspended = fixturesSummary.hasPinnedOrFollowedLive
+        ? (fixturesSummary.pinnedOrFollowedInHalftime ?? fixturesSummary.allLiveInHalftime)
+        : fixturesSummary.allLiveInHalftime;
+
+      if (isHtSuspended) {
+        const suspendMs = fixturesSummary.halftimeRemainingMs ?? this.HALFTIME_SUSPEND_MS;
+        return {
+          action: 'IDLE',
+          priority: 'NORMAL',
+          recommendedNextPollMs: suspendMs,
+          reason: fixturesSummary.hasPinnedOrFollowedLive
+            ? 'Halftime suspend: followed live match is in HT. Pausing polling for 15-minute break.'
+            : 'Halftime suspend: all live matches in HT. Pausing polling for 15-minute break.',
+        };
+      }
+
+      // 3b. Dynamic Priority Scaling:
+      // - Pinned / Followed Live Matches: Strict 90-second Live Burst Mode running exclusively from 1H through FT
+      if (fixturesSummary.hasPinnedOrFollowedLive) {
+        return {
+          action: 'POLL_LIVE',
+          priority: 'NORMAL',
+          recommendedNextPollMs: this.PINNED_LIVE_BURST_CADENCE_MS,
+          reason: `Pinned/followed live match in active play (${fixturesSummary.pinnedOrFollowedLiveCount ?? 1} active). 90-second Live Burst Mode active.`,
+        };
+      }
+
+      // - Unpinned Live Matches: Broad 15–20 minute interval
+      if (fixturesSummary.hasPinnedOrFollowedLive === false) {
+        return {
+          action: 'POLL_LIVE',
+          priority: 'NORMAL',
+          recommendedNextPollMs: this.UNPINNED_LIVE_CADENCE_MS,
+          reason: `Live match in progress (${fixturesSummary.liveCount} active unpinned). Polling with broad 15-minute interval.`,
+        };
+      }
+
+      // Fallback for generic/legacy callers where pinned state is unspecified
       const intervalMs = this.calculateLivePollingInterval(remaining);
       if (intervalMs === null) {
         return {
@@ -297,7 +394,22 @@ export class AcquisitionPolicyEngine {
       };
     }
 
-    // 7. Fully Idle
+    // 7. Fully Idle (Check every 4–6 hours, bounded by next twice-daily schedule slot)
+    if (fixturesSummary.hasPinnedOrFollowedLive !== undefined) {
+      const msUntilNextScheduleSlot = Math.max(
+        60_000,
+        this.getNextScheduleSyncSlotStart(now).getTime() - now.getTime()
+      );
+      const idleDelayMs = Math.min(this.IDLE_NO_LIVE_CADENCE_MS, msUntilNextScheduleSlot);
+
+      return {
+        action: 'IDLE',
+        priority: 'NORMAL',
+        recommendedNextPollMs: idleDelayMs,
+        reason: `No live matches. System idle (checking every ${Math.round(idleDelayMs / 3600000)}h).`,
+      };
+    }
+
     return {
       action: 'IDLE',
       priority: 'NORMAL',

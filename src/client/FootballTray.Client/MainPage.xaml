@@ -228,6 +228,83 @@
                 </Grid>
             </Border>
         </DataTemplate>
+
+        <!-- Expandable / Collapsible Competition Accordion Card Template -->
+        <DataTemplate x:Key="CompetitionAccordionTemplate" x:DataType="vm:CompetitionGroupViewModel">
+            <Expander
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                Margin="0,0,0,10">
+                <Expander.Header>
+                    <Grid ColumnSpacing="12" HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: Competition Logo + Followed Star Indicator + Competition Name + Country -->
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border
+                                Width="20"
+                                Height="20"
+                                CornerRadius="4"
+                                Background="Transparent"
+                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                VerticalAlignment="Center">
+                                <Image
+                                    Source="{x:Bind LogoUrl, Mode=OneWay}"
+                                    Width="20"
+                                    Height="20"
+                                    Stretch="Uniform" />
+                            </Border>
+                            <FontIcon
+                                Glyph="&#xE734;"
+                                FontSize="14"
+                                Foreground="{ThemeResource SystemFillColorAttentionBrush}"
+                                Visibility="{x:Bind FollowedStarVisibility, Mode=OneWay}"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                Text="{x:Bind CompetitionName}"
+                                FontSize="14"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                Text="{x:Bind CountryDisplay, Mode=OneWay}"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- Right: Match Count Badge -->
+                        <Border
+                            Grid.Column="1"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            Padding="8,2"
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center">
+                            <TextBlock
+                                Text="{x:Bind MatchCountText, Mode=OneWay}"
+                                FontSize="11"
+                                FontWeight="Bold"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Border>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <ItemsControl
+                        ItemsSource="{x:Bind Matches}"
+                        ItemTemplate="{StaticResource MatchCardTemplate}"
+                        Padding="10,0,10,6" />
+                </Expander.Content>
+            </Expander>
+        </DataTemplate>
     </Page.Resources>
 
     <Grid Padding="20" RowSpacing="12">
@@ -281,7 +358,8 @@
                 <!-- Active Taskbar Summary -->
                 <TextBlock
                     x:Name="ActiveTickerSummaryText"
-                    Text="📌 Taskbar Active: Loading..."
+                    Text="{x:Bind ViewModel.TickerMatchDisplay, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.HasActiveTicker, Mode=OneWay}"
                     FontSize="12"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
@@ -438,26 +516,10 @@
                     <!-- Match Cards List View -->
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <StackPanel Spacing="10">
-                            <!-- Followed Matches Container -->
+                            <!-- Expandable Competition Accordion Groups -->
                             <ItemsControl
-                                x:Name="FollowedMatchesList"
-                                ItemTemplate="{StaticResource MatchCardTemplate}" />
-
-                            <!-- Collapsible Other Matches Section -->
-                            <Expander
-                                x:Name="OtherMatchesExpander"
-                                HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch"
-                                Header="{x:Bind ViewModel.OtherMatchesHeader, Mode=OneWay}"
-                                IsExpanded="{x:Bind ViewModel.IsOtherMatchesExpanded, Mode=TwoWay}"
-                                Visibility="{x:Bind ViewModel.IsOtherMatchesVisible, Mode=OneWay}">
-                                <Expander.Content>
-                                    <ItemsControl
-                                        x:Name="OtherMatchesList"
-                                        ItemTemplate="{StaticResource MatchCardTemplate}"
-                                        Margin="0,8,0,0" />
-                                </Expander.Content>
-                            </Expander>
+                                x:Name="CompetitionGroupsList"
+                                ItemTemplate="{StaticResource CompetitionAccordionTemplate}" />
 
                             <!-- Empty State Card -->
                             <Border
@@ -593,7 +655,9 @@
                                 <ListView
                                     x:Name="TeamSearchResultsList"
                                     SelectionMode="None"
-                                    MaxHeight="200"
+                                    MaxHeight="800"
+                                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                    ScrollViewer.VerticalScrollMode="Disabled"
                                     Visibility="Collapsed">
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="vm:FollowedTeamItemViewModel">
@@ -639,7 +703,9 @@
                                 <ListView
                                     x:Name="CompetitionSearchResultsList"
                                     SelectionMode="None"
-                                    MaxHeight="200"
+                                    MaxHeight="800"
+                                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                    ScrollViewer.VerticalScrollMode="Disabled"
                                     Visibility="Collapsed">
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="vm:FollowedCompetitionItemViewModel">

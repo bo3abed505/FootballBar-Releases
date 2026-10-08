@@ -379,6 +379,34 @@ public class FootballApiClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Updates the pinned match ID on the daemon via POST /api/v2/preferences.
+    /// </summary>
+    public async Task<bool> UpdatePinnedMatchAsync(string? pinnedMatchId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var payload = new
+            {
+                pinnedMatchId = pinnedMatchId,
+                pinnedMatchIds = string.IsNullOrEmpty(pinnedMatchId) ? Array.Empty<string>() : new[] { pinnedMatchId }
+            };
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await _httpClient.PostAsync("/api/v2/preferences", content, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[FootballApiClient] Failed to update pinned match: {ex.Message}");
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         if (_disposeClient)

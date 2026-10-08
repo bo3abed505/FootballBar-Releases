@@ -72,6 +72,18 @@ public static class NotificationPayloadFormatter
                 body = "Match resumed";
                 break;
 
+            case NotificationType.RedCard:
+                title = $"🟥 Red Card: {candidate.HomeTeamName} vs {candidate.AwayTeamName}";
+                body = !string.IsNullOrWhiteSpace(candidate.EventPlayerName)
+                    ? $"{minuteDisplay} {candidate.EventPlayerName} sent off"
+                    : $"{minuteDisplay} Red card awarded";
+                break;
+
+            case NotificationType.PenaltyAwarded:
+                title = $"Penalty: {candidate.HomeTeamName} vs {candidate.AwayTeamName}";
+                body = $"{minuteDisplay} Penalty awarded";
+                break;
+
             default:
                 title = $"{candidate.HomeTeamName} vs {candidate.AwayTeamName}";
                 body = "Match update";

@@ -12,6 +12,18 @@ import { ApiFootballMapper } from './api-football.mapper.js';
 import { Logger } from '../../diagnostics/logger.js';
 import { extractProviderId } from '../../db/provider-alias.js';
 
+function checkApiFootballErrors(response: any): void {
+  if (response?.data?.errors) {
+    const errs = response.data.errors;
+    const hasErrors = Array.isArray(errs)
+      ? errs.length > 0
+      : typeof errs === 'object' && Object.keys(errs).length > 0;
+    if (hasErrors) {
+      throw new Error("API-Football Error: " + JSON.stringify(errs));
+    }
+  }
+}
+
 export class ApiFootballProvider implements FootballProvider {
   readonly providerName = 'api_football';
 
@@ -33,6 +45,7 @@ export class ApiFootballProvider implements FootballProvider {
 
   async getCompetitions(): Promise<ProviderCompetition[]> {
     const response = await this.client.getLeagues({ current: true });
+    checkApiFootballErrors(response);
     if (!response.success || !response.data?.response) {
       return [];
     }
@@ -54,7 +67,46 @@ export class ApiFootballProvider implements FootballProvider {
     const promise = (async () => {
       try {
         const response = await this.client.getFixturesByDate(dateStr, 'NORMAL', cycleId);
+        checkApiFootballErrors(response);
         if (!response.success || !response.data?.response) {
+          if (!response.success) {
+            console.warn(`Failed schedule fetch for ${dateStr} via API-Football: ${response.error || 'Request unsuccessful'}`);
+            throw new Error(response.error || `[API_FOOTBALL] Request denied or failed with HTTP ${response.httpStatus}`);
+          }
+          return [];
+        }
+        return response.data.response.map((item) => ApiFootballMapper.mapFixture(item));
+      } finally {
+        this.inFlight.delete(key);
+      }
+    })();
+
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Fetches fixtures across all competitions for a date range via GET /fixtures?from=YYYY-MM-DD&to=YYYY-MM-DD.
+   * Deduplicates concurrent in-flight requests for the same date range.
+   */
+  async getFixturesByDateRange(fromDate: string, toDate: string, cycleId?: string): Promise<ProviderFixture[]> {
+    const fromStr = fromDate.slice(0, 10);
+    const toStr = toDate.slice(0, 10);
+    const key = `range:${fromStr}:${toStr}`;
+    const existing = this.inFlight.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = (async () => {
+      try {
+        const response = await this.client.getFixturesByDateRange(fromStr, toStr, 'NORMAL', cycleId);
+        checkApiFootballErrors(response);
+        if (!response.success || !response.data?.response) {
+          if (!response.success) {
+            console.warn(`Failed schedule range fetch for ${fromStr}..${toStr} via API-Football: ${response.error || 'Request unsuccessful'}`);
+            throw new Error(response.error || `[API_FOOTBALL] Request denied or failed with HTTP ${response.httpStatus}`);
+          }
           return [];
         }
         return response.data.response.map((item) => ApiFootballMapper.mapFixture(item));
@@ -70,11 +122,20 @@ export class ApiFootballProvider implements FootballProvider {
   async getFixtures(filter?: FixtureFilter): Promise<ProviderFixture[]> {
     const cycleId = filter?.cycleId;
 
+    if (filter?.fromDate && filter?.toDate) {
+      return this.getFixturesByDateRange(filter.fromDate, filter.toDate, cycleId);
+    }
+
     // --- Path 1: liveOnly with an allowlist ---
     // Use the single cheap "live=all" endpoint and post-filter in memory.
     if (filter?.liveOnly) {
       const response = await this.client.getFixtures({ live: 'all' }, 'NORMAL', cycleId);
+      checkApiFootballErrors(response);
       if (!response.success || !response.data?.response) {
+        if (!response.success) {
+          console.warn(`Failed live fixtures fetch via API-Football: ${response.error || 'Request unsuccessful'}`);
+          throw new Error(response.error || `[API_FOOTBALL] Live request failed with HTTP ${response.httpStatus}`);
+        }
         return [];
       }
       const all = response.data.response.map((item) => ApiFootballMapper.mapFixture(item));
@@ -109,6 +170,7 @@ export class ApiFootballProvider implements FootballProvider {
         const response = await this.client.getFixtures({
           league: numericLeagueId,
         }, 'NORMAL', cycleId, numericLeagueId.toString());
+        checkApiFootballErrors(response);
         if (!response.success || !response.data?.response) {
           // Log and continue — a single competition failure should not abort all others.
           continue;
@@ -129,6 +191,7 @@ export class ApiFootballProvider implements FootballProvider {
     const response = await this.client.getFixtures({
       league: isNaN(leagueId as any) ? undefined : leagueId,
     }, 'NORMAL', cycleId, leagueId ? leagueId.toString() : undefined);
+    checkApiFootballErrors(response);
 
     if (!response.success || !response.data?.response) {
       return [];
@@ -143,6 +206,7 @@ export class ApiFootballProvider implements FootballProvider {
     if (isNaN(numericId)) return null;
 
     const response = await this.client.getFixtures({ id: numericId }, 'NORMAL', cycleId);
+    checkApiFootballErrors(response);
     if (!response.success || !response.data?.response || response.data.response.length === 0) {
       return null;
     }
@@ -172,6 +236,7 @@ export class ApiFootballProvider implements FootballProvider {
       if (numericIds.length === 0) continue;
 
       const response = await this.client.getFixturesByIds(numericIds, 'NORMAL', cycleId);
+      checkApiFootballErrors(response);
       if (!response.success || !response.data?.response) {
         continue;
       }
@@ -206,6 +271,7 @@ export class ApiFootballProvider implements FootballProvider {
     if (isNaN(numericId)) return [];
 
     const response = await this.client.getStandings(numericId, seasonYear);
+    checkApiFootballErrors(response);
     if (!response.success || !response.data?.response || response.data.response.length === 0) {
       return [];
     }

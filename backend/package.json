@@ -13,6 +13,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:migrate:prod": "node dist/db/migrate-prod.js",
     "db:push": "drizzle-kit push",
+    "db:force-reset": "tsx src/db/force-reset-db.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:test:setup": "tsx src/db/setup-test-db.ts",
     "dev:sync": "tsx src/acquisition/cli-sync.ts",

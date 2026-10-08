@@ -555,5 +555,55 @@ describe('ApiFootballClient & ApiFootballProvider (Mocked Network)', () => {
     expect(fixtures[0].id).toBe('fix_101');
     expect(fixtures[0].competitionId).toBe('comp_39');
   });
+
+  it('throws fatal Error when API-Football returns HTTP 200 with an errors object', async () => {
+    const mockFetch = async () => ({
+      status: 200,
+      headers: new Headers({ 'x-ratelimit-requests-remaining': '0' }),
+      json: async () => ({
+        get: 'fixtures',
+        parameters: { date: '2026-10-10' },
+        errors: { requests: 'You have reached the daily limit' },
+        results: 0,
+        paging: { current: 1, total: 1 },
+        response: [],
+      }),
+    });
+
+    const provider = new ApiFootballProvider({
+      apiKey: 'test_key',
+      gateway,
+      fetchFn: mockFetch as any,
+    });
+
+    await expect(provider.getFixturesByDate('2026-10-10')).rejects.toThrow(
+      'API-Football Error: {"requests":"You have reached the daily limit"}'
+    );
+  });
+
+  it('throws fatal Error when API-Football returns HTTP 200 with an errors array', async () => {
+    const mockFetch = async () => ({
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({
+        get: 'fixtures',
+        parameters: { date: '2026-10-10' },
+        errors: ['Too many requests per minute'],
+        results: 0,
+        paging: { current: 1, total: 1 },
+        response: [],
+      }),
+    });
+
+    const client = new ApiFootballClient({
+      apiKey: 'test_key',
+      gateway,
+      fetchFn: mockFetch as any,
+    });
+
+    await expect(client.getFixturesByDate('2026-10-10')).rejects.toThrow(
+      'API-Football Error: ["Too many requests per minute"]'
+    );
+  });
 });
 

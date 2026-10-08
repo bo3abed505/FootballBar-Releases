@@ -354,6 +354,66 @@ public class ClientV2MigrationTests
     }
 
     [TestMethod]
+    public async Task PreferencesService_MissingFile_InitializesWithStrictEmptyCollections_AndDoesNotRestoreBackup()
+    {
+        var prefPath = Path.Combine(_tempDir, "preferences.json");
+        var backupPath = Path.Combine(_tempDir, "preferences.json.bak");
+
+        // Stale backup exists with ghost items
+        var backupJson = $$"""
+        {
+            "preferencesVersion": 2,
+            "followedTeams": [
+                { "id": "{{CanonicalEntityIds.Barcelona}}", "name": "FC Barcelona", "shortName": "BAR", "country": "Spain" }
+            ],
+            "followedCompetitions": [
+                { "id": "{{CanonicalEntityIds.PremierLeague}}", "name": "Premier League", "code": "PL", "country": "England" }
+            ]
+        }
+        """;
+        await File.WriteAllTextAsync(backupPath, backupJson);
+
+        // Ensure primary does not exist (missing / wiped)
+        if (File.Exists(prefPath)) File.Delete(prefPath);
+
+        var prefService = new PreferencesService(_tempDir);
+        var loaded = await prefService.LoadAsync();
+
+        // Must initialize with strictly empty collections
+        Assert.AreEqual(0, loaded.FollowedTeams.Count, "Missing preferences file must never restore ghost teams from backup");
+        Assert.AreEqual(0, loaded.FollowedCompetitions.Count, "Missing preferences file must never restore ghost competitions from backup");
+        Assert.IsTrue(File.Exists(prefPath), "Preferences file should be saved on missing initialization");
+    }
+
+    [TestMethod]
+    public async Task PreferencesService_EmptyFile_InitializesWithStrictEmptyCollections_AndDoesNotRestoreBackup()
+    {
+        var prefPath = Path.Combine(_tempDir, "preferences.json");
+        var backupPath = Path.Combine(_tempDir, "preferences.json.bak");
+
+        // Stale backup exists with ghost items
+        var backupJson = $$"""
+        {
+            "preferencesVersion": 2,
+            "followedTeams": [
+                { "id": "{{CanonicalEntityIds.Barcelona}}", "name": "FC Barcelona", "shortName": "BAR", "country": "Spain" }
+            ]
+        }
+        """;
+        await File.WriteAllTextAsync(backupPath, backupJson);
+
+        // Primary is empty (0 bytes)
+        await File.WriteAllTextAsync(prefPath, "");
+
+        var prefService = new PreferencesService(_tempDir);
+        var loaded = await prefService.LoadAsync();
+
+        // Must initialize with strictly empty collections
+        Assert.AreEqual(0, loaded.FollowedTeams.Count, "Empty preferences file must never restore ghost teams from backup");
+        Assert.AreEqual(0, loaded.FollowedCompetitions.Count, "Empty preferences file must never restore ghost competitions from backup");
+    }
+
+    [TestMethod]
     public void FixtureRelevanceEngine_MatchesProvisionalLegacyIds_AgainstV2CanonicalMatch()
     {
         // User has a provisional legacy follow
