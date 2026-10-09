@@ -113,33 +113,11 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
-      let matches = await fixturesRepo.getTrayMatches({
+      const matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
         competitions,
       });
-
-      if (matches.length === 0 && dateParam) {
-        const syncService = (fastify as any).syncService;
-        if (syncService && typeof fixturesRepo.resolveScheduleState === 'function') {
-          const scheduleState = await fixturesRepo.resolveScheduleState(dateParam);
-          if (scheduleState !== 'DISCOVERED') {
-            try {
-              await syncService.syncSchedule(dateParam);
-              if (typeof fixturesRepo.markScheduleDiscovered === 'function') {
-                await fixturesRepo.markScheduleDiscovered(dateParam, new Date());
-              }
-              matches = await fixturesRepo.getTrayMatches({
-                date: dateParam,
-                teams,
-                competitions,
-              });
-            } catch (err: any) {
-              request.log.warn(`On-demand schedule discovery for ${dateParam} failed: ${err?.message}`);
-            }
-          }
-        }
-      }
 
       const formattedMatches = matches.map((m) => ({
         id: m.id,
@@ -267,33 +245,11 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
-      let matches = await fixturesRepo.getTrayMatches({
+      const matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
         competitions,
       });
-
-      if (matches.length === 0 && dateParam) {
-        const syncService = (fastify as any).syncService;
-        if (syncService && typeof fixturesRepo.resolveScheduleState === 'function') {
-          const scheduleState = await fixturesRepo.resolveScheduleState(dateParam);
-          if (scheduleState !== 'DISCOVERED') {
-            try {
-              await syncService.syncSchedule(dateParam);
-              if (typeof fixturesRepo.markScheduleDiscovered === 'function') {
-                await fixturesRepo.markScheduleDiscovered(dateParam, new Date());
-              }
-              matches = await fixturesRepo.getTrayMatches({
-                date: dateParam,
-                teams,
-                competitions,
-              });
-            } catch (err: any) {
-              request.log.warn(`On-demand schedule discovery for ${dateParam} failed: ${err?.message}`);
-            }
-          }
-        }
-      }
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
       let quotaExhausted = false;

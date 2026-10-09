@@ -8,7 +8,7 @@ dotenv.config();
 
 export async function buildServer(opts = {}) {
   const app = Fastify({
-    logger: process.env.NODE_ENV === 'test' ? false : true,
+    logger: process.env.NODE_ENV === 'test' ? false : (process.env.NODE_ENV === 'production' ? { level: 'warn' } : true),
     ...opts,
   });
 
