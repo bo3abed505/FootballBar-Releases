@@ -288,7 +288,7 @@ export class AcquisitionPolicyEngine {
     }
 
     // 2. Twice-Daily Schedule Sync Priority
-    // Fetch and cache the 7-day fixture schedule strictly twice a day (midnight UTC and midday)
+    // Fetch and cache the 3-day fixture schedule strictly twice a day (midnight UTC and midday)
     const scheduleSyncDue = fixturesSummary.isScheduleSyncDue ??
       this.isScheduleSyncDue(now, fixturesSummary.lastScheduleDiscoveryAt);
 

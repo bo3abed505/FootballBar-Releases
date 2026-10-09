@@ -82,7 +82,7 @@ describe('Strike 24A — The Quota-Shield Backend Engine', () => {
       expect(plan.reason).toContain('Twice-daily schedule sync due');
     });
 
-    it('sync7DaySchedule queries paced daily schedule requests across 7 consecutive dates (Yesterday through Today + 5)', async () => {
+    it('sync3DaySchedule queries paced daily schedule requests across 3 consecutive dates (Yesterday through Tomorrow)', async () => {
       vi.useFakeTimers();
       try {
         const syncedDates: string[] = [];
@@ -123,27 +123,23 @@ describe('Strike 24A — The Quota-Shield Backend Engine', () => {
           logger: silentLogger,
         });
 
-        const syncPromise = scheduler.sync7DaySchedule(testDate);
+        const syncPromise = scheduler.sync3DaySchedule(testDate);
         await vi.runAllTimersAsync();
         const summary = await syncPromise;
 
-        // Verify 7 daily requests fetched spanning 2026-10-06 (-1) through 2026-10-12 (+5)
-        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(7);
+        // Verify 3 daily requests fetched spanning 2026-10-06 (-1) through 2026-10-08 (+1)
+        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(3);
         expect(syncedDates).toEqual([
           '2026-10-06',
           '2026-10-07',
           '2026-10-08',
-          '2026-10-09',
-          '2026-10-10',
-          '2026-10-11',
-          '2026-10-12',
         ]);
 
-        // All 7 dates marked discovered in repo
-        expect(markedDates.length).toBe(7);
+        // All 3 dates marked discovered in repo
+        expect(markedDates.length).toBe(3);
         expect(markedDates[0]).toBe('2026-10-06');
-        expect(markedDates[6]).toBe('2026-10-12');
-        expect(summary.fixturesDiscovered).toBe(35);
+        expect(markedDates[2]).toBe('2026-10-08');
+        expect(summary.fixturesDiscovered).toBe(15);
 
         // Verify that after syncing, isTwiceDailyScheduleSyncDue evaluates to false for this slot
         expect(scheduler.isTwiceDailyScheduleSyncDue(testDate)).toBe(false);
@@ -152,7 +148,7 @@ describe('Strike 24A — The Quota-Shield Backend Engine', () => {
       }
     });
 
-    it('executeSingleCycle with options.sync7Days triggers 7-day schedule sync', async () => {
+    it('executeSingleCycle with options.sync7Days triggers 3-day schedule sync', async () => {
       vi.useFakeTimers();
       try {
         let callsCount = 0;
@@ -194,8 +190,8 @@ describe('Strike 24A — The Quota-Shield Backend Engine', () => {
         await vi.runAllTimersAsync();
         const { plan } = await cyclePromise;
         expect(plan.action).toBe('DISCOVER_SCHEDULE');
-        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(7);
-        expect(callsCount).toBe(7);
+        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(3);
+        expect(callsCount).toBe(3);
       } finally {
         vi.useRealTimers();
       }

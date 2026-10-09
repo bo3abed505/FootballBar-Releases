@@ -225,8 +225,28 @@ export class ApiFootballProvider implements FootballProvider {
     }
 
     const results: ProviderFixtureDetail[] = [];
+    const isPaidTier = process.env.API_FOOTBALL_TIER === 'paid';
 
-    // Process in batches of up to 20 fixture IDs
+    // On Free Tier, API-Football rejects the 'ids' parameter with "Free plans do not have access to the Ids parameter."
+    // Fall back to querying individual fixtures sequentially (capped at top 5 to protect daily budget).
+    if (!isPaidTier) {
+      const candidates = fixtureIds.slice(0, 5);
+      for (const id of candidates) {
+        try {
+          const detail = await this.getFixtureDetails(id, cycleId);
+          if (detail) {
+            results.push(detail);
+          }
+          // Pacing delay between calls
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (err: any) {
+          Logger.warn('ApiFootballProvider', 'SingleDetailError', `Failed fetching individual fixture detail for ${id}: ${err?.message || err}`, cycleId);
+        }
+      }
+      return results;
+    }
+
+    // Process in batches of up to 20 fixture IDs (for paid plans)
     for (let i = 0; i < fixtureIds.length; i += 20) {
       const chunk = fixtureIds.slice(i, i + 20);
       const numericIds = chunk
@@ -235,26 +255,30 @@ export class ApiFootballProvider implements FootballProvider {
 
       if (numericIds.length === 0) continue;
 
-      const response = await this.client.getFixturesByIds(numericIds, 'NORMAL', cycleId);
-      checkApiFootballErrors(response);
-      if (!response.success || !response.data?.response) {
-        continue;
-      }
-
-      // Partial failure isolation: parse each fixture individually
-      for (const item of response.data.response) {
-        try {
-          if (!item || !item.fixture?.id) {
-            Logger.warn('ApiFootballProvider', 'MalformedBatchFixture', 'Encountered malformed fixture item in batch details response', cycleId);
-            continue;
-          }
-          results.push(ApiFootballMapper.mapFixtureDetail(item));
-        } catch (err) {
-          Logger.warn('ApiFootballProvider', 'BatchParseError', `Failed to parse fixture detail for fixture ${item?.fixture?.id}: ${err}`, cycleId, {
-            error: err instanceof Error ? err.message : String(err),
-            fixtureId: item?.fixture?.id,
-          });
+      try {
+        const response = await this.client.getFixturesByIds(numericIds, 'NORMAL', cycleId);
+        checkApiFootballErrors(response);
+        if (!response.success || !response.data?.response) {
+          continue;
         }
+
+        // Partial failure isolation: parse each fixture individually
+        for (const item of response.data.response) {
+          try {
+            if (!item || !item.fixture?.id) {
+              Logger.warn('ApiFootballProvider', 'MalformedBatchFixture', 'Encountered malformed fixture item in batch details response', cycleId);
+              continue;
+            }
+            results.push(ApiFootballMapper.mapFixtureDetail(item));
+          } catch (err) {
+            Logger.warn('ApiFootballProvider', 'BatchParseError', `Failed to parse fixture detail for fixture ${item?.fixture?.id}: ${err}`, cycleId, {
+              error: err instanceof Error ? err.message : String(err),
+              fixtureId: item?.fixture?.id,
+            });
+          }
+        }
+      } catch (err: any) {
+        Logger.warn('ApiFootballProvider', 'BatchFetchError', `Failed batch fixtures fetch: ${err?.message || err}`, cycleId);
       }
     }
 

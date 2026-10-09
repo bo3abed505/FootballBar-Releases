@@ -507,12 +507,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _selectedCalendarDate;
         set
         {
-            if (_selectedCalendarDate.Date != value.Date)
+            var minDate = DateTime.Today.AddDays(-1);
+            var maxDate = DateTime.Today.AddDays(1);
+            var target = value.Date < minDate ? minDate : (value.Date > maxDate ? maxDate : value.Date);
+            if (_selectedCalendarDate.Date != target)
             {
-                _selectedCalendarDate = value.Date;
+                _selectedCalendarDate = target;
                 if (_syncService != null)
                 {
-                    _syncService.TargetDate = value.Date;
+                    _syncService.TargetDate = target;
                     _syncService.TriggerImmediateSync();
                 }
                 if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
@@ -1132,7 +1135,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var existingMap = CalendarDays.ToDictionary(d => d.Date.Date);
 
         var targetDates = new List<(DateTime Date, bool IsToday, bool IsSelected, int MatchCount)>();
-        for (int offset = -1; offset <= 5; offset++)
+        for (int offset = -1; offset <= 1; offset++)
         {
             var targetDate = today.AddDays(offset).Date;
             bool isToday = offset == 0;
@@ -1156,7 +1159,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             targetDates.Add((targetDate, isToday, isSelected, matchCount));
         }
 
-        // Fast path: if CalendarDays already matches target 7 days, update in place without .Clear()
+        // Fast path: if CalendarDays already matches target 3 days, update in place without .Clear()
         if (CalendarDays.Count == targetDates.Count && CalendarDays.Select(d => d.Date.Date).SequenceEqual(targetDates.Select(t => t.Date)))
         {
             for (int i = 0; i < CalendarDays.Count; i++)

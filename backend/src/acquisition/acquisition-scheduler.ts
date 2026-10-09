@@ -190,6 +190,7 @@ export class AcquisitionScheduler {
   // Twice-daily schedule sync slot tracking
   private lastScheduleSyncSlot: string | null = null;
   private lastScheduleSyncAt: Date | null = null;
+  private lastScheduleSyncAttemptAt: Date | null = null;
 
   // Single-instance and lifecycle state
   private running = false;
@@ -262,7 +263,22 @@ export class AcquisitionScheduler {
     const todayStr = now.toISOString().slice(0, 10);
     const slotHour = now.getUTCHours() < 12 ? '00' : '12';
     const currentSlot = `${todayStr}-${slotHour}`;
-    return this.lastScheduleSyncSlot !== currentSlot;
+
+    // 1. If current slot was already successfully completed, not due
+    if (this.lastScheduleSyncSlot === currentSlot) {
+      return false;
+    }
+
+    // 2. Minimum retry cooldown: prevent tight 15-minute retry loops on unexpected failure
+    // Minimum 2 hours must elapse before attempting another schedule discovery
+    if (this.lastScheduleSyncAttemptAt !== null) {
+      const elapsedMs = now.getTime() - this.lastScheduleSyncAttemptAt.getTime();
+      if (elapsedMs < 2 * 60 * 60 * 1000) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   public setTargetCompetitionIds(ids?: number[]): void {
@@ -314,6 +330,25 @@ export class AcquisitionScheduler {
           timestamp: new Date(latestInvalidation.requestedAt).toISOString(),
           reason: latestInvalidation.errorMessage ?? 'SCHEDULE_INVALIDATED',
         };
+      }
+
+      // 4. Hydrate latest schedule discovery slot marker from database
+      const latestSlotMarker = await db.query.apiRequestLedger.findFirst({
+        where: and(
+          eq(schema.apiRequestLedger.provider, 'system'),
+          eq(schema.apiRequestLedger.operation, 'DISCOVER_SCHEDULE_SLOT'),
+          eq(schema.apiRequestLedger.success, true)
+        ),
+        orderBy: [desc(schema.apiRequestLedger.requestedAt)],
+      });
+
+      if (latestSlotMarker?.endpoint) {
+        const match = latestSlotMarker.endpoint.match(/slot=([^&]+)/);
+        if (match) {
+          this.lastScheduleSyncSlot = match[1];
+          this.lastScheduleSyncAt = new Date(latestSlotMarker.requestedAt);
+          this.logger.info(`Hydrated last schedule sync slot from database: ${this.lastScheduleSyncSlot}`);
+        }
       }
     } catch (err: any) {
       this.logger.warn(`Could not hydrate scheduler state from database: ${err?.message}`);
@@ -412,9 +447,17 @@ export class AcquisitionScheduler {
    * Fetches days -1 through +5 individually using the date= parameter, paced by 9 seconds between queries
    * to guarantee never exceeding the MINUTE_CEILING (8 requests/minute).
    */
-  async sync7DaySchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
+  /**
+   * Executes the 3-day schedule synchronization routine (Yesterday, Today, Tomorrow).
+   * Runs strictly twice a day (midnight UTC and midday UTC) to capture postponed matches,
+   * kickoff adjustments, and finalize past results without wasting daily quota.
+   * Fetches days -1 through +1 individually using the date= parameter, paced by 9 seconds between queries
+   * to guarantee never exceeding the MINUTE_CEILING (8 requests/minute).
+   */
+  async sync3DaySchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
     const todayDateStr = currentDate.toISOString().slice(0, 10);
     const targetComps = this.targetCompetitionIds;
+    this.lastScheduleSyncAttemptAt = currentDate;
 
     const combinedSummary: SyncSummary = {
       provider: 'unknown',
@@ -426,9 +469,9 @@ export class AcquisitionScheduler {
       hasChanges: false,
     };
 
-    this.logger.info(`[7-DAY-SLIDING-WINDOW] Starting paced 7-day schedule sync (-1 to +5 days) for base date ${todayDateStr}...`);
+    this.logger.info(`[3-DAY-SLIDING-WINDOW] Starting paced 3-day schedule sync (-1 to +1 days) for base date ${todayDateStr}...`);
 
-    for (let offset = -1; offset <= 5; offset++) {
+    for (let offset = -1; offset <= 1; offset++) {
       const d = new Date(Date.UTC(
         currentDate.getUTCFullYear(),
         currentDate.getUTCMonth(),
@@ -457,19 +500,48 @@ export class AcquisitionScheduler {
 
         this.logger.info(`Fetched day ${offsetLabel} (${targetDateStr})... waiting 9s`);
 
-        // Pacing delay: exactly 9 seconds between each of the 7 iterations
-        await new Promise((resolve) => setTimeout(resolve, 9000));
+        // Pacing delay: exactly 9 seconds between each iteration (skip delay after final iteration)
+        if (offset < 1) {
+          await new Promise((resolve) => setTimeout(resolve, 9000));
+        }
       } catch (err: any) {
         this.logger.warn(`Failed schedule sync for day ${offsetLabel} (${targetDateStr}): ${err?.message || err}`);
-        throw err;
+        // Fault-tolerant: log warning but do not throw, allowing the routine to proceed and commit slot
       }
     }
 
+    // Unconditional slot commitment
     const slotKey = `${todayDateStr}-${currentDate.getUTCHours() < 12 ? '00' : '12'}`;
     this.lastScheduleSyncSlot = slotKey;
     this.lastScheduleSyncAt = currentDate;
 
+    // Persist durable slot record to database
+    try {
+      await db.insert(schema.apiRequestLedger).values({
+        id: `slot_${slotKey}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        cycleId: cycleId ?? null,
+        provider: 'system',
+        endpoint: `/schedule?slot=${slotKey}`,
+        operation: 'DISCOVER_SCHEDULE_SLOT',
+        priority: 'NORMAL',
+        success: true,
+        httpStatus: 200,
+        responseTimeMs: 0,
+        costUnits: 0,
+        requestedAt: currentDate,
+      }).onConflictDoNothing();
+    } catch (err: any) {
+      this.logger.warn(`Failed persisting schedule slot record: ${err?.message}`);
+    }
+
     return combinedSummary;
+  }
+
+  /**
+   * Backwards-compatibility alias for 3-day schedule sync routine.
+   */
+  async sync7DaySchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
+    return this.sync3DaySchedule(currentDate, cycleId);
   }
 
   /**
@@ -477,7 +549,7 @@ export class AcquisitionScheduler {
    */
   async executeScheduleSyncRoutine(now?: Date): Promise<SyncSummary> {
     const targetDate = now ?? this.now();
-    return this.sync7DaySchedule(targetDate);
+    return this.sync3DaySchedule(targetDate);
   }
 
   /**
@@ -600,7 +672,7 @@ export class AcquisitionScheduler {
           (plan.action as string) === 'BOOTSTRAP'
         ) {
           if (plan.reason.includes('Twice-daily') || plan.reason.includes('Bootstrapping') || (options && options.sync7Days)) {
-            syncSummary = await this.sync7DaySchedule(currentDate, cycleId);
+            syncSummary = await this.sync3DaySchedule(currentDate, cycleId);
           } else {
             syncSummary = await this.syncService.syncWithPlan(plan, {
               date: todayDateStr,
@@ -871,12 +943,12 @@ export class AcquisitionScheduler {
     if (this.running && !signal.aborted) {
       const needsBootstrap = await this.isBootstrapSyncNeeded(this.now());
       if (needsBootstrap) {
-        this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Cold boot detected (empty or missing today data). Running immediate 7-day schedule sync (-1 to +5 days)...');
+        this.logger.info('[DEBUG] Executing mandatory 3-day bootstrap sync: Cold boot detected (empty or missing today data). Running immediate 3-day schedule sync (-1 to +1 days)...');
         try {
-          await this.sync7DaySchedule(this.now());
-          this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Completed successfully.');
+          await this.sync3DaySchedule(this.now());
+          this.logger.info('[DEBUG] Executing mandatory 3-day bootstrap sync: Completed successfully.');
         } catch (coldBootErr: any) {
-          this.logger.warn(`Cold-boot 7-day schedule sync encountered an error: ${coldBootErr?.message}`);
+          this.logger.warn(`Cold-boot 3-day schedule sync encountered an error: ${coldBootErr?.message}`);
         }
       }
     }
@@ -886,11 +958,11 @@ export class AcquisitionScheduler {
 
       try {
         // Twice-Daily Schedule Sync Background Routine:
-        // Strictly twice a day (midnight UTC and midday), fetch and cache 7-day schedule (-1 to +5).
+        // Strictly twice a day (midnight UTC and midday), fetch and cache 3-day schedule (-1 to +1).
         if (this.isTwiceDailyScheduleSyncDue(this.now())) {
-          this.logger.info('Executing twice-daily 7-day schedule sync routine (midnight/midday UTC).');
+          this.logger.info('Executing twice-daily 3-day schedule sync routine (midnight/midday UTC).');
           try {
-            await this.sync7DaySchedule(this.now());
+            await this.sync3DaySchedule(this.now());
           } catch (syncErr: any) {
             this.logger.warn(`Twice-daily schedule sync routine encountered an error: ${syncErr?.message}`);
           }

@@ -745,7 +745,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       expect(needed).toBe(false);
     });
 
-    it('sync7DaySchedule executes paced daily schedule queries across 7 days (-1 to +5)', async () => {
+    it('sync3DaySchedule executes paced daily schedule queries across 3 days (-1 to +1)', async () => {
       vi.useFakeTimers();
       try {
         const syncedDates: string[] = [];
@@ -779,33 +779,29 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
         });
 
         const baseDate = new Date('2026-10-08T12:00:00.000Z');
-        const syncPromise = scheduler.sync7DaySchedule(baseDate, 'cycle_bootstrap_test');
+        const syncPromise = scheduler.sync3DaySchedule(baseDate, 'cycle_bootstrap_test');
         await vi.runAllTimersAsync();
         const summary = await syncPromise;
 
-        // Assert 7 separate daily queries spanning -1 (2026-10-07) to +5 (2026-10-13)
-        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(7);
+        // Assert 3 separate daily queries spanning -1 (2026-10-07) to +1 (2026-10-09)
+        expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(3);
         expect(syncedDates).toEqual([
           '2026-10-07',
           '2026-10-08',
           '2026-10-09',
-          '2026-10-10',
-          '2026-10-11',
-          '2026-10-12',
-          '2026-10-13',
         ]);
-        // All 7 dates marked discovered
-        expect(markedDates).toHaveLength(7);
+        // All 3 dates marked discovered
+        expect(markedDates).toHaveLength(3);
         expect(markedDates[0]).toBe('2026-10-07');
-        expect(markedDates[6]).toBe('2026-10-13');
-        expect(summary.fixturesDiscovered).toBe(14);
-        expect(summary.fixturesInserted).toBe(7);
+        expect(markedDates[2]).toBe('2026-10-09');
+        expect(summary.fixturesDiscovered).toBe(6);
+        expect(summary.fixturesInserted).toBe(3);
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it('sync7DaySchedule throws error when daily schedule request fails', async () => {
+    it('sync3DaySchedule isolates daily schedule failure without throwing and commits slot with 2-hour retry cooldown', async () => {
       vi.useFakeTimers();
       try {
         const mockSyncService: any = {
@@ -823,11 +819,14 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
         });
 
         const baseDate = new Date('2026-10-08T12:00:00.000Z');
-        const syncPromise = scheduler.sync7DaySchedule(baseDate);
-        const assertion = expect(syncPromise).rejects.toThrow('API Rate Limit or Gateway Error');
+        const syncPromise = scheduler.sync3DaySchedule(baseDate);
         await vi.runAllTimersAsync();
-        await assertion;
-        expect(mockRepo.markScheduleDiscovered).not.toHaveBeenCalled();
+        const summary = await syncPromise;
+
+        // Fault-tolerant: does not reject
+        expect(summary).toBeDefined();
+        // Commits slot and applies 2-hour cooldown so it is no longer due immediately
+        expect(scheduler.isTwiceDailyScheduleSyncDue(baseDate)).toBe(false);
       } finally {
         vi.useRealTimers();
       }

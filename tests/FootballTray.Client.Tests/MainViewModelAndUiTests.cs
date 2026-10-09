@@ -981,7 +981,7 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        Assert.AreEqual(7, vm.CalendarDays.Count);
+        Assert.AreEqual(3, vm.CalendarDays.Count);
         Assert.AreEqual(DateTime.Today.AddDays(-1).Date, vm.CalendarDays[0].Date);
         Assert.AreEqual("Yesterday", vm.CalendarDays[0].RelativeLabel);
         Assert.IsFalse(vm.CalendarDays[0].IsToday);
@@ -993,12 +993,10 @@ public class MainViewModelAndUiTests
 
         Assert.AreEqual(DateTime.Today.AddDays(1).Date, vm.CalendarDays[2].Date);
         Assert.AreEqual("Tomorrow", vm.CalendarDays[2].RelativeLabel);
-
-        Assert.AreEqual(DateTime.Today.AddDays(5).Date, vm.CalendarDays[6].Date);
     }
 
     [TestMethod]
-    public async Task Test36_7DayCalendar_DateSelection_FiltersMatches()
+    public async Task Test36_3DayCalendar_DateSelection_FiltersMatches()
     {
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
@@ -1026,16 +1024,16 @@ public class MainViewModelAndUiTests
     }
 
     [TestMethod]
-    public async Task Test36b_Strike24D_CalendarDays_7DayWindow_PreservesMatchCounts_AndTriggersSync()
+    public async Task Test36b_Strike25_CalendarDays_3DayWindow_PreservesMatchCounts_AndTriggersSync()
     {
         var mockSync = new MockSyncService();
         using var vm = new MainViewModel(_prefService, syncService: mockSync);
         await vm.InitializeAsync();
 
         var today = DateTime.Today;
-        // Verify 7 tabs: Yesterday through Today + 5
-        Assert.AreEqual(7, vm.CalendarDays.Count);
-        for (int i = 0; i < 7; i++)
+        // Verify 3 tabs: Yesterday, Today, Tomorrow (-1, 0, +1)
+        Assert.AreEqual(3, vm.CalendarDays.Count);
+        for (int i = 0; i < 3; i++)
         {
             Assert.AreEqual(today.AddDays(i - 1).Date, vm.CalendarDays[i].Date);
         }

@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml;
 namespace FootballTray.Client.ViewModels;
 
 /// <summary>
-/// Presentation model representing an individual day in the 7-day calendar navigation bar.
+/// Presentation model representing an individual day in the 3-day calendar navigation bar.
 /// Encapsulates relative date labeling ("Yesterday", "Today", "Tomorrow"), active selection,
 /// and live match counts.
 /// </summary>
