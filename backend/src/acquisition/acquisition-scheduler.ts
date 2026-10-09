@@ -589,38 +589,53 @@ export class AcquisitionScheduler {
       // 3b. Scheduler Bootstrapping: If policy evaluates to IDLE but database has zero fixtures
       // for the active target date (e.g. freshly seeded catalog or purged fixtures), generate a
       // POLL_SCHEDULE / bootstrap discovery plan to immediately download today's fixtures rather than idling.
-      if (plan.action === 'IDLE' && !summary.scheduleKnownForToday && budget.remainingDaily > 10) {
-        let hasFixturesToday = false;
+      if (plan.action === 'IDLE' && budget.remainingDaily > 10) {
+        let missingScheduleIn3DayWindow = false;
         try {
-          if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
-            hasFixturesToday = await (this.fixturesRepo as any).hasFixturesForDate(todayDateStr);
-          } else if (this.fixturesRepo instanceof FixturesRepository) {
-            const startOfToday = new Date(`${todayDateStr}T00:00:00.000Z`);
-            const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
-            const fixturesToday = await db
-              .select({ id: schema.fixtures.id })
-              .from(schema.fixtures)
-              .where(
-                and(
-                  gte(schema.fixtures.kickoffTime, startOfToday),
-                  lt(schema.fixtures.kickoffTime, endOfToday)
+          for (let offset = -1; offset <= 1; offset++) {
+            const targetD = new Date(Date.UTC(
+              currentDate.getUTCFullYear(),
+              currentDate.getUTCMonth(),
+              currentDate.getUTCDate() + offset
+            ));
+            const targetDateStr = targetD.toISOString().slice(0, 10);
+            let hasDayFixtures = false;
+
+            if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
+              hasDayFixtures = await (this.fixturesRepo as any).hasFixturesForDate(targetDateStr);
+            } else if (this.fixturesRepo instanceof FixturesRepository) {
+              const startOfDay = new Date(`${targetDateStr}T00:00:00.000Z`);
+              const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+              const fixturesDay = await db
+                .select({ id: schema.fixtures.id })
+                .from(schema.fixtures)
+                .where(
+                  and(
+                    gte(schema.fixtures.kickoffTime, startOfDay),
+                    lt(schema.fixtures.kickoffTime, endOfDay)
+                  )
                 )
-              )
-              .limit(1);
-            hasFixturesToday = fixturesToday.length > 0;
-          } else {
-            hasFixturesToday = summary.scheduleKnownForToday;
+                .limit(1);
+              hasDayFixtures = fixturesDay.length > 0;
+            } else {
+              hasDayFixtures = summary.scheduleKnownForToday;
+            }
+
+            if (!hasDayFixtures) {
+              missingScheduleIn3DayWindow = true;
+              break;
+            }
           }
         } catch {
-          hasFixturesToday = true;
+          missingScheduleIn3DayWindow = false;
         }
 
-        if (!hasFixturesToday) {
+        if (missingScheduleIn3DayWindow) {
           plan = {
             action: 'DISCOVER_SCHEDULE',
             priority: 'NORMAL',
             recommendedNextPollMs: 3600_000,
-            reason: `Database has zero fixtures for active target date ${todayDateStr}. Bootstrapping initial daily schedule (POLL_SCHEDULE).`,
+            reason: `3-day sliding window [-1, 0, 1] has zero fixtures for one or more dates. Bootstrapping 3-day schedule.`,
           };
         }
       }
@@ -896,31 +911,40 @@ export class AcquisitionScheduler {
         }
       }
 
-      // 2. Check if fixtures exist for today's date
-      let hasToday = false;
-      if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
-        hasToday = await (this.fixturesRepo as any).hasFixturesForDate(todayStr);
-      } else {
-        const startOfToday = new Date(`${todayStr}T00:00:00.000Z`);
-        const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
-        const rows = await db
-          .select({ id: schema.fixtures.id })
-          .from(schema.fixtures)
-          .where(
-            and(
-              gte(schema.fixtures.kickoffTime, startOfToday),
-              lt(schema.fixtures.kickoffTime, endOfToday),
-              notLike(schema.fixtures.id, '%mock%'),
-              notInArray(schema.fixtures.id, ['fix_elclasico_2026', 'fix_spain_egypt_2026'])
-            )
-          )
-          .limit(1);
-        hasToday = rows.length > 0;
-      }
+      // 2. Check if fixtures exist for all days in 3-day sliding window [-1, 0, 1]
+      for (let offset = -1; offset <= 1; offset++) {
+        const targetD = new Date(Date.UTC(
+          currentDate.getUTCFullYear(),
+          currentDate.getUTCMonth(),
+          currentDate.getUTCDate() + offset
+        ));
+        const targetStr = targetD.toISOString().slice(0, 10);
+        let hasDay = false;
 
-      if (!hasToday) {
-        this.logger.info(`[DEBUG] Executing mandatory 7-day bootstrap sync: No fixtures found for today (${todayStr}).`);
-        return true;
+        if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
+          hasDay = await (this.fixturesRepo as any).hasFixturesForDate(targetStr);
+        } else {
+          const startOfDay = new Date(`${targetStr}T00:00:00.000Z`);
+          const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+          const rows = await db
+            .select({ id: schema.fixtures.id })
+            .from(schema.fixtures)
+            .where(
+              and(
+                gte(schema.fixtures.kickoffTime, startOfDay),
+                lt(schema.fixtures.kickoffTime, endOfDay),
+                notLike(schema.fixtures.id, '%mock%'),
+                notInArray(schema.fixtures.id, ['fix_elclasico_2026', 'fix_spain_egypt_2026'])
+              )
+            )
+            .limit(1);
+          hasDay = rows.length > 0;
+        }
+
+        if (!hasDay) {
+          this.logger.info(`[DEBUG] Executing mandatory 3-day bootstrap sync: No fixtures found for day offset ${offset} (${targetStr}).`);
+          return true;
+        }
       }
 
       return false;

@@ -434,7 +434,7 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center" FontWeight="Medium" FontSize="13" />
+                                            <TextBlock Text="{x:Bind DisplayName}" VerticalAlignment="Center" FontWeight="Medium" FontSize="13" />
                                             <Button
                                                 Grid.Column="1"
                                                 Content="Unfollow"

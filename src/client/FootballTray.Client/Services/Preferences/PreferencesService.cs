@@ -62,12 +62,14 @@ public sealed class PreferencesService : IPreferencesService
             _isLoaded = true;
             AppLogger.IsLoggingEnabled = _currentPreferences.IsLoggingEnabled;
             AppLogger.IsDebugLoggingEnabled = _currentPreferences.IsDebugLoggingEnabled;
-            return _currentPreferences;
         }
         finally
         {
             _lock.Release();
         }
+
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+        return _currentPreferences;
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken = default)

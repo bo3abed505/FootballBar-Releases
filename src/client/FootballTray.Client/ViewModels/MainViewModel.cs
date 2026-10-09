@@ -394,15 +394,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get
         {
             if (string.IsNullOrWhiteSpace(_activeTickerText) ||
-                _activeTickerText.Equals("No active match", StringComparison.OrdinalIgnoreCase) ||
-                _activeTickerText.Equals("📌 No pinned matches", StringComparison.OrdinalIgnoreCase))
+                _activeTickerText.Equals("No active match", StringComparison.OrdinalIgnoreCase))
             {
                 return string.Empty;
             }
 
-            return _activeTickerText.StartsWith("📌") || _activeTickerText.StartsWith("⚽")
-                ? _activeTickerText
-                : $"📌 {_activeTickerText}";
+            return _activeTickerText;
         }
     }
 
@@ -652,6 +649,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var prefs = await _preferencesService.LoadAsync();
             PopulatePreferenceCollections(prefs);
+            Settings.RefreshFollowedLists();
             await SearchCatalog.InitializeAsync();
 
             if (_syncService != null)
@@ -777,6 +775,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             StatusMessage = null;
             ReapplyRelevanceAndFilters();
+            Settings.RefreshFollowedLists();
         }
         catch (Exception ex)
         {
@@ -822,6 +821,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             StatusMessage = null;
             ReapplyRelevanceAndFilters();
+            Settings.RefreshFollowedLists();
         }
         catch (Exception ex)
         {
@@ -1330,32 +1330,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             string time = goalMatch.State == "HT" ? "HT" : (goalMatch.ElapsedMinute > 0 ? $"{goalMatch.ElapsedMinute}'" : goalMatch.State);
             ActiveTickerText = $"⚽ GOAL: {home} {score} {away} ({time})";
         }
-        else if (IsExplicitlyUnpinned)
+        else
         {
             ActiveMatchId = null;
             ActiveTickerText = prefs?.EnableTickerCarousel == true
                 ? "📌 Auto-Rotate Ticker (Carousel Mode)"
                 : "📌 No pinned matches";
-        }
-        else
-        {
-            var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
-            ActiveMatchId = activeMatch?.Id;
-
-            if (activeMatch != null)
-            {
-                string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
-                string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
-                string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
-                string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : activeMatch.State);
-                ActiveTickerText = $"{home} {score} {away} ({time})";
-            }
-            else
-            {
-                ActiveTickerText = prefs?.EnableTickerCarousel == true
-                    ? "📌 Auto-Rotate Ticker (Carousel Mode)"
-                    : "📌 No pinned matches";
-            }
         }
 
         // 1. Filter by Selected Calendar Date
@@ -1384,7 +1364,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         foreach (var match in dateFiltered)
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
-            bool isActive = match.Id == ActiveMatchId;
+            bool isActive = !string.IsNullOrEmpty(ManualPinnedMatchId) && string.Equals(match.Id, ManualPinnedMatchId, StringComparison.Ordinal);
             bool homeFollowed = (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
                 || (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId))
                 || (!string.IsNullOrEmpty(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name))
@@ -1402,10 +1382,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             bool compFollowed = relevance.FollowedByCompetition
                 || (!string.IsNullOrEmpty(match.Competition?.Id) && followedCompIds.Contains(match.Competition.Id))
                 || (!string.IsNullOrEmpty(match.Competition?.LegacyId) && followedCompIds.Contains(match.Competition.LegacyId))
-                || (!string.IsNullOrEmpty(match.Competition?.Name) && followedCompIds.Contains(match.Competition.Name))
+                || (!string.IsNullOrWhiteSpace(match.Competition?.Name) && !string.IsNullOrWhiteSpace(match.Competition?.Country) && followedCompIds.Contains($"name_country:{match.Competition.Name.Trim()}|{match.Competition.Country.Trim()}"))
                 || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.Id, out var cCanon) && followedCompIds.Contains(cCanon))
                 || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.LegacyId, out var cLegCanon) && followedCompIds.Contains(cLegCanon))
-                || (prefs?.FollowedCompetitions.Any(c => string.Equals(c.Name?.Trim(), match.Competition?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+                || (prefs?.FollowedCompetitions.Any(c => 
+                    string.Equals(c.Name?.Trim(), match.Competition?.Name?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                    (string.IsNullOrEmpty(c.Country) || string.IsNullOrEmpty(match.Competition?.Country) || string.Equals(c.Country?.Trim(), match.Competition?.Country?.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+                    (string.IsNullOrEmpty(c.Id) || string.IsNullOrEmpty(match.Competition?.Id) || string.Equals(c.Id, match.Competition.Id, StringComparison.OrdinalIgnoreCase))) == true);
 
             viewModels.Add(MatchItemViewModel.FromDto(
                 match,
@@ -1567,10 +1550,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             else
             {
-                // Existing group: update metadata and sync matches in-place without touching IsExpanded!
+                // Existing group: update metadata and sync matches in-place
                 var existingGroup = CompetitionGroups[existingIndex];
                 existingGroup.UpdateMetadata(data.Country, data.LogoUrl, data.HasFollowedTeams, data.IsFollowedCompetition);
                 existingGroup.SyncMatches(data.Matches);
+
+                // Auto-expand if the competition contains followed teams or is a followed competition
+                if (data.HasFollowedTeams || data.IsFollowedCompetition)
+                {
+                    existingGroup.IsExpanded = true;
+                }
 
                 if (existingIndex != i && i < CompetitionGroups.Count)
                 {

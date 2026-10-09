@@ -19,7 +19,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const scheduler: any = (fastify as any).scheduler;
     const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
     const gateway = new RequestGateway();
-    const quotaDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
+    const effectiveProvider = process.env.ACTIVE_PROVIDER || process.env.FOOTBALL_PROVIDER || 'mock';
+    const quotaDiag = await gateway.getDiagnostics(effectiveProvider);
 
     return reply.status(200).send({
       status: 'ok',
@@ -27,7 +28,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       latencyMs: dbStatus.latencyMs,
       timestamp: new Date().toISOString(),
       version: '1.0.0',
-      provider: process.env.FOOTBALL_PROVIDER || 'mock',
+      provider: effectiveProvider,
       quotaMode: quotaDiag.mode,
       quotaRemaining: quotaDiag.remainingDaily,
       scheduler: schedulerDiag
@@ -51,7 +52,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.get('/api/diagnostics', async (request, reply) => {
     const dbStatus = await checkDatabaseConnection();
     const gateway = new RequestGateway();
-    const quotaDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
+    const effectiveProvider = process.env.ACTIVE_PROVIDER || process.env.FOOTBALL_PROVIDER || 'mock';
+    const quotaDiag = await gateway.getDiagnostics(effectiveProvider);
     const scheduler: any = (fastify as any).scheduler;
     const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
 
@@ -64,7 +66,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         memoryUsage: process.memoryUsage(),
       },
       provider: {
-        mode: process.env.FOOTBALL_PROVIDER || 'mock',
+        mode: effectiveProvider,
         allowLiveRequests: process.env.ALLOW_LIVE_PROVIDER_REQUESTS === 'true',
       },
       database: {
@@ -111,11 +113,33 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
-      const matches = await fixturesRepo.getTrayMatches({
+      let matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
         competitions,
       });
+
+      if (matches.length === 0 && dateParam) {
+        const syncService = (fastify as any).syncService;
+        if (syncService && typeof fixturesRepo.resolveScheduleState === 'function') {
+          const scheduleState = await fixturesRepo.resolveScheduleState(dateParam);
+          if (scheduleState !== 'DISCOVERED') {
+            try {
+              await syncService.syncSchedule(dateParam);
+              if (typeof fixturesRepo.markScheduleDiscovered === 'function') {
+                await fixturesRepo.markScheduleDiscovered(dateParam, new Date());
+              }
+              matches = await fixturesRepo.getTrayMatches({
+                date: dateParam,
+                teams,
+                competitions,
+              });
+            } catch (err: any) {
+              request.log.warn(`On-demand schedule discovery for ${dateParam} failed: ${err?.message}`);
+            }
+          }
+        }
+      }
 
       const formattedMatches = matches.map((m) => ({
         id: m.id,
@@ -243,11 +267,33 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
-      const matches = await fixturesRepo.getTrayMatches({
+      let matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
         competitions,
       });
+
+      if (matches.length === 0 && dateParam) {
+        const syncService = (fastify as any).syncService;
+        if (syncService && typeof fixturesRepo.resolveScheduleState === 'function') {
+          const scheduleState = await fixturesRepo.resolveScheduleState(dateParam);
+          if (scheduleState !== 'DISCOVERED') {
+            try {
+              await syncService.syncSchedule(dateParam);
+              if (typeof fixturesRepo.markScheduleDiscovered === 'function') {
+                await fixturesRepo.markScheduleDiscovered(dateParam, new Date());
+              }
+              matches = await fixturesRepo.getTrayMatches({
+                date: dateParam,
+                teams,
+                competitions,
+              });
+            } catch (err: any) {
+              request.log.warn(`On-demand schedule discovery for ${dateParam} failed: ${err?.message}`);
+            }
+          }
+        }
+      }
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
       let quotaExhausted = false;
@@ -255,7 +301,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         const scheduler: any = (fastify as any).scheduler;
         const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
         const gateway = new RequestGateway();
-        const quotaDiag = await gateway.getDiagnostics(process.env.FOOTBALL_PROVIDER || 'mock');
+        const effectiveProvider = process.env.ACTIVE_PROVIDER || process.env.FOOTBALL_PROVIDER || 'mock';
+        const quotaDiag = await gateway.getDiagnostics(effectiveProvider);
 
         if (
           quotaDiag.mode === 'RESERVE_MODE' ||

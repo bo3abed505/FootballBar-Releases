@@ -41,6 +41,7 @@ public sealed partial class SettingsPage : Page
         if (ViewModel != null)
         {
             ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            ViewModel.RefreshFollowedLists();
         }
 
         SyncUiFromViewModel();
@@ -170,9 +171,11 @@ public sealed partial class SettingsPage : Page
             }
 
             // 5. Followed Favorites
+            FollowedTeamsListView.ItemsSource = null;
             FollowedTeamsListView.ItemsSource = ViewModel.FollowedTeams;
             NoFollowedTeamsText.Visibility = ViewModel.HasFollowedTeams ? Visibility.Collapsed : Visibility.Visible;
 
+            FollowedCompetitionsListView.ItemsSource = null;
             FollowedCompetitionsListView.ItemsSource = ViewModel.FollowedCompetitions;
             NoFollowedCompetitionsText.Visibility = ViewModel.HasFollowedCompetitions ? Visibility.Collapsed : Visibility.Visible;
         }

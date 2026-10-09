@@ -440,7 +440,8 @@ public sealed class TaskbarTickerCoordinator : IDisposable
                 else
                 {
                     var followedMatches = trayData?.Matches?
-                        .Where(m => FixtureRelevanceEngine.EvaluateRelevance(m, teamIds, compIds).IsRelevant)
+                        .Where(m => (m.KickoffTime.ToLocalTime().Date == DateTime.Today || FixtureRelevanceEngine.IsLive(m)) &&
+                                    FixtureRelevanceEngine.EvaluateRelevance(m, teamIds, compIds).IsRelevant)
                         .ToList() ?? new List<TrayMatchDto>();
 
                     if (followedMatches.Count == 0)

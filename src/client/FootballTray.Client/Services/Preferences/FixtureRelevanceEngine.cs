@@ -80,7 +80,7 @@ public static class FixtureRelevanceEngine
 
         bool compFollowed = (!string.IsNullOrWhiteSpace(match.Competition?.Id) && followedCompetitionIds.Contains(match.Competition.Id))
             || (!string.IsNullOrWhiteSpace(match.Competition?.LegacyId) && followedCompetitionIds.Contains(match.Competition.LegacyId))
-            || (!string.IsNullOrWhiteSpace(match.Competition?.Name) && followedCompetitionIds.Contains(match.Competition.Name))
+            || (!string.IsNullOrWhiteSpace(match.Competition?.Name) && !string.IsNullOrWhiteSpace(match.Competition?.Country) && followedCompetitionIds.Contains($"name_country:{match.Competition.Name.Trim()}|{match.Competition.Country.Trim()}"))
             || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.Id, out var compCanon) && followedCompetitionIds.Contains(compCanon))
             || (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.LegacyId, out var compLegCanon) && followedCompetitionIds.Contains(compLegCanon));
 

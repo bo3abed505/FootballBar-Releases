@@ -23,6 +23,9 @@ public sealed record FollowedCompetition
     [JsonPropertyName("logoUrl")]
     public string? LogoUrl { get; init; }
 
+    [JsonIgnore]
+    public string DisplayName => !string.IsNullOrWhiteSpace(Country) ? $"{Name} • {Country}" : Name;
+
     public FollowedCompetition() { }
 
     public FollowedCompetition(string id, string name, string? code = null, string? country = null, string? logoUrl = null)

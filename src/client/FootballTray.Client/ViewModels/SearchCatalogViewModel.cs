@@ -261,10 +261,10 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                     if (response.IsSuccess && response.Envelope?.Data != null)
                     {
                         var prefs = _preferencesService.Current;
-                        var uniqueComps = response.Envelope.Data.DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+                        var uniqueComps = response.Envelope.Data.DistinctBy(x => !string.IsNullOrEmpty(x.Id) ? x.Id : $"{x.Name}|{x.Country}", StringComparer.OrdinalIgnoreCase);
                         foreach (var dto in uniqueComps)
                         {
-                            bool isFollowed = IsCompetitionFollowed(dto.Id, dto.LegacyId, dto.Name, dto.Code, prefs);
+                            bool isFollowed = IsCompetitionFollowed(dto.Id, dto.LegacyId, dto.Name, dto.Code, prefs, dto.Country);
                             var item = FollowedCompetitionItemViewModel.FromCatalogDto(dto, isFollowed);
                             _ = item.EnsureLogoCachedAsync(_imageCacheService);
                             CompetitionSearchResults.Add(item);
@@ -602,7 +602,7 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
 
             foreach (var searchResult in CompetitionSearchResults)
             {
-                searchResult.IsFollowed = IsCompetitionFollowed(searchResult.Id, searchResult.LegacyId, searchResult.Name, searchResult.Code, prefs);
+                searchResult.IsFollowed = IsCompetitionFollowed(searchResult.Id, searchResult.LegacyId, searchResult.Name, searchResult.Code, prefs, searchResult.Country);
             }
 
             NotifyCollectionCounts();
@@ -614,7 +614,8 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
         string? legacyId,
         string? name,
         string? code,
-        UserPreferences? prefs)
+        UserPreferences? prefs,
+        string? country = null)
     {
         if (prefs == null) return false;
 
@@ -628,7 +629,7 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
         if (CanonicalEntityIds.TryTranslateLegacyId(id, out var canon1) && followedIds.Contains(canon1)) return true;
         if (CanonicalEntityIds.TryTranslateLegacyId(legacyId, out var canon2) && followedIds.Contains(canon2)) return true;
 
-        // 3. Name match against user's followed competitions
+        // 3. Name match against user's followed competitions (country must match to prevent collisions)
         if (!string.IsNullOrWhiteSpace(name))
         {
             string trimmedName = name.Trim();
@@ -637,20 +638,11 @@ public sealed class SearchCatalogViewModel : INotifyPropertyChanged, IDisposable
                 if (string.IsNullOrWhiteSpace(c.Name)) continue;
                 if (string.Equals(c.Name.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return true;
-                }
-            }
-        }
-
-        // 4. Code match
-        if (!string.IsNullOrWhiteSpace(code))
-        {
-            string trimmedCode = code.Trim();
-            foreach (var c in prefs.FollowedCompetitions)
-            {
-                if (!string.IsNullOrWhiteSpace(c.Code) && string.Equals(c.Code.Trim(), trimmedCode, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
+                    if (string.IsNullOrWhiteSpace(c.Country) || string.IsNullOrWhiteSpace(country) ||
+                        string.Equals(c.Country.Trim(), country.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
                 }
             }
         }

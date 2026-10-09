@@ -169,9 +169,9 @@ public sealed record UserPreferences
             var id = comp.Id.Trim();
             set.Add(id);
 
-            if (!string.IsNullOrWhiteSpace(comp.Name))
+            if (!string.IsNullOrWhiteSpace(comp.Name) && !string.IsNullOrWhiteSpace(comp.Country))
             {
-                set.Add(comp.Name.Trim());
+                set.Add($"name_country:{comp.Name.Trim()}|{comp.Country.Trim()}");
             }
 
             if (id.StartsWith("provisional:", StringComparison.OrdinalIgnoreCase))
