@@ -13,13 +13,14 @@
  */
 
 import { and, desc, eq, gte, lt, notInArray, notLike, or, sql } from 'drizzle-orm';
-import { db, schema } from '../db/index.js';
+import { db, schema, isTestEnvironment } from '../db/index.js';
 import {
   AcquisitionPolicyEngine,
   BudgetContext,
   FixturesSummary,
   SyncPlan,
 } from './acquisition-policy.js';
+import { createProvider } from './provider-factory.js';
 import { SyncService, SyncSummary } from './sync.service.js';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import {
@@ -27,6 +28,7 @@ import {
   SchedulerCycleOutcome,
   SchedulerErrorType,
 } from '../repositories/scheduler-cycles.repository.js';
+import { IProviderSwapObserver } from './daemon-preferences.service.js';
 
 export interface SchedulerLogger {
   info(message: string, meta?: Record<string, unknown>): void;
@@ -170,15 +172,16 @@ export async function getDatabaseBudgetContext(provider = 'api_football', now = 
   };
 }
 
-export class AcquisitionScheduler {
-  private readonly syncService: SyncService;
+export class AcquisitionScheduler implements IProviderSwapObserver {
+  private syncService: SyncService;
   private readonly fixturesRepo: FixturesRepository;
   private readonly cyclesRepo: SchedulerCyclesRepository;
   private readonly getBudget: (provider?: string, now?: Date) => Promise<BudgetContext>;
   private readonly now: () => Date;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   private targetCompetitionIds?: number[];
-  private readonly providerName: string;
+  private providerName: string;
+  private pendingProviderName: string | null = null;
   private readonly onCycleComplete?: (plan: SyncPlan, summary: SyncSummary | null) => void;
   private readonly onErrorCallback?: (error: Error) => void;
   private readonly logger: SchedulerLogger;
@@ -249,6 +252,16 @@ export class AcquisitionScheduler {
 
   public bindPreferencesService(service: import('./daemon-preferences.service.js').DaemonPreferencesService): void {
     this.preferencesService = service;
+  }
+
+  /**
+   * Queues a dynamic provider swap for the next tick boundary.
+   */
+  public swapProvider(newProviderName: string): void {
+    if (this.providerName === newProviderName || this.pendingProviderName === newProviderName) return;
+    
+    this.logger.info(`Queuing active provider swap from ${this.providerName} to ${newProviderName} for next cycle boundary.`);
+    this.pendingProviderName = newProviderName;
   }
 
   public setPinnedMatchIds(ids: Array<string | number>): void {
@@ -500,8 +513,8 @@ export class AcquisitionScheduler {
 
         this.logger.info(`Fetched day ${offsetLabel} (${targetDateStr})... waiting 9s`);
 
-        // Pacing delay: exactly 9 seconds between each iteration (skip delay after final iteration)
-        if (offset < 1) {
+        // Pacing delay: exactly 9 seconds between each iteration (skip delay after final iteration and during tests)
+        if (offset < 1 && !isTestEnvironment) {
           await new Promise((resolve) => setTimeout(resolve, 9000));
         }
       } catch (err: any) {
@@ -568,6 +581,15 @@ export class AcquisitionScheduler {
     let syncSummary: SyncSummary | null = null;
     let targetComps = this.targetCompetitionIds;
 
+    // Apply any queued provider swaps safely before making any API requests
+    if (this.pendingProviderName) {
+      this.logger.info(`Applying queued provider swap to ${this.pendingProviderName}`);
+      this.providerName = this.pendingProviderName;
+      this.pendingProviderName = null;
+      const newProvider = createProvider({ provider: this.providerName as any });
+      this.syncService = new SyncService(newProvider);
+    }
+
     try {
       const currentDate = this.now();
       const todayDateStr = currentDate.toISOString().slice(0, 10);
@@ -601,7 +623,13 @@ export class AcquisitionScheduler {
             const targetDateStr = targetD.toISOString().slice(0, 10);
             let hasDayFixtures = false;
 
-            if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
+            const isDiscovered = typeof (this.fixturesRepo as any).isScheduleDiscovered === 'function'
+              ? (this.fixturesRepo as any).isScheduleDiscovered(targetDateStr)
+              : false;
+
+            if (isDiscovered) {
+              hasDayFixtures = true;
+            } else if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
               hasDayFixtures = await (this.fixturesRepo as any).hasFixturesForDate(targetDateStr);
             } else if (this.fixturesRepo instanceof FixturesRepository) {
               const startOfDay = new Date(`${targetDateStr}T00:00:00.000Z`);
@@ -714,14 +742,23 @@ export class AcquisitionScheduler {
               pinnedMatchIds: prefState?.pinnedMatchIds ?? Array.from(this.pinnedMatchIds),
             });
 
-            const isHtSuspended = postSyncSummary.hasPinnedOrFollowedLive
+            const hasApproaching = (postSyncSummary.approachingCount ?? 0) > 0;
+            const hasActiveInPlay = (postSyncSummary.hasPinnedOrFollowedLive
+              ? (postSyncSummary.pinnedOrFollowedActiveInPlayCount ?? 0)
+              : (postSyncSummary.activeInPlayCount ?? 0)) > 0;
+
+            const isHtSuspended = !hasApproaching && !hasActiveInPlay && (postSyncSummary.hasPinnedOrFollowedLive
               ? (postSyncSummary.pinnedOrFollowedInHalftime ?? postSyncSummary.allLiveInHalftime)
-              : postSyncSummary.allLiveInHalftime;
+              : postSyncSummary.allLiveInHalftime);
 
             if (isHtSuspended && postSyncSummary.liveCount > 0) {
-              const remainingBreak = postSyncSummary.halftimeRemainingMs ?? AcquisitionPolicyEngine.HALFTIME_SUSPEND_MS;
+              let remainingBreak = postSyncSummary.halftimeRemainingMs ?? AcquisitionPolicyEngine.HALFTIME_SUSPEND_MS;
+              if (postSyncSummary.nextScheduledKickoffMs != null) {
+                const msUntilKickoff = postSyncSummary.nextScheduledKickoffMs - currentDate.getTime();
+                remainingBreak = Math.min(remainingBreak, Math.max(30_000, msUntilKickoff));
+              }
               plan.recommendedNextPollMs = remainingBreak;
-              plan.reason = 'Live match entered HT (Halftime). Polling suspended for 15-minute break.';
+              plan.reason = 'Live match entered HT (Halftime). Polling suspended for break.';
               this.logger.info(`Halftime suspend activated: live match is in HT. Pausing polling for ${Math.round(remainingBreak / 1000)}s.`);
             }
           }
@@ -752,6 +789,8 @@ export class AcquisitionScheduler {
         } else {
           outcome = 'IDLE';
         }
+      } else if (syncSummary?.cachedFallback) {
+        outcome = 'RECOVERABLE_FALLBACK';
       } else {
         // Formal outcome semantics:
         // - SUCCESS: Provider action completed successfully and resulted in meaningful domain/entity mutations (fixtures/events inserted or updated).

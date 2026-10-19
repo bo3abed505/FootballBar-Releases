@@ -1,4 +1,4 @@
-import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql, notLike, notInArray } from 'drizzle-orm';
+import { eq, desc, or, and, gte, lte, inArray, lt, like, asc, sql, notLike, notInArray, isNull } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { AcquisitionPolicyEngine, FixturesSummary } from '../acquisition/acquisition-policy.js';
 import { generateCanonicalId } from '../db/canonical-id.js';
@@ -175,9 +175,12 @@ export class FixturesRepository {
       targetCompetitions = optionsOrLimit.competitions ?? null;
     }
 
-    const LIVE_STATES = ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY'];
-    const PREMATCH_STATES = ['PREMATCH', 'NS', 'TBD'];
-    const FINISHED_STATES = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH'];
+    const LIVE_STATES = [
+      'LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY',
+      'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'HT'
+    ];
+    const PREMATCH_STATES = ['PREMATCH', 'NS', 'TBD', 'TIMED', 'SCHEDULED', 'NOT_STARTED'];
+    const FINISHED_STATES = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH', 'FINISHED_AET', 'FINISHED_PEN'];
 
     let activeDate = now;
     if (targetDate) {
@@ -368,6 +371,149 @@ export class FixturesRepository {
     });
   }
 
+  async getLiveTrayMatches(
+    options?: { teams?: string[] | null; competitions?: string[] | null; limit?: number | null },
+    now: Date = new Date()
+  ) {
+    const nowMs = now.getTime();
+    const LIVE_STATES = ['LIVE', 'HALFTIME', 'HT', '1H', '2H', 'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'ET', 'P', 'BT', 'IN_PLAY'];
+    const FINISHED_STATES = ['FINISHED', 'FINISHED_AET', 'FINISHED_PEN', 'FT', 'AET', 'PEN', 'POSTMATCH'];
+
+    const livePastCutoff = new Date(nowMs - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS);
+    const approachingFutureCutoff = new Date(nowMs + 45 * 60 * 1000); // Kicking off within 45 min
+    const recentFinishCutoff = new Date(nowMs - 15 * 60 * 1000);     // Concluded in last 15 min
+
+    // Expand teams to include legacy IDs, stripped numeric prefixes, and resolve canonical IDs
+    const expandedTeamIds = new Set<string>();
+    const expandedCompIds = new Set<string>();
+
+    if (options?.teams && options.teams.length > 0) {
+      for (const t of options.teams) {
+        if (!t) continue;
+        const trimmed = t.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('comp_') || trimmed.startsWith('ft_comp_')) {
+          expandedCompIds.add(trimmed);
+          continue;
+        }
+        expandedTeamIds.add(trimmed);
+        if (trimmed.startsWith('team_')) {
+          expandedTeamIds.add(trimmed.substring(5));
+        } else if (!trimmed.startsWith('ft_team_')) {
+          expandedTeamIds.add(`team_${trimmed}`);
+        }
+      }
+
+      const canonicalCandidates = Array.from(expandedTeamIds).filter((id) => id.startsWith('ft_team_'));
+      if (canonicalCandidates.length > 0) {
+        try {
+          const matchedTeams = await db.query.teams.findMany({
+            where: inArray(schema.teams.canonicalId, canonicalCandidates),
+            columns: { id: true, canonicalId: true },
+          });
+          for (const mt of matchedTeams) {
+            if (mt.id) expandedTeamIds.add(mt.id);
+          }
+        } catch {
+          // Non-critical fallback
+        }
+      }
+    }
+
+    if (options?.competitions && options.competitions.length > 0) {
+      for (const c of options.competitions) {
+        if (!c) continue;
+        const trimmed = c.trim();
+        if (!trimmed) continue;
+        expandedCompIds.add(trimmed);
+        if (trimmed.startsWith('comp_')) {
+          expandedCompIds.add(trimmed.substring(5));
+        } else if (!trimmed.startsWith('ft_comp_')) {
+          expandedCompIds.add(`comp_${trimmed}`);
+        }
+      }
+
+      const canonicalCompCandidates = Array.from(expandedCompIds).filter((id) => id.startsWith('ft_comp_'));
+      if (canonicalCompCandidates.length > 0) {
+        try {
+          const matchedComps = await db.query.competitions.findMany({
+            where: inArray(schema.competitions.canonicalId, canonicalCompCandidates),
+            columns: { id: true, canonicalId: true },
+          });
+          for (const mc of matchedComps) {
+            if (mc.id) expandedCompIds.add(mc.id);
+          }
+        } catch {
+          // Non-critical fallback
+        }
+      }
+    }
+
+    const orConditions = [
+      // 1. Actively in play
+      and(
+        inArray(schema.fixtures.state, LIVE_STATES),
+        gte(schema.fixtures.kickoffTime, livePastCutoff)
+      ),
+      // 2. Imminent kickoff (within 45 minutes)
+      and(
+        inArray(schema.fixtures.state, ['PREMATCH', 'NS', 'TBD', 'SCHEDULED', 'TIMED', 'NOT_STARTED']),
+        gte(schema.fixtures.kickoffTime, new Date(nowMs - 10 * 60 * 1000)),
+        lte(schema.fixtures.kickoffTime, approachingFutureCutoff)
+      ),
+      // 3. Recently finished (within last 15 minutes)
+      and(
+        inArray(schema.fixtures.state, FINISHED_STATES),
+        gte(schema.fixtures.updatedAt, recentFinishCutoff)
+      ),
+    ];
+
+    let whereClause: any = or(...orConditions);
+
+    if (expandedTeamIds.size > 0 || expandedCompIds.size > 0) {
+      const filterConditions: any[] = [];
+      if (expandedTeamIds.size > 0) {
+        const targetTeamList = Array.from(expandedTeamIds);
+        filterConditions.push(
+          or(
+            inArray(schema.fixtures.homeTeamId, targetTeamList),
+            inArray(schema.fixtures.awayTeamId, targetTeamList)
+          )
+        );
+      }
+      if (expandedCompIds.size > 0) {
+        const targetCompList = Array.from(expandedCompIds);
+        filterConditions.push(
+          inArray(schema.fixtures.competitionId, targetCompList)
+        );
+      }
+      whereClause = and(or(...orConditions), or(...filterConditions));
+    }
+
+    return await db.query.fixtures.findMany({
+      where: whereClause,
+      with: {
+        competition: true,
+        homeTeam: true,
+        awayTeam: true,
+        events: {
+          orderBy: [desc(schema.events.minute), desc(schema.events.extraMinute)],
+          limit: 5,
+        },
+      },
+      orderBy: [
+        sql`CASE
+          WHEN ${schema.fixtures.state} IN ('LIVE', 'HALFTIME', '1H', '2H', 'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'ET', 'P', 'BT', 'IN_PLAY') THEN 0
+          WHEN ${schema.fixtures.state} IN ('PREMATCH', 'NS', 'TBD', 'SCHEDULED') THEN 1
+          ELSE 2
+        END ASC`,
+        asc(schema.fixtures.kickoffTime),
+        asc(schema.fixtures.id),
+      ],
+      ...(typeof options?.limit === 'number' && options.limit > 0 ? { limit: options.limit } : {}),
+    });
+  }
+
   async insert(fixture: Omit<typeof schema.fixtures.$inferInsert, 'canonicalId'> & { canonicalId?: string }) {
     const canonicalId = fixture.canonicalId || generateCanonicalId('fix');
     const results = await db.insert(schema.fixtures).values({ ...fixture, canonicalId }).onConflictDoNothing().returning();
@@ -403,7 +549,7 @@ export class FixturesRepository {
       })
       .where(
         and(
-          inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
+          inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'ET', 'P', 'BT', 'IN_PLAY']),
           lt(schema.fixtures.kickoffTime, cutoff)
         )
       );
@@ -582,29 +728,46 @@ export class FixturesRepository {
     const candidateFixtures = await db.query.fixtures.findMany({
       where: or(
         and(
-          inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
+          inArray(schema.fixtures.state, [
+            'LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY',
+            'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'HT'
+          ]),
           gte(schema.fixtures.kickoffTime, new Date(now.getTime() - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS)),
           lte(schema.fixtures.kickoffTime, new Date(now.getTime() + AcquisitionPolicyEngine.APPROACHING_WINDOW_MS))
         ),
         and(
-          inArray(schema.fixtures.state, ['PREMATCH', 'NS', 'TBD']),
+          inArray(schema.fixtures.state, ['PREMATCH', 'NS', 'TBD', 'TIMED', 'SCHEDULED', 'NOT_STARTED']),
           gte(schema.fixtures.kickoffTime, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
           lte(schema.fixtures.kickoffTime, new Date(now.getTime() + 24 * 60 * 60 * 1000))
         ),
         and(
-          inArray(schema.fixtures.state, ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH']),
+          inArray(schema.fixtures.state, ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH', 'FINISHED_AET', 'FINISHED_PEN']),
+          isNull(schema.fixtures.finalizedAt),
           gte(schema.fixtures.kickoffTime, new Date(now.getTime() - 4 * 60 * 60 * 1000))
         )
       ),
-      limit: 200,
+      limit: 500,
     });
+
+    const ACTIVE_PLAY_SET = new Set([
+      'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'PENALTIES', 'LIVE', '1H', '2H', 'ET', 'P', 'IN_PLAY'
+    ]);
+    const HALFTIME_SET = new Set([
+      'HALFTIME', 'HT', 'BT', 'EXTRA_TIME_HALFTIME'
+    ]);
+    const SCHEDULED_SET = new Set([
+      'PREMATCH', 'NS', 'TBD', 'TIMED', 'SCHEDULED', 'NOT_STARTED'
+    ]);
 
     const todayUtcPrefix = now.toISOString().slice(0, 10);
     let liveCount = 0;
+    let activeInPlayCount = 0;
     let pinnedOrFollowedLiveCount = 0;
+    let pinnedOrFollowedActiveInPlayCount = 0;
     let totalLiveHalftimeCount = 0;
     let pinnedOrFollowedHalftimeCount = 0;
     let minHalftimeRemainingMs: number | null = null;
+    let minScheduledKickoffMs: number | null = null;
     let approachingCount = 0;
     let recentlyFinishedCount = 0;
     let stalePrematchCount = 0;
@@ -652,7 +815,20 @@ export class FixturesRepository {
     let scheduleKnownForToday = scheduleState === 'DISCOVERED';
 
     for (const f of candidateFixtures) {
-      const kickoffStr = f.kickoffTime instanceof Date ? f.kickoffTime.toISOString() : String(f.kickoffTime);
+      const stateUpper = (f.state || '').toUpperCase().trim();
+      const kickoffDate = f.kickoffTime instanceof Date ? f.kickoffTime : new Date(f.kickoffTime);
+      const kickoffStr = kickoffDate.toISOString();
+      const kickoffMs = kickoffDate.getTime();
+
+      // Check upcoming scheduled fixtures for kickoff wake-up guard
+      if (SCHEDULED_SET.has(stateUpper) || kickoffMs >= now.getTime() - 60_000) {
+        if (SCHEDULED_SET.has(stateUpper)) {
+          if (minScheduledKickoffMs === null || kickoffMs < minScheduledKickoffMs) {
+            minScheduledKickoffMs = kickoffMs;
+          }
+        }
+      }
+
       // Only recognize schedule from existing DB fixtures if today's date was not explicitly invalidated
       if (kickoffStr.slice(0, 10) === todayUtcPrefix && scheduleState !== 'INVALIDATED') {
         scheduleKnownForToday = true;
@@ -663,6 +839,7 @@ export class FixturesRepository {
         kickoffTime: f.kickoffTime,
         lastPolledAt: f.lastPolledAt,
         updatedAt: f.updatedAt,
+        finalizedAt: f.finalizedAt,
       }, now);
 
       if (classification === 'LIVE_WINDOW') {
@@ -683,11 +860,18 @@ export class FixturesRepository {
         );
 
         const isFollowedOrPinned = isPinned || isTeamFollowed || isCompFollowed;
-        const stateUpper = (f.state || '').toUpperCase().trim();
-        const isHalftime = ['HALFTIME', 'HT', 'BT'].includes(stateUpper);
+        const isActivePlay = ACTIVE_PLAY_SET.has(stateUpper);
+        const isHalftime = HALFTIME_SET.has(stateUpper);
+
+        if (isActivePlay) {
+          activeInPlayCount++;
+        }
 
         if (isFollowedOrPinned) {
           pinnedOrFollowedLiveCount++;
+          if (isActivePlay) {
+            pinnedOrFollowedActiveInPlayCount++;
+          }
           if (isHalftime) {
             pinnedOrFollowedHalftimeCount++;
           }
@@ -723,14 +907,17 @@ export class FixturesRepository {
     }
 
     const hasPinnedOrFollowedLive = pinnedOrFollowedLiveCount > 0;
-    const allLiveInHalftime = liveCount > 0 && totalLiveHalftimeCount === liveCount;
-    const pinnedOrFollowedInHalftime = hasPinnedOrFollowedLive && pinnedOrFollowedHalftimeCount === pinnedOrFollowedLiveCount;
+    // allLiveInHalftime / pinnedOrFollowedInHalftime is true ONLY when there is at least one halftime match AND ZERO active in-play matches
+    const allLiveInHalftime = totalLiveHalftimeCount > 0 && activeInPlayCount === 0;
+    const pinnedOrFollowedInHalftime = hasPinnedOrFollowedLive && pinnedOrFollowedHalftimeCount > 0 && pinnedOrFollowedActiveInPlayCount === 0;
     const halftimeRemainingMs = minHalftimeRemainingMs !== null && minHalftimeRemainingMs > 0
       ? minHalftimeRemainingMs
       : AcquisitionPolicyEngine.HALFTIME_SUSPEND_MS;
 
     return {
       liveCount,
+      activeInPlayCount,
+      pinnedOrFollowedActiveInPlayCount,
       hasPinnedOrFollowedLive: options ? hasPinnedOrFollowedLive : undefined,
       pinnedOrFollowedLiveCount,
       unpinnedLiveCount: liveCount - pinnedOrFollowedLiveCount,
@@ -742,6 +929,7 @@ export class FixturesRepository {
       stalePrematchCount,
       staleCompetitionIds: Array.from(new Set(staleCompetitionIds)),
       scheduleKnownForToday,
+      nextScheduledKickoffMs: minScheduledKickoffMs,
     };
   }
 }

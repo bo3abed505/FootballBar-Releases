@@ -31,7 +31,7 @@ interface SeedCompetitionItem {
   seasonYear?: number;
 }
 
-import { PRIORITY_COMPETITIONS } from './priority-competitions.js';
+import { PRIORITY_COMPETITIONS, FOTMOB_COMPETITION_MAP } from './priority-competitions.js';
 
 function isCleanCompetition(name: string): boolean {
   const lower = name.toLowerCase();
@@ -179,6 +179,12 @@ async function seedCatalog() {
       const targetCanonicalId = canonicalId;
       const aliasCreated = await ensureProviderAlias(tx, 'competition', targetCanonicalId, 'api_football', String(comp.id));
       if (aliasCreated) aliasCount++;
+
+      const fotmobCompId = FOTMOB_COMPETITION_MAP[comp.id];
+      if (fotmobCompId) {
+        const fotmobAliasCreated = await ensureProviderAlias(tx, 'competition', targetCanonicalId, 'fotmob', String(fotmobCompId));
+        if (fotmobAliasCreated) aliasCount++;
+      }
 
       // Upsert current season
       const targetCompId = existing ? existing.id : compId;

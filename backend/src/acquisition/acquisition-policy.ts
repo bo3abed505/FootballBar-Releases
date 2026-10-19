@@ -43,6 +43,65 @@ export interface SyncPlan {
 }
 
 // ----------------------------------------------------
+// Canonical Match States (FotMob + Domain Normalization)
+// ----------------------------------------------------
+export const LIVE_STATES = [
+  'FIRST_HALF',
+  'SECOND_HALF',
+  'EXTRA_TIME',
+  'EXTRA_TIME_HALFTIME',
+  'PENALTIES',
+  'HALFTIME',
+  'HT',
+  'LIVE',
+  '1H',
+  '2H',
+  'ET',
+  'P',
+  'BT',
+  'IN_PLAY',
+] as const;
+
+export const ACTIVE_IN_PLAY_STATES = [
+  'FIRST_HALF',
+  'SECOND_HALF',
+  'EXTRA_TIME',
+  'PENALTIES',
+  'LIVE',
+  '1H',
+  '2H',
+  'ET',
+  'P',
+  'IN_PLAY',
+] as const;
+
+export const HALFTIME_BREAK_STATES = [
+  'HALFTIME',
+  'HT',
+  'BT',
+  'EXTRA_TIME_HALFTIME',
+] as const;
+
+export const FINISHED_STATES = [
+  'FINISHED',
+  'FT',
+  'FINISHED_AET',
+  'AET',
+  'FINISHED_PEN',
+  'PEN',
+  'POSTMATCH',
+] as const;
+
+export const PREMATCH_STATES = [
+  'PREMATCH',
+  'NS',
+  'TBD',
+  'TIMED',
+  'SCHEDULED',
+  'NOT_STARTED',
+] as const;
+
+// ----------------------------------------------------
 // 3. Context Inputs
 // ----------------------------------------------------
 export interface BudgetContext {
@@ -54,6 +113,8 @@ export interface BudgetContext {
 
 export interface FixturesSummary {
   liveCount: number;
+  activeInPlayCount?: number;
+  pinnedOrFollowedActiveInPlayCount?: number;
   approachingCount?: number;
   recentlyFinishedCount: number;
   stalePrematchCount: number;
@@ -69,6 +130,7 @@ export interface FixturesSummary {
   pinnedOrFollowedInHalftime?: boolean;
   halftimeRemainingMs?: number | null;
   isScheduleSyncDue?: boolean;
+  nextScheduledKickoffMs?: number | null;
 }
 
 export interface FixtureClassificationInput {
@@ -76,6 +138,7 @@ export interface FixtureClassificationInput {
   kickoffTime: Date | string;
   lastPolledAt?: Date | string | null;
   updatedAt?: Date | string | null;
+  finalizedAt?: Date | string | null;
 }
 
 // ----------------------------------------------------
@@ -190,8 +253,8 @@ export class AcquisitionPolicyEngine {
     const kickoffMs = kickoff.getTime();
     const diffMs = kickoffMs - nowMs; // positive if in future, negative if in past
 
-    // 1. Live match states (uses existing domain representations)
-    const liveStates = new Set(['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']);
+    // 1. Live match states (uses canonical FotMob and domain representations)
+    const liveStates = new Set<string>(LIVE_STATES);
     if (liveStates.has(stateUpper)) {
       // Live state expiration guard: if kickoff was > MAX_LIVE_MATCH_AGE_MS ago,
       // the match cannot plausibly still be in progress.
@@ -210,8 +273,17 @@ export class AcquisitionPolicyEngine {
     }
 
     // 2. Finished match states
-    const finishedStates = new Set(['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH']);
+    const finishedStates = new Set<string>(FINISHED_STATES);
     if (finishedStates.has(stateUpper)) {
+      // If fixture is already finalized, it is permanently FINAL
+      if (fixture.finalizedAt) {
+        return 'FINAL';
+      }
+      // If kickoff was > 4 hours ago, match is well concluded and requires no finalization
+      if (diffMs < -4 * 60 * 60 * 1000) {
+        return 'FINAL';
+      }
+
       // Check when the finish was recorded / polled
       const referenceTime = fixture.lastPolledAt
         ? new Date(fixture.lastPolledAt).getTime()
@@ -232,7 +304,7 @@ export class AcquisitionPolicyEngine {
       return 'FINAL';
     }
 
-    // 4. Prematch states (PREMATCH, NS, TBD)
+    // 4. Prematch states (PREMATCH, NS, TBD, TIMED, SCHEDULED, NOT_STARTED)
     // 4a. Ancient prematch: kickoff was > 24 hours in the past — match is abandoned/postponed
     if (diffMs < -24 * 60 * 60 * 1000) {
       return 'FINAL';
@@ -308,19 +380,30 @@ export class AcquisitionPolicyEngine {
       // 3a. The Halftime (HT) Suspend:
       // If all active live matches (or all followed live matches) are in HT,
       // pause polling for the 15-minute break to eliminate wasted requests.
-      const isHtSuspended = fixturesSummary.hasPinnedOrFollowedLive
-        ? (fixturesSummary.pinnedOrFollowedInHalftime ?? fixturesSummary.allLiveInHalftime)
-        : fixturesSummary.allLiveInHalftime;
+      // Dynamic Kickoff Wake-up Guard: NEVER enter Halftime suspend if approachingCount > 0.
+      const hasApproaching = (fixturesSummary.approachingCount ?? 0) > 0;
+      const isHtSuspended = !hasApproaching && (
+        fixturesSummary.hasPinnedOrFollowedLive
+          ? (fixturesSummary.pinnedOrFollowedInHalftime ?? fixturesSummary.allLiveInHalftime)
+          : fixturesSummary.allLiveInHalftime
+      );
 
       if (isHtSuspended) {
-        const suspendMs = fixturesSummary.halftimeRemainingMs ?? this.HALFTIME_SUSPEND_MS;
+        let suspendMs = fixturesSummary.halftimeRemainingMs ?? this.HALFTIME_SUSPEND_MS;
+
+        // Dynamic Kickoff Wake-up Guard: if any scheduled fixture kicks off within the sleep window, clamp sleepMs
+        if (fixturesSummary.nextScheduledKickoffMs != null) {
+          const msUntilKickoff = fixturesSummary.nextScheduledKickoffMs - now.getTime();
+          suspendMs = Math.min(suspendMs, Math.max(30_000, msUntilKickoff));
+        }
+
         return {
           action: 'IDLE',
           priority: 'NORMAL',
           recommendedNextPollMs: suspendMs,
           reason: fixturesSummary.hasPinnedOrFollowedLive
-            ? 'Halftime suspend: followed live match is in HT. Pausing polling for 15-minute break.'
-            : 'Halftime suspend: all live matches in HT. Pausing polling for 15-minute break.',
+            ? 'Halftime suspend: followed live match is in HT. Pausing polling for break.'
+            : 'Halftime suspend: all live matches in HT. Pausing polling for break.',
         };
       }
 
@@ -394,26 +477,38 @@ export class AcquisitionPolicyEngine {
       };
     }
 
-    // 7. Fully Idle (Check every 4–6 hours, bounded by next twice-daily schedule slot)
+    // 7. Fully Idle (Check every 4–6 hours, bounded by next twice-daily schedule slot or upcoming kickoff)
     if (fixturesSummary.hasPinnedOrFollowedLive !== undefined) {
       const msUntilNextScheduleSlot = Math.max(
         60_000,
         this.getNextScheduleSyncSlotStart(now).getTime() - now.getTime()
       );
-      const idleDelayMs = Math.min(this.IDLE_NO_LIVE_CADENCE_MS, msUntilNextScheduleSlot);
+      let idleDelayMs = Math.min(this.IDLE_NO_LIVE_CADENCE_MS, msUntilNextScheduleSlot);
+
+      // Dynamic Kickoff Wake-up Guard: if any scheduled fixture kicks off within the idle window, clamp
+      if (fixturesSummary.nextScheduledKickoffMs != null) {
+        const msUntilKickoff = fixturesSummary.nextScheduledKickoffMs - now.getTime();
+        idleDelayMs = Math.min(idleDelayMs, Math.max(30_000, msUntilKickoff));
+      }
 
       return {
         action: 'IDLE',
         priority: 'NORMAL',
         recommendedNextPollMs: idleDelayMs,
-        reason: `No live matches. System idle (checking every ${Math.round(idleDelayMs / 3600000)}h).`,
+        reason: `No live matches. System idle (checking in ${Math.round(idleDelayMs / 1000)}s).`,
       };
+    }
+
+    let fallbackIdleMs: number | null = null;
+    if (fixturesSummary.nextScheduledKickoffMs != null) {
+      const msUntilKickoff = fixturesSummary.nextScheduledKickoffMs - now.getTime();
+      fallbackIdleMs = Math.max(30_000, msUntilKickoff);
     }
 
     return {
       action: 'IDLE',
       priority: 'NORMAL',
-      recommendedNextPollMs: null,
+      recommendedNextPollMs: fallbackIdleMs,
       reason: 'No live, approaching, stale, or unfinalized fixtures. System is idle.',
     };
   }

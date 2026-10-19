@@ -1,7 +1,6 @@
-import { createProvider, ProviderConfigError } from './provider-factory.js';
+import { createProvider } from './provider-factory.js';
 import { getTargetCompetitionIds, CompetitionConfigError } from './competition-config.js';
-import { MockFootballProvider } from '../providers/mock.provider.js';
-import { FixtureFilter } from '../providers/football-provider.js';
+import { FixtureFilter } from '../providers/types.js';
 import { SyncService } from './sync.service.js';
 import { pool } from '../db/index.js';
 
@@ -40,8 +39,8 @@ async function runCliSync() {
   let provider;
   try {
     provider = createProvider();
-  } catch (err) {
-    if (err instanceof ProviderConfigError) {
+  } catch (err: any) {
+    if (err?.name === 'ProviderConfigError') {
       console.error(`[CONFIG ERROR] ${err.message}`);
       process.exit(1);
     }
@@ -52,7 +51,7 @@ async function runCliSync() {
   // Fail-closed enforcement for API-Football:
   // Disallow unfiltered global queries in live mode to protect daily quota.
   // -----------------------------------------------------------------------
-  if (provider.providerName === 'api_football' && targetCompIds.length === 0) {
+  if (provider.name === 'api_football' && targetCompIds.length === 0) {
     console.error(
       '[CONFIG ERROR] TARGET_COMPETITION_IDS must be configured with at least one competition ID when running with ACTIVE_PROVIDER=api_football. ' +
       'Unfiltered global fixture queries are rejected to prevent rapid quota depletion.'
@@ -64,19 +63,19 @@ async function runCliSync() {
     console.log(`[CONFIG] Competition allowlist: ${targetCompIds.join(', ')}`);
   }
 
-  console.log(`[SYNC] Using provider: ${provider.providerName}`);
+  console.log(`[SYNC] Using provider: ${provider.name}`);
 
   // -----------------------------------------------------------------------
   // Mock-only simulation helpers (strongly typed via instanceof)
   // -----------------------------------------------------------------------
-  if (provider instanceof MockFootballProvider) {
+  if (provider.name === "mock") {
     if (isReset) {
       console.log('[CLI_SYNC] Resetting mock development state back to baseline...');
-      provider.clearPersistentState();
-      provider.reset();
+      (provider as any).clearPersistentState();
+      (provider as any).reset();
     } else if (isSimulateGoal) {
       console.log('[CLI_SYNC] Simulating match event: Barcelona goal at 89th minute (2-1)...');
-      provider.simulateGoal('fix_elclasico_2026', true, 89, {
+      (provider as any).simulateGoal('fix_elclasico_2026', true, 89, {
         name: 'L. Martinez (Dev Player)',
         id: 'ply_bar_10',
       });

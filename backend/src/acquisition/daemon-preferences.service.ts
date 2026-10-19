@@ -10,7 +10,12 @@ import { inArray } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import { extractProviderId } from '../db/provider-alias.js';
 import { getTargetCompetitionIds } from './competition-config.js';
-import { AcquisitionScheduler } from './acquisition-scheduler.js';
+
+export interface IProviderSwapObserver {
+  swapProvider(newProviderName: string): void;
+  setTargetCompetitionIds(ids?: number[]): void;
+  setPinnedMatchIds(ids: Array<string | number>): void;
+}
 
 export interface UpdatePreferencesPayload {
   competitionIds?: Array<string | number>;
@@ -19,6 +24,7 @@ export interface UpdatePreferencesPayload {
   followedTeams?: Array<{ id: string; name?: string; code?: string }>;
   pinnedMatchIds?: Array<string | number>;
   pinnedMatchId?: string | number | null;
+  activeProvider?: string | null;
 }
 
 export interface DaemonPreferencesState {
@@ -27,6 +33,7 @@ export interface DaemonPreferencesState {
   effectiveCompetitionNumericIds: number[];
   effectiveTeamNumericIds: number[];
   pinnedMatchIds: string[];
+  activeProvider: string;
   lastUpdatedAt: string;
 }
 
@@ -37,7 +44,8 @@ export class DaemonPreferencesService {
   private effectiveCompetitionNumericIds: number[] = [];
   private effectiveTeamNumericIds: number[] = [];
   private lastUpdatedAt: Date = new Date();
-  private scheduler: AcquisitionScheduler | null = null;
+  private activeProvider: string = 'api_football';
+  private scheduler: IProviderSwapObserver | null = null;
 
   constructor() {
     // 1. Initialize baseline allowlist from .env TARGET_COMPETITION_IDS
@@ -49,7 +57,7 @@ export class DaemonPreferencesService {
     }
   }
 
-  public bindScheduler(scheduler: AcquisitionScheduler): void {
+  public bindScheduler(scheduler: IProviderSwapObserver): void {
     this.scheduler = scheduler;
     if (scheduler && typeof (scheduler as any).bindPreferencesService === 'function') {
       (scheduler as any).bindPreferencesService(this);
@@ -77,6 +85,7 @@ export class DaemonPreferencesService {
       effectiveCompetitionNumericIds: this.effectiveCompetitionNumericIds,
       effectiveTeamNumericIds: this.effectiveTeamNumericIds,
       pinnedMatchIds: Array.from(this.pinnedMatchIds),
+      activeProvider: this.activeProvider,
       lastUpdatedAt: this.lastUpdatedAt.toISOString(),
     };
   }
@@ -207,13 +216,17 @@ export class DaemonPreferencesService {
 
     // Propagate to background scheduler
     if (this.scheduler) {
-      if (typeof (this.scheduler as any).setTargetCompetitionIds === 'function') {
-        this.scheduler.setTargetCompetitionIds(
-          resolvedCompIds.length > 0 ? resolvedCompIds : undefined
-        );
-      }
-      if (typeof (this.scheduler as any).setPinnedMatchIds === 'function') {
-        (this.scheduler as any).setPinnedMatchIds(Array.from(this.pinnedMatchIds));
+      this.scheduler.setTargetCompetitionIds(
+        resolvedCompIds.length > 0 ? resolvedCompIds : undefined
+      );
+      this.scheduler.setPinnedMatchIds(Array.from(this.pinnedMatchIds));
+    }
+    
+    if (payload.activeProvider && typeof payload.activeProvider === 'string') {
+      const isChanged = this.activeProvider !== payload.activeProvider;
+      this.activeProvider = payload.activeProvider;
+      if (isChanged && this.scheduler) {
+        this.scheduler.swapProvider(this.activeProvider);
       }
     }
 

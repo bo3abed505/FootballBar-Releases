@@ -13,7 +13,9 @@ export type SchedulerCycleOutcome =
   | 'NO_OP' // Provider action completed successfully but produced no meaningful domain/entity mutation
   | 'ERROR' // Cycle encountered an unhandled exception or failed
   | 'QUOTA_BLOCKED' // Action was prevented due to daily quota exhaustion or critical reserve protection
-  | 'RATE_LIMITED'; // Action was prevented due to per-minute provider ceiling or rate limits
+  | 'RATE_LIMITED' // Action was prevented due to per-minute provider ceiling or rate limits
+  | 'RECOVERABLE_FALLBACK' // Action completed with graceful fallback to cached state due to upstream disruption
+  | 'CIRCUIT_OPEN'; // Action was prevented because upstream CircuitBreaker is tripped
 
 export type SchedulerCycleRecord = typeof schema.schedulerCycles.$inferSelect;
 export type NewSchedulerCycle = typeof schema.schedulerCycles.$inferInsert;

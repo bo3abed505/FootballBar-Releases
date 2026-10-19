@@ -18,6 +18,35 @@ export const CANONICAL_COMPETITION_MAP: Record<number, string> = {
   233: 'ft_comp_01M33DKNCABRRYR4K6D9DKTP40', // Egyptian Premier League
 };
 
+/**
+ * Maps API-Football competition IDs to FotMob provider competition IDs.
+ */
+export const FOTMOB_COMPETITION_MAP: Record<number, number> = {
+  39: 47,       // Premier League
+  140: 87,      // La Liga
+  135: 55,      // Serie A
+  78: 54,       // Bundesliga
+  61: 53,       // Ligue 1
+  2: 42,        // UEFA Champions League
+  3: 73,        // UEFA Europa League
+  848: 10216,   // UEFA Conference League
+  233: 525,     // Egyptian Premier League
+  1: 77,        // FIFA World Cup
+  4: 50,        // European Championship
+  5: 9806,      // UEFA Nations League
+  6: 132,       // Africa Cup of Nations
+  9: 44,        // Copa America
+  40: 48,       // Championship
+  45: 138,      // FA Cup
+  48: 139,      // EFL Cup
+  143: 137,     // Copa del Rey
+  81: 209,      // DFB-Pokal
+  137: 141,     // Coppa Italia
+  66: 142,      // Coupe de France
+  307: 536,     // Saudi Pro League
+  253: 130,     // Major League Soccer
+};
+
 export const PRIORITY_COMPETITIONS: PriorityCompetition[] = [
   // European Top Flights & Cups
   { id: 39, name: 'Premier League', country: 'England', type: 'league', code: 'PL' },
