@@ -11,6 +11,7 @@ export interface V2TrustMetadata {
   sourceObservedAt: string | null;
   dataAgeSeconds: number | null;
   provider: string | null;
+  syncState?: 'SYNCING' | 'IDLE' | 'SYNCED' | string | null;
 }
 
 export interface V2TrayMatch {

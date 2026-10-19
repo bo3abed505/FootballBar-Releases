@@ -125,6 +125,14 @@ public sealed partial class MainPage : Page
             EmptyStateTitleText.Text = _viewModel.EmptyStateTitle;
             EmptyStateSubtitleText.Text = _viewModel.EmptyStateMessage;
             CompetitionGroupsList.Visibility = Visibility.Collapsed;
+            if (EmptyStateProgressRing != null)
+            {
+                EmptyStateProgressRing.Visibility = _viewModel.IsSynchronizingSchedule ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (EmptyStateIcon != null)
+            {
+                EmptyStateIcon.Visibility = _viewModel.IsSynchronizingSchedule ? Visibility.Collapsed : Visibility.Visible;
+            }
         }
         else
         {

@@ -100,7 +100,7 @@ public sealed class CalendarDayItemViewModel : INotifyPropertyChanged
         }
         else
         {
-            RelativeLabel = DayOfWeekName;
+            RelativeLabel = date.ToString("ddd d", System.Globalization.CultureInfo.InvariantCulture);
         }
     }
 

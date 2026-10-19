@@ -26,4 +26,5 @@ public interface ISyncService : IDisposable
     DateTime TargetDate { get; set; }
     void TriggerImmediateSync();
     void RefreshTickerOnPreferenceChange();
+    bool HasCachedDataForDate(DateTime date) => false;
 }

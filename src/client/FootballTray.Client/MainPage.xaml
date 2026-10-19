@@ -453,7 +453,7 @@
                         <ItemsControl x:Name="CalendarDaysList" HorizontalAlignment="Center">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
@@ -462,49 +462,26 @@
                                         Click="OnCalendarDayClicked"
                                         Tag="{x:Bind}"
                                         Style="{x:Bind ButtonStyle, Mode=OneWay}"
-                                        Padding="8,6,8,6"
-                                        Margin="0,0,4,0"
+                                        Padding="8,5,8,5"
+                                        Margin="0,0,2,0"
                                         CornerRadius="8"
-                                        MinWidth="68"
+                                        MinWidth="48"
                                         HorizontalAlignment="Center"
                                         HorizontalContentAlignment="Center">
-                                        <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                            <!-- Today Pill Badge -->
-                                            <Border
-                                                Visibility="{x:Bind IsToday, Mode=OneWay}"
-                                                Background="{ThemeResource SystemFillColorAttentionBackgroundBrush}"
-                                                CornerRadius="4"
-                                                Padding="4,1,4,1"
-                                                HorizontalAlignment="Center">
-                                                <TextBlock
-                                                    Text="TODAY"
-                                                    FontSize="9"
-                                                    FontWeight="Bold"
-                                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                    HorizontalAlignment="Center" />
-                                            </Border>
-
-                                            <!-- Relative Day Label (Yesterday, Tomorrow, Wed, etc.) -->
+                                        <StackPanel Spacing="1" HorizontalAlignment="Center">
+                                            <!-- Day Pill Label: Yesterday / Today / Tomorrow / Thu 22 / etc. -->
                                             <TextBlock
-                                                Visibility="{x:Bind IsNotToday, Mode=OneWay}"
                                                 Text="{x:Bind RelativeLabel, Mode=OneWay}"
-                                                FontSize="11"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                HorizontalAlignment="Center" />
-
-                                            <!-- Date Display (Sep 29) -->
-                                            <TextBlock
-                                                Text="{x:Bind DateDisplay, Mode=OneWay}"
-                                                FontSize="13"
-                                                FontWeight="Bold"
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
                                                 HorizontalAlignment="Center" />
 
                                             <!-- Match Count Text -->
                                             <TextBlock
                                                 Visibility="{x:Bind HasMatches, Mode=OneWay}"
                                                 Text="{x:Bind MatchCountText, Mode=OneWay}"
-                                                FontSize="10"
-                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                FontSize="9"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                 HorizontalAlignment="Center" />
                                         </StackPanel>
                                     </Button>
@@ -532,7 +509,15 @@
                                 Padding="32"
                                 HorizontalAlignment="Stretch">
                                 <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                    <ProgressRing
+                                        x:Name="EmptyStateProgressRing"
+                                        IsActive="True"
+                                        Width="32"
+                                        Height="32"
+                                        Visibility="Collapsed"
+                                        HorizontalAlignment="Center" />
                                     <FontIcon
+                                        x:Name="EmptyStateIcon"
                                         Glyph="&#xE9CE;"
                                         FontSize="36"
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"

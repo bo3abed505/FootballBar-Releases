@@ -1,0 +1,36 @@
+{
+  "general": {
+    "matchId": "4193850",
+    "matchName": "Arsenal - Manchester City",
+    "matchTimeUTCDate": "2026-10-09T19:00:00.000Z",
+    "started": true,
+    "finished": false
+  },
+  "header": {
+    "teams": [
+      { "id": "9825", "name": "Arsenal", "score": 2 },
+      { "id": "8456", "name": "Manchester City", "score": 1 }
+    ]
+  },
+  "content": {
+    "lineup": {
+      "lineup": [],
+      "bench": []
+    },
+    "stats": {
+      "Periods": {
+        "All": {
+          "stats": [
+            {
+              "title": "Top stats",
+              "stats": [
+                { "key": "expected_goals", "stats": ["1.82", "0.94"] },
+                { "key": "possession", "stats": ["55", "45"] }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

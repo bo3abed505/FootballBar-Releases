@@ -48,6 +48,7 @@ public class SyncService : ISyncService
 
     private readonly ConcurrentDictionary<string, string> _etagsByKey = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, TrayDataDto> _dataByKey = new(StringComparer.OrdinalIgnoreCase);
+    private string? _lastPublishedDate;
 
     public event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
     public event EventHandler<bool>? SyncStateChanged;
@@ -84,6 +85,7 @@ public class SyncService : ISyncService
                 {
                     _currentTrayData = cachedData;
                     _lastKnownEtag = _etagsByKey.TryGetValue(matchingKey, out var etag) ? etag : null;
+                    _lastPublishedDate = _targetDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                     PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                 }
                 else
@@ -92,6 +94,12 @@ public class SyncService : ISyncService
                 }
             }
         }
+    }
+
+    public bool HasCachedDataForDate(DateTime date)
+    {
+        var dateKeyPrefix = $"{date.Date:yyyy-MM-dd}|";
+        return _dataByKey.Keys.Any(k => k.StartsWith(dateKeyPrefix, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string BuildRequestKey(DateTime? date, IEnumerable<string> teams, IEnumerable<string> comps)
@@ -209,6 +217,7 @@ public class SyncService : ISyncService
             // Establish baseline in notification engine so cached historical data is never replayed
             _notificationService?.Engine.EvaluateUpdates(null, _currentTrayData);
 
+            _lastPublishedDate = DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
             _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
         }
@@ -382,9 +391,16 @@ public class SyncService : ISyncService
             sw.Stop();
             _lastRefreshDurationMs = sw.ElapsedMilliseconds;
 
-            if (response.IsNotModified || (response.Envelope?.Data?.IsNotModified ?? false))
+            string normalizedDate = queryDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            bool isNotModified = response.IsNotModified || (response.Envelope?.Data?.IsNotModified ?? false);
+
+            if (isNotModified)
             {
-                if (_dataByKey.TryGetValue(requestKey, out var existingData))
+                if (response.Envelope?.Data != null && response.Envelope.Data.Matches != null)
+                {
+                    _currentTrayData = response.Envelope.Data;
+                }
+                else if (_dataByKey.TryGetValue(requestKey, out var existingData))
                 {
                     _currentTrayData = existingData;
                 }
@@ -418,6 +434,15 @@ public class SyncService : ISyncService
                     {
                         AppLogger.Warn("Sync", "CacheTouchFailed", $"Failed to update cache validation timestamp on 304: [{ex.GetType().Name}] {ex.Message}", ex: ex);
                     }
+                }
+
+                // If user switched calendar days, publish the cached snapshot immediately
+                if (!string.Equals(normalizedDate, _lastPublishedDate, StringComparison.Ordinal))
+                {
+                    _lastPublishedDate = normalizedDate;
+                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                    _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
+                    return _freshnessState;
                 }
 
                 AppLogger.Debug("Sync", "PollNotModified", "Tray state unchanged (304 Not Modified)");
@@ -466,6 +491,7 @@ public class SyncService : ISyncService
 
                 AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
                 _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
+                _lastPublishedDate = normalizedDate;
                 PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                 return _freshnessState;
             }

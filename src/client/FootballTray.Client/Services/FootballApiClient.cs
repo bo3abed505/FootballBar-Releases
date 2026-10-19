@@ -91,6 +91,7 @@ public class FootballApiClient : IDisposable
     private readonly HttpClient _httpClient;
     private readonly bool _disposeClient;
     private readonly ConcurrentDictionary<string, string> _etagsByUrl = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ApiResponseEnvelope<TrayDataDto>> _payloadsByUrl = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -113,10 +114,12 @@ public class FootballApiClient : IDisposable
         if (string.IsNullOrWhiteSpace(uri))
         {
             _etagsByUrl.Clear();
+            _payloadsByUrl.Clear();
         }
         else
         {
             _etagsByUrl.TryRemove(uri, out _);
+            _payloadsByUrl.TryRemove(uri, out _);
         }
     }
 
@@ -228,6 +231,21 @@ public class FootballApiClient : IDisposable
                 {
                     _etagsByUrl[uri] = matchedEtag;
                 }
+
+                if (_payloadsByUrl.TryGetValue(uri, out var cachedEnvelope) && cachedEnvelope?.Data != null)
+                {
+                    cachedEnvelope.Data.IsNotModified = true;
+                    return new TrayApiResponse
+                    {
+                        IsSuccess = true,
+                        IsNotModified = true,
+                        ETag = matchedEtag,
+                        QuotaExhausted = quotaExhaustedHeader || cachedEnvelope.QuotaExhausted || (cachedEnvelope.Data?.QuotaExhausted ?? false),
+                        CachedFallback = cachedEnvelope.CachedFallback || (cachedEnvelope.Data?.CachedFallback ?? false),
+                        Envelope = cachedEnvelope
+                    };
+                }
+
                 return TrayApiResponse.NotModified(matchedEtag, quotaExhaustedHeader);
             }
 
@@ -259,6 +277,7 @@ public class FootballApiClient : IDisposable
                 {
                     _etagsByUrl[uri] = newEtag;
                 }
+                _payloadsByUrl[uri] = envelope;
 
                 return TrayApiResponse.Success(envelope, newEtag, quotaExhaustedHeader);
             }

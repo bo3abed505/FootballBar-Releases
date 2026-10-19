@@ -22,7 +22,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { FootballProvider } from '../providers/football-provider.js';
+import { IDataProvider } from '../providers/types.js';
 import { createProvider } from '../acquisition/provider-factory.js';
 import { EmptyFootballProvider } from '../providers/empty.provider.js';
 import { ApiFootballProvider } from '../providers/api-football/api-football.provider.js';
@@ -30,6 +30,7 @@ import { SyncService } from '../acquisition/sync.service.js';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import { AcquisitionScheduler } from '../acquisition/acquisition-scheduler.js';
 import { DaemonPreferencesService } from '../acquisition/daemon-preferences.service.js';
+import { seedFotmobCompetitionAliases } from '../db/provider-alias.js';
 
 export interface RuntimeLogger {
   info(message: string, meta?: Record<string, unknown>): void;
@@ -40,7 +41,7 @@ export interface RuntimeLogger {
 export interface AppRuntimeOptions {
   app?: FastifyInstance;
   enableScheduler?: boolean; // default: true
-  provider?: FootballProvider;
+  provider?: IDataProvider;
   fixturesRepository?: FixturesRepository;
   scheduler?: AcquisitionScheduler;
   port?: number;
@@ -51,7 +52,7 @@ export interface AppRuntimeOptions {
 
 export class AppRuntime {
   public readonly app: FastifyInstance;
-  public readonly provider: FootballProvider;
+  public readonly provider: IDataProvider;
   public readonly syncService: SyncService;
   public readonly fixturesRepository: FixturesRepository;
   public readonly preferencesService: DaemonPreferencesService;
@@ -78,14 +79,17 @@ export class AppRuntime {
     };
 
     // 1. Construct Provider via ProviderFactory (boundary enforcement)
-    if (options.provider) {
-      this.provider = options.provider;
+    if ((options.provider as any)) {
+      this.provider = (options.provider as any);
     } else {
       const isProduction = process.env.NODE_ENV === 'production';
       const keyIsPresent = typeof process.env.API_FOOTBALL_KEY === 'string' &&
         process.env.API_FOOTBALL_KEY.trim().length > 0;
 
-      if (!keyIsPresent) {
+      if (process.env.ACTIVE_PROVIDER === 'fotmob') {
+        process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'true';
+        this.provider = createProvider({ provider: 'fotmob' });
+      } else if (!keyIsPresent) {
         this.logger.warn(
           'API_FOOTBALL_KEY is not configured in the environment. ' +
           'Live match synchronization is disabled. ' +
@@ -93,8 +97,8 @@ export class AppRuntime {
         );
         this.provider = new EmptyFootballProvider();
       } else if (isProduction || process.env.ACTIVE_PROVIDER === 'api_football' || (!process.env.ACTIVE_PROVIDER && keyIsPresent)) {
-        process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS || 'true';
-        this.provider = new ApiFootballProvider();
+        process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'true';
+        this.provider = new ApiFootballProvider(process.env.API_FOOTBALL_KEY || '', process.env.API_FOOTBALL_TIER);
       } else {
         this.provider = createProvider();
       }
@@ -115,7 +119,7 @@ export class AppRuntime {
           syncService: this.syncService,
           fixturesRepository: this.fixturesRepository,
           targetCompetitionIds: initialCompetitionIds.length > 0 ? initialCompetitionIds : undefined,
-          providerName: this.provider.providerName,
+          providerName: this.provider.name,
         });
       this.preferencesService.bindScheduler(this.scheduler);
       (this.app as any).scheduler = this.scheduler;
@@ -154,6 +158,13 @@ export class AppRuntime {
     } catch (err: any) {
       this.logger.error(`Failed to start HTTP server: ${err.message}`);
       throw err;
+    }
+
+    // 1.5 Ensure default provider competition aliases (e.g. FotMob) are present
+    try {
+      await seedFotmobCompetitionAliases();
+    } catch (aliasErr: any) {
+      this.logger.warn(`Failed ensuring provider competition aliases: ${aliasErr?.message}`);
     }
 
     // 2. Start Acquisition Scheduler

@@ -65,6 +65,12 @@ public class TrayDataDto
 
     [JsonPropertyName("isNotModified")]
     public bool IsNotModified { get; set; }
+
+    [JsonPropertyName("syncState")]
+    public string? SyncState { get; set; }
+
+    [JsonPropertyName("followedCountsByDate")]
+    public Dictionary<string, int>? FollowedCountsByDate { get; set; }
 }
 
 public class TrayMatchDto
@@ -148,6 +154,9 @@ public sealed class V2TrustMetadataDto
 
     [JsonPropertyName("provider")]
     public string? Provider { get; set; }
+
+    [JsonPropertyName("syncState")]
+    public string? SyncState { get; set; }
 }
 
 public class TeamSummaryDto

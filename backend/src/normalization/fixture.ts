@@ -80,6 +80,7 @@ export function normalizeFixture(raw: ProviderFixture): CanonicalFixture {
     venue: raw.venue?.trim() || null,
     referee: raw.referee?.trim() || null,
     lastPolledAt: new Date(),
+    finalizedAt: ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH'].includes(raw.state.trim().toUpperCase()) ? new Date() : null,
     provider: raw.provider,
     providerId: raw.providerId,
   };

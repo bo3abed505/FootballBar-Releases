@@ -52,6 +52,121 @@ export class FixturesRepository {
     return rows.length > 0;
   }
 
+  async getFollowedCountsByDate(options: {
+    teams?: string[] | null;
+    competitions?: string[] | null;
+    fromDate: Date;
+    toDate: Date;
+  }): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    const { teams: targetTeams, competitions: targetCompetitions, fromDate, toDate } = options;
+
+    if ((!targetTeams || targetTeams.length === 0) && (!targetCompetitions || targetCompetitions.length === 0)) {
+      return counts;
+    }
+
+    const expandedTeamIds = new Set<string>();
+    const expandedCompIds = new Set<string>();
+
+    if (targetTeams && targetTeams.length > 0) {
+      for (const t of targetTeams) {
+        if (!t) continue;
+        const trimmed = t.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('comp_') || trimmed.startsWith('ft_comp_')) {
+          expandedCompIds.add(trimmed);
+          continue;
+        }
+        expandedTeamIds.add(trimmed);
+        if (trimmed.startsWith('team_')) {
+          expandedTeamIds.add(trimmed.substring(5));
+        } else if (!trimmed.startsWith('ft_team_')) {
+          expandedTeamIds.add(`team_${trimmed}`);
+        }
+      }
+
+      const canonicalCandidates = Array.from(expandedTeamIds).filter((id) => id.startsWith('ft_team_'));
+      if (canonicalCandidates.length > 0) {
+        try {
+          const matchedTeams = await db.query.teams.findMany({
+            where: inArray(schema.teams.canonicalId, canonicalCandidates),
+            columns: { id: true, canonicalId: true },
+          });
+          for (const mt of matchedTeams) {
+            if (mt.id) expandedTeamIds.add(mt.id);
+          }
+        } catch {
+          // Non-critical fallback
+        }
+      }
+    }
+
+    if (targetCompetitions && targetCompetitions.length > 0) {
+      for (const c of targetCompetitions) {
+        if (!c) continue;
+        const trimmed = c.trim();
+        if (!trimmed) continue;
+        expandedCompIds.add(trimmed);
+        if (trimmed.startsWith('comp_')) {
+          expandedCompIds.add(trimmed.substring(5));
+        } else if (!trimmed.startsWith('ft_comp_')) {
+          expandedCompIds.add(`comp_${trimmed}`);
+        }
+      }
+
+      const canonicalCompCandidates = Array.from(expandedCompIds).filter((id) => id.startsWith('ft_comp_'));
+      if (canonicalCompCandidates.length > 0) {
+        try {
+          const matchedComps = await db.query.competitions.findMany({
+            where: inArray(schema.competitions.canonicalId, canonicalCompCandidates),
+            columns: { id: true, canonicalId: true },
+          });
+          for (const mc of matchedComps) {
+            if (mc.id) expandedCompIds.add(mc.id);
+          }
+        } catch {
+          // Non-critical fallback
+        }
+      }
+    }
+
+    const conditions: any[] = [];
+    if (expandedTeamIds.size > 0) {
+      const arr = Array.from(expandedTeamIds);
+      conditions.push(inArray(schema.fixtures.homeTeamId, arr));
+      conditions.push(inArray(schema.fixtures.awayTeamId, arr));
+    }
+    if (expandedCompIds.size > 0) {
+      const arr = Array.from(expandedCompIds);
+      conditions.push(inArray(schema.fixtures.competitionId, arr));
+    }
+
+    if (conditions.length === 0) {
+      return counts;
+    }
+
+    const rows = await db
+      .select({
+        id: schema.fixtures.id,
+        kickoffTime: schema.fixtures.kickoffTime,
+      })
+      .from(schema.fixtures)
+      .where(
+        and(
+          gte(schema.fixtures.kickoffTime, fromDate),
+          lte(schema.fixtures.kickoffTime, toDate),
+          or(...conditions)
+        )
+      );
+
+    for (const r of rows) {
+      const dateKey = new Date(r.kickoffTime).toISOString().slice(0, 10);
+      counts[dateKey] = (counts[dateKey] ?? 0) + 1;
+    }
+
+    return counts;
+  }
+
   async getAll(limit = 50) {
     return await db.query.fixtures.findMany({
       columns: {

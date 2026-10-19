@@ -1,0 +1,25 @@
+{
+  "leagues": [
+    {
+      "id": 47,
+      "name": "Premier League",
+      "matches": [
+        {
+          "id": 4193850,
+          "home": { "id": 9825, "name": "Arsenal", "score": 2 },
+          "away": { "id": 8456, "name": "Manchester City", "score": 1 },
+          "status": {
+            "utcTime": "2026-10-09T19:00:00.000Z",
+            "started": true,
+            "cancelled": false,
+            "finished": false,
+            "scoreStr": "2 - 1",
+            "reason": { "short": "2H", "long": "2nd Half" },
+            "liveTime": { "short": "67'", "long": "67'" }
+          },
+          "time": "19:00"
+        }
+      ]
+    }
+  ]
+}

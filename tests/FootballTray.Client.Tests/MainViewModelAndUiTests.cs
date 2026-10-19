@@ -981,7 +981,7 @@ public class MainViewModelAndUiTests
         using var vm = new MainViewModel(_prefService);
         await vm.InitializeAsync();
 
-        Assert.AreEqual(3, vm.CalendarDays.Count);
+        Assert.AreEqual(7, vm.CalendarDays.Count);
         Assert.AreEqual(DateTime.Today.AddDays(-1).Date, vm.CalendarDays[0].Date);
         Assert.AreEqual("Yesterday", vm.CalendarDays[0].RelativeLabel);
         Assert.IsFalse(vm.CalendarDays[0].IsToday);
@@ -1031,9 +1031,9 @@ public class MainViewModelAndUiTests
         await vm.InitializeAsync();
 
         var today = DateTime.Today;
-        // Verify 3 tabs: Yesterday, Today, Tomorrow (-1, 0, +1)
-        Assert.AreEqual(3, vm.CalendarDays.Count);
-        for (int i = 0; i < 3; i++)
+        // Verify 7 tabs: Yesterday, Today, Tomorrow, and +2 to +5 (-1 to +5)
+        Assert.AreEqual(7, vm.CalendarDays.Count);
+        for (int i = 0; i < 7; i++)
         {
             Assert.AreEqual(today.AddDays(i - 1).Date, vm.CalendarDays[i].Date);
         }

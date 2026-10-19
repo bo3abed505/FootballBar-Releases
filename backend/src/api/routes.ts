@@ -12,6 +12,7 @@ import { SyncService } from '../acquisition/sync.service.js';
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const fixturesRepo = new FixturesRepository();
   const catalogRepo = new CatalogRepository();
+  const inFlightScheduleSyncs = new Map<string, Promise<any>>();
 
   // ----------------------------------------------------
   // Health check endpoint (backward-compatible & enhanced)
@@ -249,11 +250,73 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
         : undefined;
 
+      let isDateSyncing = false;
+      // If a specific date within [-2..+6] relative to UTC is requested that has 0 fixtures in SQLite:
+      // Trigger deduplicated in-flight schedule sync and await with bounded 3500ms race timeout
+      if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam.trim())) {
+        const normalizedDate = dateParam.trim();
+        const [y, m, d] = normalizedDate.split('-').map(Number);
+        const reqUtc = Date.UTC(y, m - 1, d);
+        const now = new Date();
+        const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+        const diffDays = Math.round((reqUtc - todayUtc) / (24 * 60 * 60 * 1000));
+
+        if (diffDays >= -2 && diffDays <= 6) {
+          const hasFixtures = await fixturesRepo.hasFixturesForDate(normalizedDate);
+          if (!hasFixtures) {
+            let syncPromise = inFlightScheduleSyncs.get(normalizedDate);
+            if (!syncPromise) {
+              const syncService: SyncService | undefined = (fastify as any).syncService;
+              if (syncService && typeof syncService.syncSchedule === 'function') {
+                syncPromise = syncService
+                  .syncSchedule(normalizedDate)
+                  .catch((err: any) => {
+                    request.log.warn(err, `On-demand schedule sync failed for ${normalizedDate}`);
+                  })
+                  .finally(() => {
+                    inFlightScheduleSyncs.delete(normalizedDate);
+                  });
+                inFlightScheduleSyncs.set(normalizedDate, syncPromise);
+              }
+            }
+
+            if (syncPromise) {
+              const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
+                setTimeout(() => resolve({ timedOut: true }), 3500)
+              );
+              await Promise.race([syncPromise, timeoutPromise]);
+              if (inFlightScheduleSyncs.has(normalizedDate)) {
+                isDateSyncing = true;
+              }
+            }
+          }
+        }
+      }
+
+      // Query SQLite after bounded wait so newly discovered fixtures are immediately returned
       const matches = await fixturesRepo.getTrayMatches({
         date: dateParam,
         teams,
         competitions,
       });
+
+      // If matches are 0 while an in-flight sync is active for this date, mark isDateSyncing
+      if (dateParam && matches.length === 0 && inFlightScheduleSyncs.has(dateParam.trim())) {
+        isDateSyncing = true;
+      }
+
+      // Compute followed match counts across the [-2..+6] UTC calendar window
+      const now = new Date();
+      const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 2, 0, 0, 0, 0));
+      const windowEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 6, 23, 59, 59, 999));
+
+      const followedCountsByDate = await fixturesRepo.getFollowedCountsByDate({
+        teams,
+        competitions,
+        fromDate: windowStart,
+        toDate: windowEnd,
+      });
+
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
       let quotaExhausted = false;
@@ -285,34 +348,48 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         reply.header('X-Quota-Exhausted', 'true');
       }
 
-      // Compute deterministic ETag based on v2 match data, query parameters, and quotaExhausted state
-      // Exclude volatile runtime clock fields (trust.dataAgeSeconds) so ETag remains stable between polls when match data is unchanged
-      const stableMatches = formattedMatches.map(({ trust, ...rest }) => ({
-        ...rest,
-        trust: trust ? { freshnessState: trust.freshnessState, sourceObservedAt: trust.sourceObservedAt, provider: trust.provider } : undefined,
-      }));
-      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(stableMatches)}_${quotaExhausted}`;
-      const dataHash = createHash('md5').update(cacheKey).digest('hex');
-      const etag = `"${dataHash}"`;
+      // If the 3500ms timeout elapsed while fetch is still in flight (matches empty),
+      // do NOT set a cacheable ETag header on interim empty response
+      const isInterimSyncingEmpty = isDateSyncing && formattedMatches.length === 0;
 
-      const rawIfNoneMatch = request.headers['if-none-match'];
-      const cleanIfNoneMatch = typeof rawIfNoneMatch === 'string'
-        ? rawIfNoneMatch.replace(/^W\//i, '').replace(/^"+|"+$/g, '').trim()
-        : null;
-      if (cleanIfNoneMatch && (cleanIfNoneMatch === dataHash || cleanIfNoneMatch === etag.replace(/^"+|"+$/g, ''))) {
-        reply.header('ETag', etag);
-        if (quotaExhausted) {
-          reply.header('X-Quota-Exhausted', 'true');
+      if (!isInterimSyncingEmpty) {
+        // Compute deterministic ETag based on v2 match data, query parameters, quotaExhausted state, and followed counts
+        // Exclude volatile runtime clock fields (trust.dataAgeSeconds) so ETag remains stable between polls when match data is unchanged
+        const stableMatches = formattedMatches.map(({ trust, ...rest }) => ({
+          ...rest,
+          trust: trust ? { freshnessState: trust.freshnessState, sourceObservedAt: trust.sourceObservedAt, provider: trust.provider } : undefined,
+        }));
+        const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(stableMatches)}_${quotaExhausted}_${JSON.stringify(followedCountsByDate)}`;
+        const dataHash = createHash('md5').update(cacheKey).digest('hex');
+        const etag = `"${dataHash}"`;
+
+        const rawIfNoneMatch = request.headers['if-none-match'];
+        const cleanIfNoneMatch = typeof rawIfNoneMatch === 'string'
+          ? rawIfNoneMatch.replace(/^W\//i, '').replace(/^"+|"+$/g, '').trim()
+          : null;
+        if (cleanIfNoneMatch && (cleanIfNoneMatch === dataHash || cleanIfNoneMatch === etag.replace(/^"+|"+$/g, ''))) {
+          reply.header('ETag', etag);
+          if (quotaExhausted) {
+            reply.header('X-Quota-Exhausted', 'true');
+          }
+          return reply.status(304).send();
         }
-        return reply.status(304).send();
+
+        reply.header('ETag', etag);
+      } else {
+        reply.header('Cache-Control', 'no-store, no-cache');
       }
 
       const envelope = createResponseEnvelope(
-        { matches: formattedMatches, quotaExhausted },
+        {
+          matches: formattedMatches,
+          quotaExhausted,
+          syncState: isDateSyncing ? 'SYNCING' : 'IDLE',
+          followedCountsByDate,
+        },
         { schemaVersion: '2.0', version: 2, quotaExhausted }
       );
 
-      reply.header('ETag', etag);
       return reply.send(envelope);
     } catch (err: any) {
       request.log.error(err, 'Failed to fetch v2 tray matches');

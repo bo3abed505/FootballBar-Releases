@@ -52,6 +52,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _isOtherMatchesVisible;
     private bool _isOtherMatchesExpanded = true;
     private string _otherMatchesHeader = "Other Matches";
+    private readonly Dictionary<string, int> _followedCountsByDate = new(StringComparer.OrdinalIgnoreCase);
+    private bool _isDateSynchronizing;
+    public bool IsSynchronizingSchedule => _isDateSynchronizing;
 
     private UpdateCheckState _updateCheckState = UpdateCheckState.NotChecked;
     private bool _isCheckingForUpdates;
@@ -486,6 +489,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get
         {
+            if (_isDateSynchronizing) return "Synchronizing schedule...";
             if (IsSyncing) return "Syncing active calendar day & followed team fixtures...";
             if (IsOffline) return "Offline";
             if (_latestTrayData?.QuotaExhausted == true) return "API Limit Reached (Resets Midnight)";
@@ -495,7 +499,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public string SyncIconGlyph => IsSyncing ? "\uE72C" : (_latestTrayData?.QuotaExhausted == true ? "\uE7BA" : "\uE73E");
+    public string SyncIconGlyph => (_isDateSynchronizing || IsSyncing) ? "\uE72C" : (_latestTrayData?.QuotaExhausted == true ? "\uE7BA" : "\uE73E");
 
     public bool IsSyncFooterVisible => true;
 
@@ -508,6 +512,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (_selectedCalendarDate.Date != target)
             {
                 _selectedCalendarDate = target;
+                bool hasCached = _syncService?.HasCachedDataForDate(target) ?? false;
+
+                if (!hasCached)
+                {
+                    // Immediate loading state:
+                    // When no cached payload for that date is immediately available,
+                    // immediately transition into synchronizing state
+                    _isDateSynchronizing = true;
+                    _isEmpty = true;
+                    _hasMatches = false;
+                    _emptyStateTitle = "Synchronizing Schedule...";
+                    _emptyStateMessage = $"Loading fixtures for {_selectedCalendarDate:dddd, MMM d}...";
+                    FilteredMatches.Clear();
+                    FollowedMatches.Clear();
+                    OtherMatches.Clear();
+                    CompetitionGroups.Clear();
+
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEmpty)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasMatches)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyStateTitle)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyStateMessage)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSynchronizingSchedule)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
+                }
+
                 if (_syncService != null)
                 {
                     _syncService.TargetDate = target;
@@ -518,7 +547,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     _latestTrayData = _syncService.CurrentTrayData;
                 }
                 UpdateCalendarSelection();
-                ApplyCurrentFilter();
+                if (hasCached)
+                {
+                    _isDateSynchronizing = false;
+                    ApplyCurrentFilter();
+                }
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateDisplay)));
             }
@@ -986,8 +1019,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         CheckAndExecuteSync();
 
-        // 1. HTTP 304 Not Modified: Short-circuit collection mutation if already populated (Zero Flicker!)
-        if (freshnessState == DataFreshnessState.NotModified && _latestTrayData != null && (FilteredMatches.Count > 0 || _latestTrayData.Matches.Count == 0))
+        // 1. HTTP 304 Not Modified: Short-circuit collection mutation if already populated for the SAME date (Zero Flicker!)
+        if (freshnessState == DataFreshnessState.NotModified && _latestTrayData != null && _lastDateApplied == _selectedCalendarDate.Date && (FilteredMatches.Count > 0 || _latestTrayData.Matches.Count == 0))
         {
             UpdateConnectionUi(connectionState, freshnessState);
             return;
@@ -1001,6 +1034,61 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _latestTrayData = _syncService.CurrentTrayData;
         }
+
+        if (_latestTrayData?.FollowedCountsByDate != null)
+        {
+            foreach (var kvp in _latestTrayData.FollowedCountsByDate)
+            {
+                _followedCountsByDate[kvp.Key] = kvp.Value;
+            }
+        }
+
+        // Handle still-syncing responses from backend:
+        // If backend response returns 0 matches for selected date while syncState == "SYNCING",
+        // maintain synchronizing state and trigger a follow-up poll 2 seconds later.
+        bool isSyncingResponse = string.Equals(_latestTrayData?.SyncState, "SYNCING", StringComparison.OrdinalIgnoreCase);
+        int matchesOnSelectedDate = _latestTrayData?.Matches?.Count(m =>
+        {
+            var localDate = m.KickoffTime.ToLocalTime().Date;
+            var utcDate = m.KickoffTime.UtcDateTime.Date;
+            var rawDate = m.KickoffTime.Date;
+            return localDate == _selectedCalendarDate.Date || utcDate == _selectedCalendarDate.Date || rawDate == _selectedCalendarDate.Date || m.KickoffTime.DateTime.Date == _selectedCalendarDate.Date;
+        }) ?? 0;
+
+        if (matchesOnSelectedDate == 0 && (isSyncingResponse || _isDateSynchronizing))
+        {
+            _isDateSynchronizing = true;
+            IsEmpty = true;
+            HasMatches = false;
+            EmptyStateTitle = "Synchronizing Schedule...";
+            EmptyStateMessage = $"Loading fixtures for {_selectedCalendarDate:dddd, MMM d}...";
+            FilteredMatches.Clear();
+            FollowedMatches.Clear();
+            OtherMatches.Clear();
+            CompetitionGroups.Clear();
+            UpdateConnectionUi(connectionState, freshnessState);
+            RebuildCalendarDays();
+
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSynchronizingSchedule)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
+
+            if (isSyncingResponse)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _delayFunc(TimeSpan.FromSeconds(2), _disposeCts.Token);
+                        _syncService?.TriggerImmediateSync();
+                    }
+                    catch (OperationCanceledException) { }
+                });
+            }
+            return;
+        }
+
+        _isDateSynchronizing = false;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSynchronizingSchedule)));
 
         // 2. Offline Resilience: Retain existing matches in memory if backend is unreachable or returning cached data
         UpdateConnectionUi(connectionState, freshnessState);
@@ -1141,39 +1229,102 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ApplyCurrentFilter();
     }
 
+    private static bool IsMatchFollowed(TrayMatchDto match, UserPreferences? prefs)
+    {
+        if (match == null || prefs == null) return false;
+
+        var followedTeamIds = prefs.GetFollowedTeamIdSet();
+        var followedCompIds = prefs.GetFollowedCompetitionIdSet();
+
+        // 1. Team follow check
+        if (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id)) return true;
+        if (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId)) return true;
+        if (!string.IsNullOrEmpty(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.Id, out var hCanon) && followedTeamIds.Contains(hCanon)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.LegacyId, out var hLegCanon) && followedTeamIds.Contains(hLegCanon)) return true;
+        if (prefs.FollowedTeams != null && prefs.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), match.HomeTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase))) return true;
+
+        if (!string.IsNullOrEmpty(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id)) return true;
+        if (!string.IsNullOrEmpty(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId)) return true;
+        if (!string.IsNullOrEmpty(match.AwayTeam?.Name) && followedTeamIds.Contains(match.AwayTeam.Name)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.Id, out var aCanon) && followedTeamIds.Contains(aCanon)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.LegacyId, out var aLegCanon) && followedTeamIds.Contains(aLegCanon)) return true;
+        if (prefs.FollowedTeams != null && prefs.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), match.AwayTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase))) return true;
+
+        // 2. Competition follow check
+        if (!string.IsNullOrEmpty(match.Competition?.Id) && followedCompIds.Contains(match.Competition.Id)) return true;
+        if (!string.IsNullOrEmpty(match.Competition?.LegacyId) && followedCompIds.Contains(match.Competition.LegacyId)) return true;
+        if (!string.IsNullOrWhiteSpace(match.Competition?.Name) && !string.IsNullOrWhiteSpace(match.Competition?.Country) && followedCompIds.Contains($"name_country:{match.Competition.Name.Trim()}|{match.Competition.Country.Trim()}")) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.Id, out var cCanon) && followedCompIds.Contains(cCanon)) return true;
+        if (CanonicalEntityIds.TryTranslateLegacyId(match.Competition?.LegacyId, out var cLegCanon) && followedCompIds.Contains(cLegCanon)) return true;
+        if (prefs.FollowedCompetitions != null && prefs.FollowedCompetitions.Any(c =>
+            string.Equals(c.Name?.Trim(), match.Competition?.Name?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            (string.IsNullOrEmpty(c.Country) || string.IsNullOrEmpty(match.Competition?.Country) || string.Equals(c.Country?.Trim(), match.Competition?.Country?.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(c.Id) || string.IsNullOrEmpty(match.Competition?.Id) || string.Equals(c.Id, match.Competition.Id, StringComparison.OrdinalIgnoreCase)))) return true;
+
+        var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
+        return relevance.FollowedByTeam || relevance.FollowedByCompetition;
+    }
+
     public void RebuildCalendarDays()
     {
         var today = DateTime.Today;
         var allMatches = _latestTrayData?.Matches ?? (IReadOnlyList<TrayMatchDto>)Array.Empty<TrayMatchDto>();
+        var prefs = _preferencesService.GetPreferences();
 
         var existingMap = CalendarDays.ToDictionary(d => d.Date.Date);
 
         var targetDates = new List<(DateTime Date, bool IsToday, bool IsSelected, int MatchCount)>();
-        for (int offset = -1; offset <= 1; offset++)
+        for (int offset = -1; offset <= 5; offset++)
         {
             var targetDate = today.AddDays(offset).Date;
             bool isToday = offset == 0;
             bool isSelected = targetDate == _selectedCalendarDate.Date;
+            string dateKey = targetDate.ToString("yyyy-MM-dd");
 
-            int matchCount = allMatches.Count(m =>
+            int matchCount = 0;
+
+            // Followed matches in current in-memory payload matching target date
+            int liveFollowedInPayload = allMatches.Count(m =>
             {
                 var localDate = m.KickoffTime.ToLocalTime().Date;
                 var utcDate = m.KickoffTime.UtcDateTime.Date;
                 var rawDate = m.KickoffTime.Date;
-                if (localDate == targetDate || utcDate == targetDate || rawDate == targetDate || m.KickoffTime.DateTime.Date == targetDate) return true;
-                if (isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
-                return false;
+                bool dateMatches = localDate == targetDate || utcDate == targetDate || rawDate == targetDate || m.KickoffTime.DateTime.Date == targetDate;
+                if (!dateMatches && !(isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))))
+                {
+                    return false;
+                }
+                return IsMatchFollowed(m, prefs);
             });
 
-            if (matchCount == 0 && targetDate != _selectedCalendarDate.Date && existingMap.TryGetValue(targetDate, out var prevDay) && prevDay.MatchCount > 0)
+            if (targetDate == _selectedCalendarDate.Date)
             {
-                matchCount = prevDay.MatchCount;
+                // Authoritative live calculation for currently selected calendar date
+                matchCount = liveFollowedInPayload;
+                _followedCountsByDate[dateKey] = liveFollowedInPayload;
+            }
+            else
+            {
+                if (liveFollowedInPayload > 0)
+                {
+                    matchCount = liveFollowedInPayload;
+                    _followedCountsByDate[dateKey] = liveFollowedInPayload;
+                }
+                else if (_followedCountsByDate.TryGetValue(dateKey, out var cachedFollowedCount))
+                {
+                    matchCount = cachedFollowedCount;
+                }
+                else if (existingMap.TryGetValue(targetDate, out var prevDay) && prevDay.MatchCount > 0)
+                {
+                    matchCount = prevDay.MatchCount;
+                }
             }
 
             targetDates.Add((targetDate, isToday, isSelected, matchCount));
         }
 
-        // Fast path: if CalendarDays already matches target 3 days, update in place without .Clear()
+        // Fast path: if CalendarDays already matches target 7 days, update in place without .Clear()
         if (CalendarDays.Count == targetDates.Count && CalendarDays.Select(d => d.Date.Date).SequenceEqual(targetDates.Select(t => t.Date)))
         {
             for (int i = 0; i < CalendarDays.Count; i++)
@@ -1617,7 +1768,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         if (IsEmpty)
         {
-            if (dateFiltered.Count == 0)
+            if (_isDateSynchronizing)
+            {
+                EmptyStateTitle = "Synchronizing Schedule...";
+                EmptyStateMessage = $"Loading fixtures for {_selectedCalendarDate:dddd, MMM d}...";
+            }
+            else if (dateFiltered.Count == 0)
             {
                 string dateLabel = _selectedCalendarDate.Date == DateTime.Today
                     ? "today"

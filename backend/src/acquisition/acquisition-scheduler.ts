@@ -461,11 +461,8 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
    * to guarantee never exceeding the MINUTE_CEILING (8 requests/minute).
    */
   /**
-   * Executes the 3-day schedule synchronization routine (Yesterday, Today, Tomorrow).
-   * Runs strictly twice a day (midnight UTC and midday UTC) to capture postponed matches,
-   * kickoff adjustments, and finalize past results without wasting daily quota.
-   * Fetches days -1 through +1 individually using the date= parameter, paced by 9 seconds between queries
-   * to guarantee never exceeding the MINUTE_CEILING (8 requests/minute).
+   * Executes the core 3-day schedule synchronization routine (Today, Yesterday, Tomorrow).
+   * Fetches days individually using the date= parameter, paced safely (500ms for FotMob, 9s for API-Football).
    */
   async sync3DaySchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
     const todayDateStr = currentDate.toISOString().slice(0, 10);
@@ -482,9 +479,13 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
       hasChanges: false,
     };
 
-    this.logger.info(`[3-DAY-SLIDING-WINDOW] Starting paced 3-day schedule sync (-1 to +1 days) for base date ${todayDateStr}...`);
+    const offsets = this.providerName === 'fotmob' ? [0, -1, 1] : [-1, 0, 1];
+    const paceDelayMs = this.providerName === 'api_football' ? 9000 : 500;
 
-    for (let offset = -1; offset <= 1; offset++) {
+    this.logger.info(`[CORE-3-DAY-WINDOW] Starting paced core schedule sync (${offsets.join(', ')} days) for base date ${todayDateStr}...`);
+
+    for (let i = 0; i < offsets.length; i++) {
+      const offset = offsets[i];
       const d = new Date(Date.UTC(
         currentDate.getUTCFullYear(),
         currentDate.getUTCMonth(),
@@ -511,11 +512,11 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
           await this.fixturesRepo.markScheduleDiscovered(targetDateStr, currentDate, cycleId);
         }
 
-        this.logger.info(`Fetched day ${offsetLabel} (${targetDateStr})... waiting 9s`);
+        this.logger.info(`Fetched core day ${offsetLabel} (${targetDateStr})...`);
 
-        // Pacing delay: exactly 9 seconds between each iteration (skip delay after final iteration and during tests)
-        if (offset < 1 && !isTestEnvironment) {
-          await new Promise((resolve) => setTimeout(resolve, 9000));
+        // Pacing delay between queries (skip delay after final iteration and during tests)
+        if (i < offsets.length - 1 && !isTestEnvironment && paceDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, paceDelayMs));
         }
       } catch (err: any) {
         this.logger.warn(`Failed schedule sync for day ${offsetLabel} (${targetDateStr}): ${err?.message || err}`);
@@ -551,10 +552,87 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
   }
 
   /**
-   * Backwards-compatibility alias for 3-day schedule sync routine.
+   * Syncs extended lookahead days (-2, +2 to +6) sequentially with safe pacing.
+   * Widened to [-2, +2..+6] so that client days up to local +5 (e.g. UTC +6 at UTC+3 timezone)
+   * are pre-synced.
+   */
+  async syncExtendedSchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
+    const targetComps = this.targetCompetitionIds;
+    const combinedSummary: SyncSummary = {
+      provider: 'unknown',
+      fixturesDiscovered: 0,
+      fixturesInserted: 0,
+      fixturesUpdated: 0,
+      eventsInserted: 0,
+      eventsSkippedDuplicates: 0,
+      hasChanges: false,
+    };
+
+    const offsets = [-2, 2, 3, 4, 5, 6];
+    const paceDelayMs = this.providerName === 'api_football' ? 9000 : 500;
+
+    this.logger.info(`[EXTENDED-LOOKAHEAD] Starting sequential lookahead sync (-2, +2 to +6 days)...`);
+
+    for (let i = 0; i < offsets.length; i++) {
+      const offset = offsets[i];
+      const d = new Date(Date.UTC(
+        currentDate.getUTCFullYear(),
+        currentDate.getUTCMonth(),
+        currentDate.getUTCDate() + offset
+      ));
+      const targetDateStr = d.toISOString().slice(0, 10);
+      const offsetLabel = offset > 0 ? `+${offset}` : `${offset}`;
+
+      // Pacing delay before each extended query to ensure non-bursting
+      if (!isTestEnvironment && paceDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, paceDelayMs));
+      }
+
+      try {
+        const daySummary = await this.syncService.syncSchedule(targetDateStr, targetComps, cycleId);
+        if (daySummary) {
+          combinedSummary.provider = daySummary.provider || combinedSummary.provider;
+          combinedSummary.fixturesDiscovered += daySummary.fixturesDiscovered ?? 0;
+          combinedSummary.fixturesInserted += daySummary.fixturesInserted ?? 0;
+          combinedSummary.fixturesUpdated += daySummary.fixturesUpdated ?? 0;
+          combinedSummary.eventsInserted += daySummary.eventsInserted ?? 0;
+          combinedSummary.eventsSkippedDuplicates += daySummary.eventsSkippedDuplicates ?? 0;
+          if (daySummary.hasChanges) {
+            combinedSummary.hasChanges = true;
+          }
+        }
+
+        if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+          await this.fixturesRepo.markScheduleDiscovered(targetDateStr, currentDate, cycleId);
+        }
+
+        this.logger.info(`Fetched extended lookahead day ${offsetLabel} (${targetDateStr}).`);
+      } catch (err: any) {
+        this.logger.warn(`Failed schedule sync for extended day ${offsetLabel} (${targetDateStr}): ${err?.message || err}`);
+      }
+    }
+
+    return combinedSummary;
+  }
+
+  /**
+   * Executes the full two-tier 7-day schedule synchronization routine (-1 to +5).
+   * Tier 1: Core 3-day window (0, -1, +1)
+   * Tier 2: Extended lookahead (+2, +3, +4, +5)
    */
   async sync7DaySchedule(currentDate: Date = this.now(), cycleId?: string): Promise<SyncSummary> {
-    return this.sync3DaySchedule(currentDate, cycleId);
+    const coreSummary = await this.sync3DaySchedule(currentDate, cycleId);
+    const extSummary = await this.syncExtendedSchedule(currentDate, cycleId);
+
+    return {
+      provider: extSummary.provider !== 'unknown' ? extSummary.provider : coreSummary.provider,
+      fixturesDiscovered: coreSummary.fixturesDiscovered + extSummary.fixturesDiscovered,
+      fixturesInserted: coreSummary.fixturesInserted + extSummary.fixturesInserted,
+      fixturesUpdated: coreSummary.fixturesUpdated + extSummary.fixturesUpdated,
+      eventsInserted: coreSummary.eventsInserted + extSummary.eventsInserted,
+      eventsSkippedDuplicates: coreSummary.eventsSkippedDuplicates + extSummary.eventsSkippedDuplicates,
+      hasChanges: coreSummary.hasChanges || extSummary.hasChanges,
+    };
   }
 
   /**
@@ -562,7 +640,7 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
    */
   async executeScheduleSyncRoutine(now?: Date): Promise<SyncSummary> {
     const targetDate = now ?? this.now();
-    return this.sync3DaySchedule(targetDate);
+    return this.sync7DaySchedule(targetDate);
   }
 
   /**
@@ -715,7 +793,7 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
           (plan.action as string) === 'BOOTSTRAP'
         ) {
           if (plan.reason.includes('Twice-daily') || plan.reason.includes('Bootstrapping') || (options && options.sync7Days)) {
-            syncSummary = await this.sync3DaySchedule(currentDate, cycleId);
+            syncSummary = await this.sync7DaySchedule(currentDate, cycleId);
           } else {
             syncSummary = await this.syncService.syncWithPlan(plan, {
               date: todayDateStr,
@@ -950,8 +1028,9 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
         }
       }
 
-      // 2. Check if fixtures exist for all days in 3-day sliding window [-1, 0, 1]
-      for (let offset = -1; offset <= 1; offset++) {
+      // 2. Check if fixtures exist for all days in core sliding window [0, -1, 1]
+      const checkOffsets = this.providerName === 'fotmob' ? [0, -1, 1] : [-1, 0, 1];
+      for (const offset of checkOffsets) {
         const targetD = new Date(Date.UTC(
           currentDate.getUTCFullYear(),
           currentDate.getUTCMonth(),
@@ -981,7 +1060,7 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
         }
 
         if (!hasDay) {
-          this.logger.info(`[DEBUG] Executing mandatory 3-day bootstrap sync: No fixtures found for day offset ${offset} (${targetStr}).`);
+          this.logger.info(`[DEBUG] Executing mandatory bootstrap sync: No fixtures found for day offset ${offset} (${targetStr}).`);
           return true;
         }
       }
@@ -1002,16 +1081,19 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
     await this.hydrateStateFromDatabase();
 
     // 2. Cold-boot check: if database is empty or current day lacks data,
-    // sync7DaySchedule() runs immediately and synchronously before standard live loop starts.
+    // sync core 3-day window immediately, then launch non-blocking extended 7-day lookahead (+2 to +5)
     if (this.running && !signal.aborted) {
       const needsBootstrap = await this.isBootstrapSyncNeeded(this.now());
       if (needsBootstrap) {
-        this.logger.info('[DEBUG] Executing mandatory 3-day bootstrap sync: Cold boot detected (empty or missing today data). Running immediate 3-day schedule sync (-1 to +1 days)...');
+        this.logger.info('[DEBUG] Executing mandatory 7-day bootstrap sync: Cold boot detected (empty or missing today data). Running immediate core schedule sync (0, -1, +1)...');
         try {
           await this.sync3DaySchedule(this.now());
-          this.logger.info('[DEBUG] Executing mandatory 3-day bootstrap sync: Completed successfully.');
+          this.logger.info('[DEBUG] Core bootstrap sync completed. Launching non-blocking extended 7-day lookahead sync (+2 to +5)...');
+          this.syncExtendedSchedule(this.now()).catch((err: any) => {
+            this.logger.warn(`Non-blocking extended schedule sync encountered an error: ${err?.message}`);
+          });
         } catch (coldBootErr: any) {
-          this.logger.warn(`Cold-boot 3-day schedule sync encountered an error: ${coldBootErr?.message}`);
+          this.logger.warn(`Cold-boot core schedule sync encountered an error: ${coldBootErr?.message}`);
         }
       }
     }
@@ -1021,11 +1103,11 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
 
       try {
         // Twice-Daily Schedule Sync Background Routine:
-        // Strictly twice a day (midnight UTC and midday), fetch and cache 3-day schedule (-1 to +1).
+        // Strictly twice a day (midnight UTC and midday), fetch and cache full 7-day schedule (-1 to +5).
         if (this.isTwiceDailyScheduleSyncDue(this.now())) {
-          this.logger.info('Executing twice-daily 3-day schedule sync routine (midnight/midday UTC).');
+          this.logger.info('Executing twice-daily 7-day schedule sync routine (midnight/midday UTC).');
           try {
-            await this.sync3DaySchedule(this.now());
+            await this.sync7DaySchedule(this.now());
           } catch (syncErr: any) {
             this.logger.warn(`Twice-daily schedule sync routine encountered an error: ${syncErr?.message}`);
           }

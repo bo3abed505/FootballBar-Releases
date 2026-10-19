@@ -373,6 +373,48 @@ export class SyncService {
   }
 
   /**
+   * Paced multi-day schedule synchronization across an array of date strings.
+   * Fetches days sequentially with safe spacing (default 500ms) to prevent burst-spamming providers.
+   */
+  async syncScheduleDays(dates: string[], competitionIds?: number[], cycleId?: string, paceMs = 500): Promise<SyncSummary> {
+    const combinedSummary: SyncSummary = {
+      provider: this.getProviderName(),
+      fixturesDiscovered: 0,
+      fixturesInserted: 0,
+      fixturesUpdated: 0,
+      eventsInserted: 0,
+      eventsSkippedDuplicates: 0,
+      hasChanges: false,
+    };
+
+    for (let i = 0; i < dates.length; i++) {
+      const date = dates[i];
+      try {
+        const daySummary = await this.syncSchedule(date, competitionIds, cycleId);
+        if (daySummary) {
+          combinedSummary.provider = daySummary.provider || combinedSummary.provider;
+          combinedSummary.fixturesDiscovered += daySummary.fixturesDiscovered ?? 0;
+          combinedSummary.fixturesInserted += daySummary.fixturesInserted ?? 0;
+          combinedSummary.fixturesUpdated += daySummary.fixturesUpdated ?? 0;
+          combinedSummary.eventsInserted += daySummary.eventsInserted ?? 0;
+          combinedSummary.eventsSkippedDuplicates += daySummary.eventsSkippedDuplicates ?? 0;
+          if (daySummary.hasChanges) {
+            combinedSummary.hasChanges = true;
+          }
+        }
+      } catch {
+        // Continue across days fault-tolerantly
+      }
+
+      if (i < dates.length - 1 && paceMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, paceMs));
+      }
+    }
+
+    return combinedSummary;
+  }
+
+  /**
    * Performs a single date-range discovery query across the entire window (e.g. Yesterday to +5 days)
    * and filters in-memory using competition_provider_aliases. Exactly 1 quota request.
    */
