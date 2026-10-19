@@ -8,6 +8,7 @@ export interface ApiResponseEnvelope<T> {
   dataAgeSeconds: number;
   data: T | null;
   quotaExhausted?: boolean;
+  cachedFallback?: boolean;
   error?: {
     code: string;
     message: string;
@@ -30,6 +31,7 @@ export function createResponseEnvelope<T>(
     dataAgeSeconds?: number;
     schemaVersion?: string;
     quotaExhausted?: boolean;
+    cachedFallback?: boolean;
   }
 ): ApiResponseEnvelope<T> {
   const now = new Date();
@@ -46,6 +48,7 @@ export function createResponseEnvelope<T>(
     dataAgeSeconds: options?.dataAgeSeconds ?? 0,
     data,
     ...(options?.quotaExhausted !== undefined ? { quotaExhausted: options.quotaExhausted } : {}),
+    ...(options?.cachedFallback !== undefined ? { cachedFallback: options.cachedFallback } : {}),
   };
 }
 

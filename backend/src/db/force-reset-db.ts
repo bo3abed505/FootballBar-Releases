@@ -109,6 +109,7 @@ const TABLE_SCHEMAS: string[] = [
     "venue" text,
     "referee" text,
     "last_polled_at" integer,
+    "finalized_at" integer,
     "live_source_provider" text,
     "live_observed_at" integer,
     "schedule_source_provider" text,
@@ -179,6 +180,7 @@ const TABLE_SCHEMAS: string[] = [
     "goalkeeper_saves" integer,
     "total_passes" integer,
     "passes_accurate" integer,
+    "expected_goals" real,
     "updated_at" integer DEFAULT (cast((julianday('now') - 2440587.5)*86400000 as integer)) NOT NULL,
     FOREIGN KEY ("fixture_id") REFERENCES "fixtures"("id") ON UPDATE no action ON DELETE cascade,
     FOREIGN KEY ("team_id") REFERENCES "teams"("id") ON UPDATE no action ON DELETE no action

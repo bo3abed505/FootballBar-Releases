@@ -216,3 +216,40 @@ export async function ensureProviderAlias(
 
   throw new Error(`Unsupported alias entity type: ${entityType}`);
 }
+
+import { FOTMOB_COMPETITION_MAP, CANONICAL_COMPETITION_MAP } from '../acquisition/priority-competitions.js';
+
+/**
+ * Seeds or updates FotMob provider competition aliases for all priority competitions.
+ */
+export async function seedFotmobCompetitionAliases(executor: DbExecutor = db): Promise<number> {
+  let seeded = 0;
+  for (const [apiIdStr, fotmobId] of Object.entries(FOTMOB_COMPETITION_MAP)) {
+    const apiId = parseInt(apiIdStr, 10);
+    const canonicalId = CANONICAL_COMPETITION_MAP[apiId];
+    if (!canonicalId) continue;
+
+    const existingComp = await executor.query.competitions.findFirst({
+      where: or(
+        eq(schema.competitions.canonicalId, canonicalId),
+        eq(schema.competitions.id, `comp_${apiId}`)
+      ),
+    });
+
+    const targetCanonicalId = existingComp?.canonicalId || canonicalId;
+
+    try {
+      const created = await ensureProviderAlias(
+        executor,
+        'competition',
+        targetCanonicalId,
+        'fotmob',
+        String(fotmobId)
+      );
+      if (created) seeded++;
+    } catch {
+      // Non-fatal if alias already mapped or conflict
+    }
+  }
+  return seeded;
+}

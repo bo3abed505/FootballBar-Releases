@@ -75,6 +75,7 @@ export const fixtures = sqliteTable('fixtures', {
   venue: text('venue'),
   referee: text('referee'),
   lastPolledAt: integer('last_polled_at', { mode: 'timestamp_ms' }),
+  finalizedAt: integer('finalized_at', { mode: 'timestamp_ms' }),
   liveSourceProvider: text('live_source_provider'),
   liveObservedAt: integer('live_observed_at', { mode: 'timestamp_ms' }),
   scheduleSourceProvider: text('schedule_source_provider'),
@@ -160,6 +161,7 @@ export const fixtureStatistics = sqliteTable('fixture_statistics', {
   goalkeeperSaves: integer('goalkeeper_saves'),
   totalPasses: integer('total_passes'),
   passesAccurate: integer('passes_accurate'),
+  expectedGoals: real('expected_goals'),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('stats_fixture_team_idx').on(table.fixtureId, table.teamId),

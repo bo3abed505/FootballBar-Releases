@@ -12,7 +12,7 @@ export const isTestEnvironment = process.env.NODE_ENV === 'test' || Boolean(proc
 function resolveDatabasePath(): string {
   let rawUrl: string | undefined;
   if (isTestEnvironment) {
-    rawUrl = process.env.DATABASE_URL_TEST || process.env.DATABASE_URL || './local_test.db';
+    rawUrl = process.env.DATABASE_URL_TEST || './local_test.db';
   } else {
     rawUrl = process.env.DATABASE_URL || './local.db';
   }
@@ -46,6 +46,18 @@ export const sqlite: SQLiteDatabase = new Database(databasePath);
 sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
 sqlite.pragma('busy_timeout = 5000');
+
+try {
+  sqlite.exec('ALTER TABLE fixture_statistics ADD COLUMN expected_goals REAL;');
+} catch {
+  // column already exists or table not yet created
+}
+
+try {
+  sqlite.exec('ALTER TABLE fixtures ADD COLUMN finalized_at INTEGER;');
+} catch {
+  // column already exists or table not yet created
+}
 
 export const db = drizzle(sqlite, { schema });
 

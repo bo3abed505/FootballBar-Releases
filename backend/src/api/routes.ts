@@ -6,6 +6,8 @@ import { createResponseEnvelope, createErrorEnvelope } from './envelope.js';
 import { RequestGateway } from '../gateway/request-gateway.js';
 import { formatV2TrayMatch, formatV2MatchDetail } from './v2-dto.js';
 import { CatalogRepository } from '../repositories/catalog.repository.js';
+import { createProvider } from '../acquisition/provider-factory.js';
+import { SyncService } from '../acquisition/sync.service.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const fixturesRepo = new FixturesRepository();
@@ -124,7 +126,9 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         competition: {
           id: m.competition?.id,
           name: m.competition?.name,
-          code: m.competition?.code,
+          code: m.competition?.code !== 'COMP' ? (m.competition?.code ?? m.competition?.country) : (m.competition?.country !== 'COMP' ? m.competition?.country : undefined),
+          country: m.competition?.country !== 'COMP' ? m.competition?.country : undefined,
+          logoUrl: m.competition?.logoUrl,
         },
         homeTeam: {
           id: m.homeTeam?.id,
@@ -282,12 +286,20 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       }
 
       // Compute deterministic ETag based on v2 match data, query parameters, and quotaExhausted state
-      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(formattedMatches)}_${quotaExhausted}`;
+      // Exclude volatile runtime clock fields (trust.dataAgeSeconds) so ETag remains stable between polls when match data is unchanged
+      const stableMatches = formattedMatches.map(({ trust, ...rest }) => ({
+        ...rest,
+        trust: trust ? { freshnessState: trust.freshnessState, sourceObservedAt: trust.sourceObservedAt, provider: trust.provider } : undefined,
+      }));
+      const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(stableMatches)}_${quotaExhausted}`;
       const dataHash = createHash('md5').update(cacheKey).digest('hex');
       const etag = `"${dataHash}"`;
 
-      const ifNoneMatch = request.headers['if-none-match'];
-      if (ifNoneMatch && (ifNoneMatch === etag || ifNoneMatch === dataHash || ifNoneMatch === `W/${etag}`)) {
+      const rawIfNoneMatch = request.headers['if-none-match'];
+      const cleanIfNoneMatch = typeof rawIfNoneMatch === 'string'
+        ? rawIfNoneMatch.replace(/^W\//i, '').replace(/^"+|"+$/g, '').trim()
+        : null;
+      if (cleanIfNoneMatch && (cleanIfNoneMatch === dataHash || cleanIfNoneMatch === etag.replace(/^"+|"+$/g, ''))) {
         reply.header('ETag', etag);
         if (quotaExhausted) {
           reply.header('X-Quota-Exhausted', 'true');
@@ -311,71 +323,186 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   });
 
   // ----------------------------------------------------
-  // Delivery API v2: Match Details (Canonical & Alias Resolution)
+  // Delivery API v2: Live Tray Matches (Lightweight Taskbar Popout Summary)
   // ----------------------------------------------------
-  fastify.get<{ Params: { id: string } }>('/api/v2/match/:id', async (request, reply) => {
-    const { id } = request.params;
+  fastify.get<{ Querystring: { teams?: string; competitions?: string } }>(
+    '/api/v2/tray/live',
+    async (request, reply) => {
+      try {
+        const teamsParam = request.query.teams;
+        const competitionsParam = request.query.competitions;
+        const teams = teamsParam
+          ? teamsParam.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+          : undefined;
+        const competitions = competitionsParam
+          ? competitionsParam.split(',').map((c) => c.trim()).filter((c) => c.length > 0)
+          : undefined;
 
+        // 1. Strictly query SQLite canonical tables (zero provider calls)
+        const matches = await fixturesRepo.getLiveTrayMatches({ teams, competitions });
+        const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
+
+        // 2. Assess daemon fallback / quota diagnostics
+        let cachedFallback = false;
+        let quotaExhausted = false;
+        try {
+          const scheduler: any = (fastify as any).scheduler;
+          const schedulerDiag = scheduler ? scheduler.getDiagnostics() : null;
+          const gateway = new RequestGateway();
+          const effectiveProvider = process.env.ACTIVE_PROVIDER || process.env.FOOTBALL_PROVIDER || 'mock';
+          const quotaDiag = await gateway.getDiagnostics(effectiveProvider);
+
+          if (
+            quotaDiag.isExhausted ||
+            quotaDiag.mode === 'HARD_STOP' ||
+            quotaDiag.mode === 'RESERVE_MODE' ||
+            quotaDiag.remainingDaily <= 10 ||
+            schedulerDiag?.lastCycleOutcome === 'LIMIT_REACHED' ||
+            schedulerDiag?.lastCycleOutcome === 'EXHAUSTED' ||
+            schedulerDiag?.currentState === 'IDLE_LIMIT'
+          ) {
+            quotaExhausted = true;
+          }
+          const syncService = (fastify as any).syncService;
+          if (
+            schedulerDiag?.lastCycleOutcome === 'RECOVERABLE_FALLBACK' ||
+            schedulerDiag?.lastCycleOutcome === 'CIRCUIT_OPEN' ||
+            syncService?.lastSyncSummary?.cachedFallback === true ||
+            (syncService?.provider as any)?.circuitBreaker?.getState?.() === 1 || // CircuitState.OPEN
+            (fastify as any).isCachedFallback === true
+          ) {
+            cachedFallback = true;
+          }
+        } catch {
+          // Non-critical diagnostic check
+        }
+
+        // 3. Compute deterministic timestamp- and composition-based ETag
+        const maxUpdatedAtMs = matches.reduce((max, m) => {
+          const t = m.updatedAt ? new Date(m.updatedAt).getTime() : 0;
+          return t > max ? t : max;
+        }, 0);
+
+        // Crucial Caveat Fix: Hash the sorted match IDs to prevent collisions on match removal
+        const idsHash = createHash('md5')
+          .update(matches.map((m) => m.id).sort().join(','))
+          .digest('hex')
+          .slice(0, 8);
+
+        const filterKey = `${teamsParam || ''}_${competitionsParam || ''}_${cachedFallback}`;
+        const filterHash = createHash('md5').update(filterKey).digest('hex').slice(0, 8);
+        const etag = `W/"live-${maxUpdatedAtMs}-${idsHash}-${filterHash}"`;
+
+        // 4. ETag 304 Not Modified validation: immediate return on cache hit
+        const ifNoneMatch = request.headers['if-none-match'];
+        if (ifNoneMatch && (ifNoneMatch === etag || ifNoneMatch === etag.replace(/^W\//, '') || `W/${ifNoneMatch}` === etag)) {
+          reply.header('ETag', etag);
+          if (quotaExhausted) reply.header('X-Quota-Exhausted', 'true');
+          if (cachedFallback) reply.header('X-Cached-Fallback', 'true');
+          return reply.status(304).send();
+        }
+
+        // 5. Cache miss: return 200 OK with payload
+        if (quotaExhausted) reply.header('X-Quota-Exhausted', 'true');
+        if (cachedFallback) reply.header('X-Cached-Fallback', 'true');
+        reply.header('ETag', etag);
+
+        return reply.send(
+          createResponseEnvelope(
+            { matches: formattedMatches, quotaExhausted, cachedFallback },
+            { schemaVersion: '2.0', version: 2, cachedFallback, quotaExhausted }
+          )
+        );
+      } catch (err: any) {
+        request.log.error(err, 'Failed to fetch live tray matches');
+        return reply.status(500).send(
+          createErrorEnvelope('INTERNAL_ERROR', 'Failed to retrieve live tray matches', { details: err?.message }, { schemaVersion: '2.0' })
+        );
+      }
+    }
+  );
+
+  // ----------------------------------------------------
+  // Delivery API v2: Match Details (Canonical & Alias Resolution with ETag 304)
+  // ----------------------------------------------------
+  const handleMatchDetails = async (request: any, reply: any) => {
+    const { id } = request.params;
     if (!id || typeof id !== 'string' || id.trim().length === 0) {
       return reply.status(400).send(
-        createErrorEnvelope('INVALID_REQUEST', 'Match ID is required and must not be empty.', undefined, { schemaVersion: '2.0' })
+        createErrorEnvelope('INVALID_REQUEST', 'Match ID is required.', undefined, { schemaVersion: '2.0' })
       );
     }
 
     try {
+      // 1. Strictly query SQLite canonical tables directly
       let fixture = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
-
       if (!fixture) {
         return reply.status(404).send(
           createErrorEnvelope('MATCH_NOT_FOUND', `No match found with ID '${id}'.`, undefined, { schemaVersion: '2.0' })
         );
       }
 
-      // --- Tier 3: Cache-Aside On-Demand Resolver ---
-      // Check if lineups or statistics are absent and match is approaching (<45m), live, or finished
-      const syncService = (fastify as any).syncService;
+      // 2. Hydrate missing or stale live match details from active provider (15s TTL / CircuitBreaker protected)
+      let syncService = (request.server as any).syncService || (fastify as any).syncService;
+      if (!syncService) {
+        try {
+          const provider = createProvider();
+          syncService = new SyncService(provider);
+          (fastify as any).syncService = syncService;
+        } catch {
+          // Non-critical fallback if provider cannot be instantiated
+        }
+      }
       if (syncService) {
-        const now = new Date();
-        const kickoff = new Date(fixture.kickoffTime);
-        const minutesToKickoff = (kickoff.getTime() - now.getTime()) / (60 * 1000);
-        const stateUpper = (fixture.state || '').toUpperCase().trim();
-        const isLive = ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY'].includes(stateUpper);
-        const isFinished = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH'].includes(stateUpper);
-        const isApproaching = minutesToKickoff <= 45 && !isFinished;
+        const hasDetails = (fixture.statistics && fixture.statistics.length > 0) || (fixture.lineups && fixture.lineups.length > 0);
+        const LIVE_STATES = ['LIVE', '1H', '2H', 'HT', 'ET', 'P', 'BT', 'FIRST_HALF', 'SECOND_HALF', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES', 'IN_PLAY'];
+        const isLive = LIVE_STATES.includes(String(fixture.state || '').toUpperCase());
+        const lastUpdatedMs = fixture.updatedAt ? new Date(fixture.updatedAt).getTime() : 0;
+        const isStale = (Date.now() - lastUpdatedMs) > 15000;
 
-        const hasLineups = fixture.lineups && fixture.lineups.length > 0;
-        const hasStatistics = fixture.statistics && fixture.statistics.length > 0;
-        const lastPolled = fixture.lastPolledAt ? new Date(fixture.lastPolledAt).getTime() : 0;
-        const secondsSinceLastPoll = (now.getTime() - lastPolled) / 1000;
-
-        const needsLineups = (isApproaching || isLive || isFinished) && !hasLineups;
-        const needsStatistics = (isLive || isFinished) && !hasStatistics;
-        const isLiveRefreshDue = isLive && secondsSinceLastPoll >= 180;
-
-        if ((needsLineups || needsStatistics || isLiveRefreshDue) && secondsSinceLastPoll >= 30) {
+        if (!hasDetails || (isLive && isStale)) {
           try {
-            await syncService.syncFixtureDetails(fixture.id);
-            // Reload populated fixture from PostgreSQL
-            const reloaded = await fixturesRepo.getByCanonicalOrLegacyId(fixture.id);
-            if (reloaded) {
-              fixture = reloaded;
+            const synced = await syncService.syncFixtureDetails(fixture.id);
+            if (synced) {
+              const updated = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
+              if (updated) fixture = updated;
             }
-          } catch (err: any) {
-            request.log.warn(`On-demand fixture sync failed for ${fixture.id}: ${err?.message}`);
+          } catch (syncErr: any) {
+            request.log.warn(`On-demand match hydration failed for '${id}': ${syncErr?.message}`);
           }
         }
       }
 
+      // 3. Compute fixture ETag based on entity updatedAt timestamp, events count, and stats/lineups hash
+      const fixtureUpdatedMs = fixture.updatedAt ? new Date(fixture.updatedAt).getTime() : 0;
+      const eventCount = fixture.events?.length ?? 0;
+      const detailsDigest = createHash('md5')
+        .update(JSON.stringify(fixture.statistics || []) + JSON.stringify(fixture.lineups || []))
+        .digest('hex')
+        .slice(0, 8);
+      const etag = `W/"match-${fixture.id}-${fixtureUpdatedMs}-${eventCount}-${detailsDigest}"`;
+
+      // 4. ETag 304 Validation
+      const ifNoneMatch = request.headers['if-none-match'];
+      if (ifNoneMatch && (ifNoneMatch === etag || ifNoneMatch === etag.replace(/^W\//, '') || `W/${ifNoneMatch}` === etag)) {
+        reply.header('ETag', etag);
+        return reply.status(304).send();
+      }
+
       const formatted = formatV2MatchDetail(fixture);
-      const envelope = createResponseEnvelope(formatted, { schemaVersion: '2.0', version: 2 });
-      return reply.send(envelope);
+      reply.header('ETag', etag);
+      return reply.send(createResponseEnvelope(formatted, { schemaVersion: '2.0', version: 2 }));
     } catch (err: any) {
-      request.log.error(err, `Failed to fetch v2 match '${id}'`);
+      request.log.error(err, `Failed to fetch match details '${id}'`);
       return reply.status(500).send(
         createErrorEnvelope('INTERNAL_ERROR', 'Failed to retrieve match details', { details: err?.message }, { schemaVersion: '2.0' })
       );
     }
-  });
+  };
+
+  // Register primary route and backward-compatible singular alias
+  fastify.get<{ Params: { id: string } }>('/api/v2/matches/:id', handleMatchDetails);
+  fastify.get<{ Params: { id: string } }>('/api/v2/match/:id', handleMatchDetails);
 
   // ----------------------------------------------------
   // Delivery API v2: Catalog Search (Teams)

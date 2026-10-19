@@ -116,9 +116,12 @@ export interface V2MatchDetail {
  */
 export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2TrustMetadata {
   const state = (fixture.state || '').toUpperCase();
-  const LIVE_STATES = ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY'];
-  const FINISHED_STATES = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH'];
-  const PREMATCH_STATES = ['PREMATCH', 'NS', 'TBD'];
+  const LIVE_STATES = [
+    'LIVE', 'HALFTIME', 'HT', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY',
+    'FIRST_HALF', 'SECOND_HALF', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES'
+  ];
+  const FINISHED_STATES = ['FINISHED', 'FT', 'AET', 'PEN', 'POSTMATCH', 'FINISHED_AET', 'FINISHED_PEN'];
+  const PREMATCH_STATES = ['PREMATCH', 'NS', 'TBD', 'TIMED', 'SCHEDULED', 'NOT_STARTED'];
 
   let sourceObservedAt: Date | null = null;
   let provider: string | null = null;
@@ -218,8 +221,8 @@ export function formatV2TrayMatch(m: any, now: Date = new Date()): V2TrayMatch {
       id: m.competition?.canonicalId || m.competition?.id,
       legacyId: m.competition?.id,
       name: m.competition?.name,
-      code: m.competition?.code,
-      country: m.competition?.country,
+      code: m.competition?.code !== 'COMP' ? (m.competition?.code ?? m.competition?.country ?? undefined) : (m.competition?.country !== 'COMP' ? m.competition?.country : undefined),
+      country: m.competition?.country !== 'COMP' ? (m.competition?.country ?? m.competition?.code ?? undefined) : undefined,
       logoUrl: m.competition?.logoUrl,
     },
     homeTeam: {
@@ -269,9 +272,9 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
       id: fixture.competition?.canonicalId || fixture.competition?.id,
       legacyId: fixture.competition?.id,
       name: fixture.competition?.name,
-      code: fixture.competition?.code,
+      code: fixture.competition?.code !== 'COMP' ? (fixture.competition?.code ?? fixture.competition?.country ?? undefined) : (fixture.competition?.country !== 'COMP' ? fixture.competition?.country : undefined),
       type: fixture.competition?.type,
-      country: fixture.competition?.country,
+      country: fixture.competition?.country !== 'COMP' ? (fixture.competition?.country ?? fixture.competition?.code ?? undefined) : undefined,
       logoUrl: fixture.competition?.logoUrl,
     },
     season: fixture.season,
@@ -310,7 +313,11 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     kickoffTime: fixture.kickoffTime,
     events: fixture.events || [],
     lineups: fixture.lineups || [],
-    statistics: fixture.statistics || [],
+    statistics: (fixture.statistics || []).map((s: any) => ({
+      ...s,
+      expectedGoals: s.expectedGoals ?? null,
+      xg: s.expectedGoals ?? null,
+    })),
     trust: calculateTrustMetadata(fixture, now),
   };
 }
