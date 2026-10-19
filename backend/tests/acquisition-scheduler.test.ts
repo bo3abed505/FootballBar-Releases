@@ -714,7 +714,7 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       const mockSyncService: any = { syncSchedule: vi.fn() };
       const mockRepo: any = {
         countTotalFixtures: vi.fn().mockResolvedValue(10),
-        hasFixturesForDate: vi.fn().mockResolvedValue(false),
+        hasFixturesForDate: vi.fn().mockImplementation(async (d: string) => d !== '2026-10-08'),
       };
 
       const scheduler = new AcquisitionScheduler({
@@ -832,5 +832,68 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       }
     });
   });
+
+  describe('Tick-Boundary Hot-Swap Integration', () => {
+    it('buffers provider swap and evaluates at the tick boundary, hydrating the API config', async () => {
+      const prevKey = process.env.API_FOOTBALL_KEY;
+      const prevTier = process.env.API_FOOTBALL_TIER;
+      const prevAllowLive = process.env.ALLOW_LIVE_PROVIDER_REQUESTS;
+
+      process.env.API_FOOTBALL_KEY = 'test_api_key_123';
+      process.env.API_FOOTBALL_TIER = 'test_tier';
+      process.env.ALLOW_LIVE_PROVIDER_REQUESTS = 'true';
+
+      try {
+
+      const mockSyncService: any = { sync: vi.fn().mockResolvedValue(null) };
+      const mockRepo: any = {
+        getActiveSummary: vi.fn().mockResolvedValue({
+          liveCount: 0,
+          recentlyFinishedCount: 0,
+          stalePrematchCount: 0,
+          scheduleKnownForToday: true,
+        }),
+      };
+
+      const scheduler = new AcquisitionScheduler({
+        syncService: mockSyncService,
+        fixturesRepository: mockRepo,
+        getBudgetContext: async () => ({ consumedDaily: 10, remainingDaily: 90 }),
+        sleepFn: async () => {},
+        logger: silentLogger,
+      });
+
+      // 1. Initial provider defaults to fotmob
+      expect((scheduler as any).providerName).toBe('api_football');
+      // Set to fotmob to start for this test
+      (scheduler as any).providerName = 'fotmob';
+
+      // 2. User initiates a change via UI -> REST -> preferences service
+      scheduler.swapProvider('api_football');
+      
+      // 3. Immediately after, providerName is NOT mutated
+      expect((scheduler as any).providerName).toBe('fotmob');
+      expect((scheduler as any).pendingProviderName).toBe('api_football');
+
+      // 4. Tick boundary execution
+      await scheduler.executeSingleCycle();
+
+      // 5. Post tick boundary, the swap is processed
+      expect((scheduler as any).providerName).toBe('api_football');
+      expect((scheduler as any).pendingProviderName).toBeNull();
+      
+      // 6. The re-instantiated syncService contains an ApiFootballProvider with the test keys
+      const activeProvider = (scheduler as any).syncService.provider;
+      expect(activeProvider.name).toBe('api-football');
+      const client = (activeProvider as any).client;
+      expect(client.apiKey).toBe('test_api_key_123');
+      } finally {
+        if (prevKey !== undefined) process.env.API_FOOTBALL_KEY = prevKey; else delete process.env.API_FOOTBALL_KEY;
+        if (prevTier !== undefined) process.env.API_FOOTBALL_TIER = prevTier; else delete process.env.API_FOOTBALL_TIER;
+        if (prevAllowLive !== undefined) process.env.ALLOW_LIVE_PROVIDER_REQUESTS = prevAllowLive; else delete process.env.ALLOW_LIVE_PROVIDER_REQUESTS;
+      }
+    });
+  });
 });
+
 

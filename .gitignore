@@ -63,3 +63,9 @@ $RECYCLE.BIN/
 .DS_Store
 scratch/
 backend/scratch/
+
+# SQLite runtime databases
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/*.db-journal

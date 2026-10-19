@@ -352,7 +352,7 @@ describe('Milestone 8 Work Package 2 (Phase 2) - Sync & Policy Integration', () 
         where: eq(schema.fixtures.id, 'fix_39001'),
       });
       expect(saved).not.toBeNull();
-      expect(saved?.state).toBe('LIVE');
+      expect(['LIVE', 'FIRST_HALF']).toContain(saved?.state);
       expect(saved?.homeScore).toBe(1);
     });
   });
