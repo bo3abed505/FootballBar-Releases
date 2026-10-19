@@ -18,15 +18,15 @@ public sealed record NotificationCandidate
     public required string AwayTeamName { get; init; }
     public required int HomeScore { get; init; }
     public required int AwayScore { get; init; }
-    public int ElapsedMinute { get; init; }
-    public int ExtraMinute { get; init; }
+    public int ElapsedMinute { get; set; }
+    public int ExtraMinute { get; set; }
     public string? CompetitionId { get; init; }
     public string? CompetitionLegacyId { get; init; }
     public string? HomeTeamId { get; init; }
     public string? HomeTeamLegacyId { get; init; }
     public string? AwayTeamId { get; init; }
     public string? AwayTeamLegacyId { get; init; }
-    public string? EventPlayerName { get; init; }
-    public string? EventDescription { get; init; }
+    public string? EventPlayerName { get; set; }
+    public string? EventDescription { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }

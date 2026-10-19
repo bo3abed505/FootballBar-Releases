@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -45,6 +46,9 @@ public class SyncService : ISyncService
     private DateTimeOffset? _lastRefreshAttempt;
     private long _lastRefreshDurationMs;
 
+    private readonly ConcurrentDictionary<string, string> _etagsByKey = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, TrayDataDto> _dataByKey = new(StringComparer.OrdinalIgnoreCase);
+
     public event EventHandler<TrayUpdateEventArgs>? TrayUpdated;
     public event EventHandler<bool>? SyncStateChanged;
     private bool _isSyncing;
@@ -70,13 +74,36 @@ public class SyncService : ISyncService
         get => _targetDate;
         set
         {
-            if (_targetDate.Date != value.Date)
+            var target = value.Date;
+            if (_targetDate.Date != target)
             {
-                _targetDate = value.Date;
-                _lastKnownEtag = null; // Invalidate previous date ETag to force fresh fetch
+                _targetDate = target;
+                var dateKeyPrefix = $"{_targetDate:yyyy-MM-dd}|";
+                var matchingKey = _dataByKey.Keys.FirstOrDefault(k => k.StartsWith(dateKeyPrefix, StringComparison.OrdinalIgnoreCase));
+                if (matchingKey != null && _dataByKey.TryGetValue(matchingKey, out var cachedData))
+                {
+                    _currentTrayData = cachedData;
+                    _lastKnownEtag = _etagsByKey.TryGetValue(matchingKey, out var etag) ? etag : null;
+                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                }
+                else
+                {
+                    _lastKnownEtag = null;
+                }
             }
         }
     }
+
+    private static string BuildRequestKey(DateTime? date, IEnumerable<string> teams, IEnumerable<string> comps)
+    {
+        var datePart = date.HasValue ? date.Value.ToString("yyyy-MM-dd") : DateTime.Today.ToString("yyyy-MM-dd");
+        var sortedTeams = string.Join(",", teams.OrderBy(t => t, StringComparer.OrdinalIgnoreCase));
+        var sortedComps = string.Join(",", comps.OrderBy(c => c, StringComparer.OrdinalIgnoreCase));
+        return $"{datePart}|{sortedTeams}|{sortedComps}";
+    }
+
+    private static string BuildRequestKey(DateTime date, IEnumerable<string> teams, IEnumerable<string> comps) =>
+        BuildRequestKey((DateTime?)date, teams, comps);
 
     public void TriggerImmediateSync()
     {
@@ -277,13 +304,20 @@ public class SyncService : ISyncService
             compIds.Add("ft_comp_01M467Y24DRWPKFG9AX4XX88ZE");
             compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.CopaAmerica);
 
-            var teamIdList = teamIds.ToList();
-            var compIdList = compIds.ToList();
+            DateTime queryDate = _targetDate.Date;
+            var teamIdList = teamIds.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
+            var compIdList = compIds.OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
+            var requestKey = BuildRequestKey(queryDate, teamIdList, compIdList);
 
             // Phase 1: Cache Desync Resiliency
             // If local in-memory cache is null (meaning tray.json is missing, corrupt, or deleted),
             // attempt a reload. If still null, ignore any saved ETag and pass null to the API client
             // to force the backend to return a 200 OK with the full payload to rehydrate the client.
+            if (_currentTrayData == null && _dataByKey.TryGetValue(requestKey, out var memoryData))
+            {
+                _currentTrayData = memoryData;
+            }
+
             if (_currentTrayData == null)
             {
                 try
@@ -294,6 +328,14 @@ public class SyncService : ISyncService
                         _currentTrayData = reloaded.Envelope.Data;
                         _lastKnownVersion = reloaded.Envelope.Version;
                         _lastKnownEtag = reloaded.ETag;
+                        if (_targetDate.Date == DateTime.Today)
+                        {
+                            _dataByKey[requestKey] = _currentTrayData;
+                            if (!string.IsNullOrWhiteSpace(_lastKnownEtag))
+                            {
+                                _etagsByKey[requestKey] = _lastKnownEtag;
+                            }
+                        }
                     }
                 }
                 catch
@@ -301,71 +343,73 @@ public class SyncService : ISyncService
                     // Ignore cache read failures; fall through to null ETag fetch
                 }
             }
+            else if (!_dataByKey.ContainsKey(requestKey) && _targetDate.Date == DateTime.Today)
+            {
+                _dataByKey[requestKey] = _currentTrayData;
+                if (!string.IsNullOrWhiteSpace(_lastKnownEtag))
+                {
+                    _etagsByKey[requestKey] = _lastKnownEtag;
+                }
+            }
 
-            string? etagToSend = (_currentTrayData != null) ? _lastKnownEtag : null;
+            string? etagToSend = null;
+            if (_dataByKey.TryGetValue(requestKey, out var kData) && kData != null)
+            {
+                _currentTrayData = kData;
+                if (_etagsByKey.TryGetValue(requestKey, out var kEtag))
+                {
+                    etagToSend = kEtag;
+                    _lastKnownEtag = kEtag;
+                }
+            }
+            else if (_currentTrayData != null)
+            {
+                etagToSend = _lastKnownEtag;
+            }
+
             if (_currentTrayData == null)
             {
                 _lastKnownEtag = null;
             }
 
-            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {_targetDate:yyyy-MM-dd}, Teams: {teamIdList.Count}, Competitions: {compIdList.Count}, ETag: '{etagToSend ?? "none"}')...");
+            AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {queryDate:yyyy-MM-dd}, Teams: {teamIdList.Count}, Competitions: {compIdList.Count}, ETag: '{etagToSend ?? "none"}')...");
             var response = await _apiClient.GetTrayAsync(
                 etagToSend,
-                _targetDate,
+                queryDate,
                 teamIdList,
                 compIdList,
                 cancellationToken);
             sw.Stop();
             _lastRefreshDurationMs = sw.ElapsedMilliseconds;
 
-            if (response.IsNotModified)
+            if (response.IsNotModified || (response.Envelope?.Data?.IsNotModified ?? false))
             {
-                if (_currentTrayData == null)
+                if (_dataByKey.TryGetValue(requestKey, out var existingData))
                 {
-                    // Cache desync recovery: server returned 304 but local memory is null.
-                    // Invalidate ETag and force re-request with null ETag to rehydrate.
-                    _lastKnownEtag = null;
-                    AppLogger.Warn("Sync", "CacheDesyncDetected", "Received 304 Not Modified while local cache is null. Re-requesting with null ETag to force rehydration.");
-                    response = await _apiClient.GetTrayAsync(
-                        null,
-                        _targetDate,
-                        teamIdList,
-                        compIdList,
-                        cancellationToken);
-
-                    if (response.IsNotModified)
-                    {
-                        try
-                        {
-                            var reloaded = await _cacheService.LoadCacheAsync(cancellationToken);
-                            if (reloaded?.Envelope?.Data != null)
-                            {
-                                _currentTrayData = reloaded.Envelope.Data;
-                            }
-                        }
-                        catch { }
-                        PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
-                        return _freshnessState;
-                    }
+                    _currentTrayData = existingData;
                 }
-                else
+
+                _freshnessState = DataFreshnessState.NotModified;
+                _lastValidatedAt = DateTimeOffset.UtcNow;
+                _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
+                if (!string.IsNullOrWhiteSpace(response.ETag))
                 {
-                    // 304 Not Modified: Server confirms cached representation is still current
-                    _freshnessState = DataFreshnessState.NotModified;
-                    _lastValidatedAt = DateTimeOffset.UtcNow;
-                    _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
-                    if (!string.IsNullOrWhiteSpace(response.ETag))
-                    {
-                        _lastKnownEtag = response.ETag;
-                    }
+                    _lastKnownEtag = response.ETag;
+                    _etagsByKey[requestKey] = response.ETag;
+                }
+                else if (!string.IsNullOrWhiteSpace(etagToSend))
+                {
+                    _lastKnownEtag = etagToSend;
+                    _etagsByKey[requestKey] = etagToSend;
+                }
 
-                    // Propagate quota exhaustion even on 304 Not Modified
-                    if (response.QuotaExhausted && _currentTrayData != null)
-                    {
-                        _currentTrayData.QuotaExhausted = true;
-                    }
+                if (response.QuotaExhausted && _currentTrayData != null)
+                {
+                    _currentTrayData.QuotaExhausted = true;
+                }
 
-                    // Update cache validation timestamp (secondary non-critical persistence)
+                if (_targetDate.Date == DateTime.Today && !string.IsNullOrWhiteSpace(_lastKnownEtag))
+                {
                     try
                     {
                         await _cacheService.TouchLastValidatedAsync(_lastKnownEtag, cancellationToken);
@@ -374,12 +418,11 @@ public class SyncService : ISyncService
                     {
                         AppLogger.Warn("Sync", "CacheTouchFailed", $"Failed to update cache validation timestamp on 304: [{ex.GetType().Name}] {ex.Message}", ex: ex);
                     }
-
-                    AppLogger.Info("Sync", "PollNotModified", $"Backend returned 304 Not Modified ({_lastRefreshDurationMs}ms). Cache revalidated.");
-                    _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
-                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
-                    return _freshnessState;
                 }
+
+                AppLogger.Debug("Sync", "PollNotModified", "Tray state unchanged (304 Not Modified)");
+                _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
+                return _freshnessState;
             }
 
             if (response.IsSuccess && response.Envelope?.Data != null)
@@ -400,14 +443,25 @@ public class SyncService : ISyncService
                 _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
                 _freshnessState = DataFreshnessState.Fresh;
 
-                // Atomically persist to disk
-                await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
+                // Cache in memory by requestKey
+                _dataByKey[requestKey] = _currentTrayData;
+                if (!string.IsNullOrWhiteSpace(response.ETag))
+                {
+                    _etagsByKey[requestKey] = response.ETag;
+                }
+
+                // Atomically persist to disk if current view is today
+                if (_targetDate.Date == DateTime.Today)
+                {
+                    await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
+                }
 
                 // Evaluate and dispatch notifications for newly observed events/transitions
                 if (_notificationService != null)
                 {
                     var preferences = _preferencesService?.GetPreferences();
-                    await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, cancellationToken);
+                    string? pinnedMatchId = App.CurrentTickerCoordinator?.PinnedMatchId ?? App.CurrentMainViewModel?.ManualPinnedMatchId;
+                    await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, pinnedMatchId, cancellationToken);
                 }
 
                 AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
@@ -541,7 +595,7 @@ public class SyncService : ISyncService
             var compIds = preferences.FollowedCompetitions?.Select(c => c.Id).Where(id => !string.IsNullOrWhiteSpace(id)) ?? Enumerable.Empty<string>();
             var teamIds = preferences.FollowedTeams?.Select(t => t.Id).Where(id => !string.IsNullOrWhiteSpace(id)) ?? Enumerable.Empty<string>();
 
-            await _apiClient.SyncPreferencesAsync(compIds, teamIds, cancellationToken);
+            await _apiClient.SyncPreferencesAsync(compIds, teamIds, null, cancellationToken);
         }
         catch (Exception ex)
         {

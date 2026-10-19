@@ -129,7 +129,7 @@ public sealed class DaemonLifecycleManager : IDisposable
     /// Ensures the backend daemon is running. If not already active, launches node dist/server.js
     /// in the background without creating a console window.
     /// </summary>
-    public async Task<bool> StartDaemonAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> StartDaemonAsync(string activeProvider = "api_football", CancellationToken cancellationToken = default)
     {
         // 1. Pre-flight check: Is the backend already running?
         if (await IsDaemonHealthyAsync(cancellationToken))
@@ -217,6 +217,7 @@ public sealed class DaemonLifecycleManager : IDisposable
 
         // Explicitly enforce production environment to eliminate mock fallback
         startInfo.EnvironmentVariables["NODE_ENV"] = "production";
+        startInfo.EnvironmentVariables["ACTIVE_PROVIDER"] = activeProvider;
 
         if (!string.IsNullOrEmpty(envFilePath))
         {
@@ -246,6 +247,7 @@ public sealed class DaemonLifecycleManager : IDisposable
 
             // Strictly enforce production environment to prevent downgrade by local .env settings
             startInfo.EnvironmentVariables["NODE_ENV"] = "production";
+            startInfo.EnvironmentVariables["ACTIVE_PROVIDER"] = activeProvider;
         }
 
         try

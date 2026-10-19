@@ -22,6 +22,9 @@ public sealed record UserPreferences
     [JsonPropertyName("followedCompetitions")]
     public List<FollowedCompetition> FollowedCompetitions { get; init; } = new();
 
+    [JsonPropertyName("activeProvider")]
+    public string ActiveProvider { get; init; } = "fotmob";
+
     [JsonPropertyName("notifications")]
     public NotificationPreferences Notifications { get; init; } = new();
 

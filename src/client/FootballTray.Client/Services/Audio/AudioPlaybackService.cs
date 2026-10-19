@@ -57,6 +57,7 @@ public class AudioPlaybackService : IAudioPlaybackService
             case NotificationType.Kickoff:
             case NotificationType.MatchStarted:
             case NotificationType.MatchResumed:
+            case NotificationType.SecondHalf:
                 PlayAudioFile("RefereeWhistle_ShortBurst.wav");
                 break;
             case NotificationType.HalfTime:

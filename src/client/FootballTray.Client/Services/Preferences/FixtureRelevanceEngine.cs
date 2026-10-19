@@ -23,17 +23,17 @@ public static class FixtureRelevanceEngine
 {
     private static readonly HashSet<string> LiveStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "LIVE", "1H", "2H", "ET", "P", "BT", "IN_PLAY", "HALFTIME", "HT", "EXTRA_TIME", "PENALTIES", "SUSP", "INT"
+        "LIVE", "FIRST_HALF", "SECOND_HALF", "1H", "2H", "ET", "P", "BT", "IN_PLAY", "HALFTIME", "HT", "EXTRA_TIME", "EXTRA_TIME_HALFTIME", "PENALTIES", "SUSP", "INT"
     };
 
     private static readonly HashSet<string> FinishedStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "FT", "AET", "PEN", "FINISHED"
+        "FT", "AET", "PEN", "FINISHED", "FINISHED_AET", "FINISHED_PEN", "POSTMATCH"
     };
 
     private static readonly HashSet<string> PrematchStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "PREMATCH", "NS", "TBD"
+        "PREMATCH", "NS", "TBD", "TIMED", "SCHEDULED", "NOT_STARTED"
     };
 
     /// <summary>

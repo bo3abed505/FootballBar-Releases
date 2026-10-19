@@ -38,6 +38,8 @@ public sealed class NotificationCategoryItemViewModel : INotifyPropertyChanged
             NotificationType.MatchResumed => ("Match Resumed", "Alert when a suspended/delayed match restarts"),
             NotificationType.RedCard => ("Red Card", "Alert when a player is sent off"),
             NotificationType.PenaltyAwarded => ("Penalty Awarded", "Alert when a penalty kick is awarded"),
+            NotificationType.SecondHalf => ("Second Half", "Alert when the second half kicks off"),
+            NotificationType.Kickoff => ("Kickoff Reminder", "Alert before a followed match kicks off"),
             _ => (type.ToString(), "Match alert")
         };
 

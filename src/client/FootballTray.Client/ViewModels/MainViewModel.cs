@@ -504,9 +504,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _selectedCalendarDate;
         set
         {
-            var minDate = DateTime.Today.AddDays(-1);
-            var maxDate = DateTime.Today.AddDays(1);
-            var target = value.Date < minDate ? minDate : (value.Date > maxDate ? maxDate : value.Date);
+            var target = value.Date;
             if (_selectedCalendarDate.Date != target)
             {
                 _selectedCalendarDate = target;
@@ -614,6 +612,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         if (_syncService != null)
         {
+            _syncService.TargetDate = _selectedCalendarDate.Date;
             _syncService.TrayUpdated += OnTrayUpdated;
             _syncService.SyncStateChanged += OnSyncStateChanged;
         }
@@ -710,13 +709,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             available.IsFollowed = followedCompIds.Contains(available.Id);
         }
 
-        // 3. Notification Categories (all 7 canonical NotificationType members)
+        // 3. Notification Categories
         var allTypes = new[]
         {
             NotificationType.MatchStarted,
             NotificationType.Goal,
             NotificationType.HalfTime,
+            NotificationType.SecondHalf,
             NotificationType.MatchFinished,
+            NotificationType.RedCard,
+            NotificationType.PenaltyAwarded,
+            NotificationType.Kickoff,
             NotificationType.MatchPostponed,
             NotificationType.MatchCancelled,
             NotificationType.MatchResumed
@@ -982,24 +985,34 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public void RefreshMatches(TrayDataDto? trayData, DataFreshnessState freshnessState, TickerConnectionState connectionState)
     {
         CheckAndExecuteSync();
+
+        // 1. HTTP 304 Not Modified: Short-circuit collection mutation if already populated (Zero Flicker!)
+        if (freshnessState == DataFreshnessState.NotModified && _latestTrayData != null && (FilteredMatches.Count > 0 || _latestTrayData.Matches.Count == 0))
+        {
+            UpdateConnectionUi(connectionState, freshnessState);
+            return;
+        }
+
         if (trayData != null)
         {
             _latestTrayData = trayData;
-        }
-        else if (freshnessState == DataFreshnessState.NotModified && _latestTrayData != null)
-        {
-            // Preserve existing _latestTrayData on 304 Not Modified
         }
         else if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
         {
             _latestTrayData = _syncService.CurrentTrayData;
         }
 
+        // 2. Offline Resilience: Retain existing matches in memory if backend is unreachable or returning cached data
+        UpdateConnectionUi(connectionState, freshnessState);
+
+        ApplyCurrentFilter();
+    }
+
+    private void UpdateConnectionUi(TickerConnectionState connectionState, DataFreshnessState freshnessState)
+    {
         _freshnessState = freshnessState;
         _connectionState = connectionState;
 
-
-        // Update connection status
         switch (connectionState)
         {
             case TickerConnectionState.OnlineFresh:
@@ -1015,12 +1028,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 IsOffline = true;
                 break;
             default:
-                ConnectionStatusText = freshnessState == DataFreshnessState.Fresh ? "Online" : "Offline";
+                ConnectionStatusText = freshnessState == DataFreshnessState.Fresh ? "Online" : "Offline (Cached Data)";
                 IsOffline = freshnessState != DataFreshnessState.Fresh;
                 break;
         }
 
-        ApplyCurrentFilter();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ConnectionStatusText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsOffline)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncIconGlyph)));
     }
@@ -1330,12 +1344,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             string time = goalMatch.State == "HT" ? "HT" : (goalMatch.ElapsedMinute > 0 ? $"{goalMatch.ElapsedMinute}'" : goalMatch.State);
             ActiveTickerText = $"⚽ GOAL: {home} {score} {away} ({time})";
         }
-        else
+        else if (IsExplicitlyUnpinned)
         {
             ActiveMatchId = null;
             ActiveTickerText = prefs?.EnableTickerCarousel == true
                 ? "📌 Auto-Rotate Ticker (Carousel Mode)"
                 : "📌 No pinned matches";
+        }
+        else
+        {
+            var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
+            ActiveMatchId = activeMatch?.Id;
+
+            if (activeMatch != null)
+            {
+                string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
+                string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
+                string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
+                string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : activeMatch.State);
+                ActiveTickerText = $"{home} {score} {away} ({time})";
+            }
+            else
+            {
+                ActiveTickerText = prefs?.EnableTickerCarousel == true
+                    ? "📌 Auto-Rotate Ticker (Carousel Mode)"
+                    : "📌 No pinned matches";
+            }
         }
 
         // 1. Filter by Selected Calendar Date
@@ -1356,15 +1390,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return false;
         }).ToList();
 
-        var followedTeamIds = prefs.GetFollowedTeamIdSet();
-        var followedCompIds = prefs.GetFollowedCompetitionIdSet();
+        var followedTeamIds = prefs?.GetFollowedTeamIdSet() ?? new HashSet<string>();
+        var followedCompIds = prefs?.GetFollowedCompetitionIdSet() ?? new HashSet<string>();
 
         // 2. Evaluate relevance and build view models
         var viewModels = new List<MatchItemViewModel>();
         foreach (var match in dateFiltered)
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
-            bool isActive = !string.IsNullOrEmpty(ManualPinnedMatchId) && string.Equals(match.Id, ManualPinnedMatchId, StringComparison.Ordinal);
+            bool isActive = match.Id == ActiveMatchId;
             bool homeFollowed = (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
                 || (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId))
                 || (!string.IsNullOrEmpty(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name))
@@ -1440,24 +1474,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 .ThenBy(m => m.Id, StringComparer.Ordinal)
                 .ToList();
 
-        FollowedMatches.Clear();
-        foreach (var item in sortedFollowed)
-        {
-            FollowedMatches.Add(item);
-        }
-
-        OtherMatches.Clear();
-        foreach (var item in sortedOther)
-        {
-            OtherMatches.Add(item);
-        }
+        ReconcileMatchCollection(FollowedMatches, sortedFollowed);
+        ReconcileMatchCollection(OtherMatches, sortedOther);
 
         var completeFilteredList = sortedFollowed.Concat(sortedOther).ToList();
-        FilteredMatches.Clear();
-        foreach (var item in completeFilteredList)
-        {
-            FilteredMatches.Add(item);
-        }
+        ReconcileMatchCollection(FilteredMatches, completeFilteredList);
 
         // Smart Merge expandable competition accordion groups (Anti-Blink UX)
         var groupedData = completeFilteredList
@@ -1653,11 +1674,65 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
-            EmptyStateTitle = null;
-            EmptyStateMessage = null;
+            EmptyStateTitle = string.Empty;
+            EmptyStateMessage = string.Empty;
         }
 
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
+    }
+
+    /// <summary>
+    /// Reconciles ObservableCollection items in-place instead of calling Clear() + Add().
+    /// Preserves ListView item containers, scroll position, and eliminates visual flickering.
+    /// </summary>
+    private static void ReconcileMatchCollection(
+        ObservableCollection<MatchItemViewModel> targetCollection,
+        IReadOnlyList<MatchItemViewModel> newItems)
+    {
+        var newIdSet = new HashSet<string>(newItems.Select(m => m.Id), StringComparer.Ordinal);
+
+        // 1. Remove deleted/absent items from the end backwards
+        for (int i = targetCollection.Count - 1; i >= 0; i--)
+        {
+            if (!newIdSet.Contains(targetCollection[i].Id))
+            {
+                targetCollection.RemoveAt(i);
+            }
+        }
+
+        // 2. Update existing items in-place or insert newly appeared items
+        for (int targetIndex = 0; targetIndex < newItems.Count; targetIndex++)
+        {
+            var sourceItem = newItems[targetIndex];
+            int existingIndex = -1;
+
+            for (int j = targetIndex; j < targetCollection.Count; j++)
+            {
+                if (string.Equals(targetCollection[j].Id, sourceItem.Id, StringComparison.Ordinal))
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex == targetIndex)
+            {
+                // Already at correct index: update in-place (fires PropertyChanged ONLY on changed fields)
+                targetCollection[targetIndex].UpdateFromSource(sourceItem);
+            }
+            else if (existingIndex > targetIndex)
+            {
+                // Item order changed: move into position and update in-place
+                var item = targetCollection[existingIndex];
+                targetCollection.Move(existingIndex, targetIndex);
+                item.UpdateFromSource(sourceItem);
+            }
+            else
+            {
+                // Brand new item: insert at targetIndex
+                targetCollection.Insert(targetIndex, sourceItem);
+            }
+        }
     }
 
     /// <summary>

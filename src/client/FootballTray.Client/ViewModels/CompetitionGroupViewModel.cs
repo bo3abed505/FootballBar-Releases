@@ -30,7 +30,7 @@ public sealed class CompetitionGroupViewModel : INotifyPropertyChanged
     public int MatchCount => Matches.Count;
     public string MatchCountText => Matches.Count.ToString();
     public Visibility FollowedStarVisibility => IsFollowed ? Visibility.Visible : Visibility.Collapsed;
-    public string CountryDisplay => !string.IsNullOrWhiteSpace(Country) ? $"• {Country}" : string.Empty;
+    public string CountryDisplay => (!string.IsNullOrWhiteSpace(Country) && !string.Equals(Country, "COMP", StringComparison.OrdinalIgnoreCase)) ? $"• {Country}" : string.Empty;
 
     public bool IsExpanded
     {

@@ -15,6 +15,8 @@ public sealed partial class MatchCenterWindow : Window
 
     public ObservableCollection<MatchTimelineItem> TimelineItems => ViewModel.TimelineItems;
 
+    private readonly FootballApiClient _apiClient = new();
+    private string? _lastEtag;
     private DispatcherTimer? _liveRefreshTimer;
     private bool _isRefreshing;
 
@@ -42,6 +44,11 @@ public sealed partial class MatchCenterWindow : Window
 
     public void Populate(MatchDetailDto match)
     {
+        if (ViewModel.MatchId != match.Id)
+        {
+            _lastEtag = null;
+        }
+
         ViewModel.Load(match);
 
         Title = ViewModel.Title;
@@ -53,10 +60,19 @@ public sealed partial class MatchCenterWindow : Window
         AwayTeamName.Text = ViewModel.AwayTeamName;
         ScoreText.Text = ViewModel.ScoreText;
 
-        // Explicitly refresh incident and timeline collections on UI
-        HomeIncidentsList.ItemsSource = ViewModel.HomeIncidents;
-        AwayIncidentsList.ItemsSource = ViewModel.AwayIncidents;
-        EventsList.ItemsSource = ViewModel.TimelineItems;
+        // Explicitly refresh incident and timeline collections on UI if not already bound
+        if (HomeIncidentsList.ItemsSource != ViewModel.HomeIncidents)
+        {
+            HomeIncidentsList.ItemsSource = ViewModel.HomeIncidents;
+        }
+        if (AwayIncidentsList.ItemsSource != ViewModel.AwayIncidents)
+        {
+            AwayIncidentsList.ItemsSource = ViewModel.AwayIncidents;
+        }
+        if (EventsList.ItemsSource != ViewModel.TimelineItems)
+        {
+            EventsList.ItemsSource = ViewModel.TimelineItems;
+        }
 
         if (ViewModel.HasHalfTime)
         {
@@ -144,18 +160,23 @@ public sealed partial class MatchCenterWindow : Window
         }
 
         _isRefreshing = true;
-        bool created = false;
-        if (client == null)
-        {
-            client = new FootballApiClient();
-            created = true;
-        }
+        FootballApiClient effectiveClient = client ?? _apiClient;
 
         try
         {
-            var response = await client.GetMatchDetailsAsync(ViewModel.MatchId);
+            var response = await effectiveClient.GetMatchDetailsAsync(ViewModel.MatchId, _lastEtag);
+            if (response.IsNotModified)
+            {
+                if (!string.IsNullOrEmpty(response.ETag))
+                {
+                    _lastEtag = response.ETag;
+                }
+                return true;
+            }
+
             if (response.IsSuccess && response.Envelope?.Data != null)
             {
+                _lastEtag = response.ETag;
                 Populate(response.Envelope.Data);
                 return true;
             }
@@ -166,10 +187,6 @@ public sealed partial class MatchCenterWindow : Window
         }
         finally
         {
-            if (created)
-            {
-                client.Dispose();
-            }
             _isRefreshing = false;
         }
 
@@ -299,6 +316,7 @@ public sealed partial class MatchCenterWindow : Window
     {
         Closed -= OnWindowClosed;
         StopLiveRefreshTimer();
+        _apiClient.Dispose();
 
         if (HomeTeamLogo != null)
         {

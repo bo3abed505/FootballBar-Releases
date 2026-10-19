@@ -33,6 +33,9 @@ public class ApiResponseEnvelope<T>
     [JsonPropertyName("quotaExhausted")]
     public bool QuotaExhausted { get; set; }
 
+    [JsonPropertyName("cachedFallback")]
+    public bool CachedFallback { get; set; }
+
     [JsonPropertyName("error")]
     public ApiErrorDto? Error { get; set; }
 }
@@ -56,6 +59,12 @@ public class TrayDataDto
 
     [JsonPropertyName("quotaExhausted")]
     public bool QuotaExhausted { get; set; }
+
+    [JsonPropertyName("cachedFallback")]
+    public bool CachedFallback { get; set; }
+
+    [JsonPropertyName("isNotModified")]
+    public bool IsNotModified { get; set; }
 }
 
 public class TrayMatchDto
@@ -276,6 +285,16 @@ public class TrayEventDto
     {
         get => null;
         set { if (string.IsNullOrEmpty(AssistPlayerName) && !string.IsNullOrEmpty(value)) AssistPlayerName = value; }
+    }
+
+    [JsonPropertyName("assistPlayerId")]
+    public string? AssistPlayerId { get; set; }
+
+    [JsonPropertyName("assist_player_id")]
+    public string? AssistPlayerIdAlias
+    {
+        get => null;
+        set { if (string.IsNullOrEmpty(AssistPlayerId) && !string.IsNullOrEmpty(value)) AssistPlayerId = value; }
     }
 
     [JsonPropertyName("description")]
@@ -501,6 +520,15 @@ public class TeamStatisticsDto
 
     [JsonPropertyName("passesAccurate")]
     public int? PassesAccurate { get; set; }
+
+    [JsonPropertyName("expectedGoals")]
+    public double? ExpectedGoals { get; set; }
+
+    [JsonPropertyName("xg")]
+    public double? Xg { get; set; }
+
+    [JsonIgnore]
+    public double? EffectiveXg => ExpectedGoals ?? Xg;
 }
 
 public class V2CatalogTeamDto
@@ -561,5 +589,8 @@ public class SyncPreferencesRequestDto
 
     [JsonPropertyName("teamIds")]
     public List<string> TeamIds { get; set; } = new();
+
+    [JsonPropertyName("activeProvider")]
+    public string? ActiveProvider { get; set; }
 }
 

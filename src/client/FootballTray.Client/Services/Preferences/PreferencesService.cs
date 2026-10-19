@@ -107,6 +107,23 @@ public sealed class PreferencesService : IPreferencesService
         PreferencesChanged?.Invoke(this, _currentPreferences);
     }
 
+    public async Task SetActiveProviderAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var updated = _currentPreferences with { ActiveProvider = provider };
+            var normalized = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalized, cancellationToken);
+            _currentPreferences = normalized;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
     public async Task FollowTeamAsync(FollowedTeam team, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(team);

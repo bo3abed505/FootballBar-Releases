@@ -76,6 +76,42 @@
                 </Border>
 
                 <!-- ======================================================== -->
+                <!-- CARD 1.5: DATA PROVIDER                                  -->
+                <!-- ======================================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE78C;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="Data Provider" FontSize="16" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="Select the backend data source used for match tracking."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Active Football Provider" FontWeight="Medium" FontSize="13" />
+                            <ComboBox x:Name="ActiveProviderCombo" SelectionChanged="OnActiveProviderChanged" Width="240">
+                                <ComboBoxItem Tag="fotmob">FotMob</ComboBoxItem>
+                                <ComboBoxItem Tag="api_football">API-Football</ComboBoxItem>
+                            </ComboBox>
+                        </StackPanel>
+                        
+                        <TextBlock
+                            x:Name="ProviderRestartNote"
+                            Text="* Changing the provider will restart the background synchronization daemon."
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            FontSize="12"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ======================================================== -->
                 <!-- CARD 2: NOTIFICATIONS                                    -->
                 <!-- ======================================================== -->
                 <Border

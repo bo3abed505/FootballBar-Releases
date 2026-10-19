@@ -200,6 +200,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     private TickerConnectionState _currentConnectionState = TickerConnectionState.OnlineFresh;
     private UserPreferences? _currentPreferences;
     private string? _pinnedMatchId;
+    private TrayMatchDto? _pinnedMatch;
     private TrayDataDto? _latestTrayData;
     private bool _isDisposed;
     private MatchCenterWindow? _matchCenterWindow;
@@ -281,11 +282,13 @@ public sealed class TaskbarTickerCoordinator : IDisposable
 
         // Check active candidates first, then fall back to latest tray data (allows pinning unfollowed matches)
         TrayMatchDto? match = _state.Candidates.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.Ordinal))
-            ?? _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.Ordinal));
+            ?? _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.Ordinal))
+            ?? _pinnedMatch;
 
         if (match != null)
         {
             _pinnedMatchId = targetId;
+            _pinnedMatch = match;
             if (!_state.Candidates.Any(m => string.Equals(m.Id, targetId, StringComparison.Ordinal)))
             {
                 var combined = new List<TrayMatchDto>(_state.Candidates);
@@ -305,6 +308,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         if (_isDisposed) return;
         var unpinnedId = _pinnedMatchId;
         _pinnedMatchId = null;
+        _pinnedMatch = null;
 
         if (!string.IsNullOrEmpty(unpinnedId))
         {
@@ -400,8 +404,9 @@ public sealed class TaskbarTickerCoordinator : IDisposable
                 {
                     bool isLive = FixtureRelevanceEngine.IsLive(match);
                     bool isFollowed = FixtureRelevanceEngine.EvaluateRelevance(match, teamIds, compIds).IsRelevant;
+                    bool isPinned = !string.IsNullOrWhiteSpace(_pinnedMatchId) && (string.Equals(match.Id, _pinnedMatchId, StringComparison.OrdinalIgnoreCase) || match.Id.EndsWith($"_{_pinnedMatchId}") || _pinnedMatchId.EndsWith($"_{match.Id}"));
 
-                    if (isLive && isFollowed && (currentHome != prevScore.Home || currentAway != prevScore.Away))
+                    if (isLive && (isFollowed || isPinned) && (currentHome != prevScore.Home || currentAway != prevScore.Away))
                     {
                         goalJumpMatchId ??= match.Id;
                     }
@@ -472,14 +477,20 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             }
         }
 
-        // If a match was explicitly pinned, guarantee it is present in candidates even if unfollowed
+        // If a match was explicitly pinned, guarantee it is present in candidates even if unfollowed or date changed
         if (!string.IsNullOrEmpty(_pinnedMatchId))
         {
             var pinnedInTray = trayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
-            if (pinnedInTray != null && !candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal)))
+            if (pinnedInTray != null)
+            {
+                _pinnedMatch = pinnedInTray;
+            }
+
+            var matchToKeep = _pinnedMatch ?? pinnedInTray;
+            if (matchToKeep != null && !candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal)))
             {
                 var combined = new List<TrayMatchDto>(candidates);
-                combined.Insert(0, pinnedInTray);
+                combined.Insert(0, matchToKeep);
                 candidates = combined;
             }
         }
@@ -528,17 +539,13 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             }
         }
 
-        // If a match was pinned, retain it if still in candidates, or keep from trayData if still valid
+        // If a match was pinned, retain it if still in candidates
         if (!string.IsNullOrEmpty(_pinnedMatchId))
         {
             bool matchStillPresent = _state.Candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
             if (matchStillPresent)
             {
                 _state.SetCurrentMatch(_pinnedMatchId);
-            }
-            else
-            {
-                _pinnedMatchId = null;
             }
         }
 

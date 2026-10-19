@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -19,12 +22,32 @@ public class TrayApiResponse
     public ApiResponseEnvelope<TrayDataDto>? Envelope { get; init; }
     public string? ErrorMessage { get; init; }
     public bool QuotaExhausted { get; set; }
+    public bool CachedFallback { get; set; }
 
-    public static TrayApiResponse Success(ApiResponseEnvelope<TrayDataDto> envelope, string? etag, bool quotaExhausted = false) =>
-        new() { IsSuccess = true, IsNotModified = false, Envelope = envelope, ETag = etag, QuotaExhausted = quotaExhausted || envelope.QuotaExhausted || (envelope.Data?.QuotaExhausted ?? false) };
+    public static TrayApiResponse Success(ApiResponseEnvelope<TrayDataDto> envelope, string? etag, bool quotaExhausted = false, bool cachedFallback = false) =>
+        new()
+        {
+            IsSuccess = true,
+            IsNotModified = false,
+            Envelope = envelope,
+            ETag = etag,
+            QuotaExhausted = quotaExhausted || envelope.QuotaExhausted || (envelope.Data?.QuotaExhausted ?? false),
+            CachedFallback = cachedFallback || envelope.CachedFallback || (envelope.Data?.CachedFallback ?? false)
+        };
 
-    public static TrayApiResponse NotModified(string? etag, bool quotaExhausted = false) =>
-        new() { IsSuccess = true, IsNotModified = true, ETag = etag, QuotaExhausted = quotaExhausted };
+    public static TrayApiResponse NotModified(string? etag, bool quotaExhausted = false, bool cachedFallback = false) =>
+        new()
+        {
+            IsSuccess = true,
+            IsNotModified = true,
+            ETag = etag,
+            QuotaExhausted = quotaExhausted,
+            CachedFallback = cachedFallback,
+            Envelope = new ApiResponseEnvelope<TrayDataDto>
+            {
+                Data = new TrayDataDto { IsNotModified = true, QuotaExhausted = quotaExhausted, CachedFallback = cachedFallback }
+            }
+        };
 
     public static TrayApiResponse Error(string message) =>
         new() { IsSuccess = false, IsNotModified = false, ErrorMessage = message };
@@ -33,14 +56,19 @@ public class TrayApiResponse
 public class MatchDetailApiResponse
 {
     public bool IsSuccess { get; init; }
+    public bool IsNotModified { get; init; }
+    public string? ETag { get; init; }
     public ApiResponseEnvelope<MatchDetailDto>? Envelope { get; init; }
     public string? ErrorMessage { get; init; }
 
-    public static MatchDetailApiResponse Success(ApiResponseEnvelope<MatchDetailDto> envelope) =>
-        new() { IsSuccess = true, Envelope = envelope };
+    public static MatchDetailApiResponse Success(ApiResponseEnvelope<MatchDetailDto> envelope, string? etag = null) =>
+        new() { IsSuccess = true, IsNotModified = false, Envelope = envelope, ETag = etag };
+
+    public static MatchDetailApiResponse NotModified(string? etag) =>
+        new() { IsSuccess = true, IsNotModified = true, ETag = etag };
 
     public static MatchDetailApiResponse Error(string message) =>
-        new() { IsSuccess = false, ErrorMessage = message };
+        new() { IsSuccess = false, IsNotModified = false, ErrorMessage = message };
 }
 
 public class CatalogSearchApiResponse<T>
@@ -62,6 +90,8 @@ public class FootballApiClient : IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly bool _disposeClient;
+    private readonly ConcurrentDictionary<string, string> _etagsByUrl = new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -77,6 +107,21 @@ public class FootballApiClient : IDisposable
         }
         return DefaultBaseUrl;
     }
+
+    public void InvalidateETag(string? uri = null)
+    {
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            _etagsByUrl.Clear();
+        }
+        else
+        {
+            _etagsByUrl.TryRemove(uri, out _);
+        }
+    }
+
+    public string? GetCachedETag(string uri) =>
+        _etagsByUrl.TryGetValue(uri, out var etag) ? etag : null;
 
     public FootballApiClient(HttpClient? httpClient = null, string? baseUrl = null)
     {
@@ -124,13 +169,13 @@ public class FootballApiClient : IDisposable
         try
         {
             var uriBuilder = new System.Text.StringBuilder("/api/v2/tray?");
-            if (date.HasValue)
-            {
-                uriBuilder.Append($"date={date.Value:yyyy-MM-dd}&");
-            }
+            var effectiveDate = date ?? DateTime.Today;
+            uriBuilder.Append($"date={effectiveDate:yyyy-MM-dd}&");
             if (teams != null)
             {
-                var teamList = teams.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+                var teamList = teams.Where(t => !string.IsNullOrWhiteSpace(t))
+                                    .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                                    .ToList();
                 if (teamList.Count > 0)
                 {
                     uriBuilder.Append($"teams={Uri.EscapeDataString(string.Join(",", teamList))}&");
@@ -138,7 +183,9 @@ public class FootballApiClient : IDisposable
             }
             if (competitions != null)
             {
-                var compList = competitions.Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
+                var compList = competitions.Where(c => !string.IsNullOrWhiteSpace(c))
+                                           .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                                           .ToList();
                 if (compList.Count > 0)
                 {
                     uriBuilder.Append($"competitions={Uri.EscapeDataString(string.Join(",", compList))}&");
@@ -147,9 +194,15 @@ public class FootballApiClient : IDisposable
             string uri = uriBuilder.ToString().TrimEnd('?', '&');
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
 
-            if (!string.IsNullOrWhiteSpace(ifNoneMatch))
+            string? effectiveEtag = ifNoneMatch;
+            if (string.IsNullOrWhiteSpace(effectiveEtag) && _etagsByUrl.TryGetValue(uri, out var cachedEtag))
             {
-                var cleanEtag = ifNoneMatch.Trim();
+                effectiveEtag = cachedEtag;
+            }
+
+            if (!string.IsNullOrWhiteSpace(effectiveEtag))
+            {
+                var cleanEtag = effectiveEtag.Trim();
                 if (!cleanEtag.StartsWith("\"") && !cleanEtag.StartsWith("W/\""))
                 {
                     cleanEtag = $"\"{cleanEtag}\"";
@@ -170,7 +223,12 @@ public class FootballApiClient : IDisposable
 
             if (response.StatusCode == HttpStatusCode.NotModified)
             {
-                return TrayApiResponse.NotModified(newEtag ?? ifNoneMatch, quotaExhaustedHeader);
+                string? matchedEtag = newEtag ?? effectiveEtag;
+                if (!string.IsNullOrWhiteSpace(matchedEtag))
+                {
+                    _etagsByUrl[uri] = matchedEtag;
+                }
+                return TrayApiResponse.NotModified(matchedEtag, quotaExhaustedHeader);
             }
 
             if (response.IsSuccessStatusCode)
@@ -197,6 +255,11 @@ public class FootballApiClient : IDisposable
                     }
                 }
 
+                if (!string.IsNullOrWhiteSpace(newEtag))
+                {
+                    _etagsByUrl[uri] = newEtag;
+                }
+
                 return TrayApiResponse.Success(envelope, newEtag, quotaExhaustedHeader);
             }
 
@@ -214,9 +277,146 @@ public class FootballApiClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches full match details and timeline from /api/v2/match/:id.
+    /// Fetches lightweight live tray matches from /api/v2/tray/live with ETag 304 support.
+    /// Strictly queries SQLite canonical tables on daemon.
     /// </summary>
-    public async Task<MatchDetailApiResponse> GetMatchDetailsAsync(string matchId, CancellationToken cancellationToken = default)
+    public async Task<TrayApiResponse> GetLiveTrayAsync(
+        string? ifNoneMatch = null,
+        IEnumerable<string>? teams = null,
+        IEnumerable<string>? competitions = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var uriBuilder = new System.Text.StringBuilder("/api/v2/tray/live?");
+            if (teams != null)
+            {
+                var teamList = teams.Where(t => !string.IsNullOrWhiteSpace(t))
+                                    .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                                    .ToList();
+                if (teamList.Count > 0)
+                {
+                    uriBuilder.Append($"teams={Uri.EscapeDataString(string.Join(",", teamList))}&");
+                }
+            }
+            if (competitions != null)
+            {
+                var compList = competitions.Where(c => !string.IsNullOrWhiteSpace(c))
+                                           .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                                           .ToList();
+                if (compList.Count > 0)
+                {
+                    uriBuilder.Append($"competitions={Uri.EscapeDataString(string.Join(",", compList))}&");
+                }
+            }
+            string uri = uriBuilder.ToString().TrimEnd('?', '&');
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+
+            string? effectiveEtag = ifNoneMatch;
+            if (string.IsNullOrWhiteSpace(effectiveEtag) && _etagsByUrl.TryGetValue(uri, out var cachedEtag))
+            {
+                effectiveEtag = cachedEtag;
+            }
+
+            if (!string.IsNullOrWhiteSpace(effectiveEtag))
+            {
+                var cleanEtag = effectiveEtag.Trim();
+                if (!cleanEtag.StartsWith("\"") && !cleanEtag.StartsWith("W/\""))
+                {
+                    cleanEtag = $"\"{cleanEtag}\"";
+                }
+                request.Headers.TryAddWithoutValidation("If-None-Match", cleanEtag);
+            }
+
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            bool quotaExhaustedHeader = false;
+            if (response.Headers.Contains("X-Quota-Exhausted"))
+            {
+                var val = response.Headers.GetValues("X-Quota-Exhausted").FirstOrDefault();
+                quotaExhaustedHeader = string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+            }
+
+            bool cachedFallbackHeader = false;
+            if (response.Headers.Contains("X-Cached-Fallback"))
+            {
+                var val = response.Headers.GetValues("X-Cached-Fallback").FirstOrDefault();
+                cachedFallbackHeader = string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+            }
+
+            string? newEtag = response.Headers.ETag?.ToString();
+
+            // HTTP 304 Not Modified: Zero deserialization overhead
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                string? matchedEtag = newEtag ?? effectiveEtag;
+                if (!string.IsNullOrWhiteSpace(matchedEtag))
+                {
+                    _etagsByUrl[uri] = matchedEtag;
+                }
+                return TrayApiResponse.NotModified(matchedEtag, quotaExhaustedHeader, cachedFallbackHeader);
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var envelope = await JsonSerializer.DeserializeAsync(
+                    contentStream,
+                    FootballJsonSerializerContext.Default.ApiResponseEnvelopeTrayDataDto,
+                    cancellationToken);
+
+                if (envelope == null)
+                {
+                    return TrayApiResponse.Error("Failed to deserialize live tray envelope.");
+                }
+
+                if (!TrayPayloadValidator.IsValid(envelope, out var validationError))
+                {
+                    return TrayApiResponse.Error($"Malformed live tray response payload: {validationError}");
+                }
+
+                if (quotaExhaustedHeader)
+                {
+                    envelope.QuotaExhausted = true;
+                    if (envelope.Data != null) envelope.Data.QuotaExhausted = true;
+                }
+                if (cachedFallbackHeader)
+                {
+                    envelope.CachedFallback = true;
+                    if (envelope.Data != null) envelope.Data.CachedFallback = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(newEtag))
+                {
+                    _etagsByUrl[uri] = newEtag;
+                }
+
+                return TrayApiResponse.Success(envelope, newEtag, quotaExhaustedHeader, cachedFallbackHeader);
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            return TrayApiResponse.Error($"Server returned HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return TrayApiResponse.Error($"Network error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Fetches full match details and timeline from /api/v2/matches/:id with ETag 304 support.
+    /// </summary>
+    public Task<MatchDetailApiResponse> GetMatchDetailsAsync(string matchId, CancellationToken cancellationToken = default) =>
+        GetMatchDetailsAsync(matchId, null, cancellationToken);
+
+    public async Task<MatchDetailApiResponse> GetMatchDetailsAsync(
+        string matchId,
+        string? ifNoneMatch,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(matchId))
         {
@@ -225,19 +425,57 @@ public class FootballApiClient : IDisposable
 
         try
         {
-            using var response = await _httpClient.GetAsync($"/api/v2/match/{Uri.EscapeDataString(matchId.Trim())}", cancellationToken);
+            string uri = $"/api/v2/match/{Uri.EscapeDataString(matchId.Trim())}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+
+            string? effectiveEtag = ifNoneMatch;
+            if (string.IsNullOrWhiteSpace(effectiveEtag) && _etagsByUrl.TryGetValue(uri, out var cachedEtag))
+            {
+                effectiveEtag = cachedEtag;
+            }
+
+            if (!string.IsNullOrWhiteSpace(effectiveEtag))
+            {
+                var cleanEtag = effectiveEtag.Trim();
+                if (!cleanEtag.StartsWith("\"") && !cleanEtag.StartsWith("W/\""))
+                {
+                    cleanEtag = $"\"{cleanEtag}\"";
+                }
+                request.Headers.TryAddWithoutValidation("If-None-Match", cleanEtag);
+            }
+
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            string? newEtag = response.Headers.ETag?.ToString();
+
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                string? matchedEtag = newEtag ?? effectiveEtag;
+                if (!string.IsNullOrWhiteSpace(matchedEtag))
+                {
+                    _etagsByUrl[uri] = matchedEtag;
+                }
+                return MatchDetailApiResponse.NotModified(matchedEtag);
+            }
 
             if (response.IsSuccessStatusCode)
             {
                 var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                var envelope = await JsonSerializer.DeserializeAsync(contentStream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto, cancellationToken);
+                var envelope = await JsonSerializer.DeserializeAsync(
+                    contentStream,
+                    FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto,
+                    cancellationToken);
 
                 if (envelope == null || envelope.Data == null)
                 {
                     return MatchDetailApiResponse.Error("Failed to deserialize match detail envelope.");
                 }
 
-                return MatchDetailApiResponse.Success(envelope);
+                if (!string.IsNullOrWhiteSpace(newEtag))
+                {
+                    _etagsByUrl[uri] = newEtag;
+                }
+
+                return MatchDetailApiResponse.Success(envelope, newEtag);
             }
 
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -353,6 +591,7 @@ public class FootballApiClient : IDisposable
     public async Task<bool> SyncPreferencesAsync(
         IEnumerable<string> competitionIds,
         IEnumerable<string> teamIds,
+        string? activeProvider = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -361,6 +600,7 @@ public class FootballApiClient : IDisposable
             {
                 CompetitionIds = competitionIds.ToList(),
                 TeamIds = teamIds.ToList(),
+                ActiveProvider = activeProvider
             };
 
             var json = JsonSerializer.Serialize(payload, FootballJsonSerializerContext.Default.SyncPreferencesRequestDto);

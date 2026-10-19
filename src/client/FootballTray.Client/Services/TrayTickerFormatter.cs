@@ -49,12 +49,7 @@ public static class TrayTickerFormatter
         }
 
         // 1. Prioritize in-play / Live matches
-        var liveMatch = trayData.Matches.FirstOrDefault(m =>
-            string.Equals(m.State, "LIVE", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(m.State, "HALFTIME", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(m.State, "EXTRA_TIME", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(m.State, "PENALTIES", StringComparison.OrdinalIgnoreCase));
-
+        var liveMatch = trayData.Matches.FirstOrDefault(FixtureRelevanceEngine.IsLive);
         if (liveMatch != null)
         {
             return liveMatch;
@@ -62,7 +57,7 @@ public static class TrayTickerFormatter
 
         // 2. Nearest upcoming match (PREMATCH)
         var upcomingMatch = trayData.Matches
-            .Where(m => string.Equals(m.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
+            .Where(FixtureRelevanceEngine.IsPrematch)
             .OrderBy(m => m.KickoffTime)
             .FirstOrDefault();
 
@@ -181,27 +176,44 @@ public static class TrayTickerFormatter
 
         string mainText;
 
-        if (string.Equals(match.State, "LIVE", StringComparison.OrdinalIgnoreCase))
-        {
-            var minuteText = match.ExtraMinute > 0
-                ? $"{match.ElapsedMinute}+{match.ExtraMinute}'"
-                : $"{match.ElapsedMinute}'";
-            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} {minuteText}";
-        }
-        else if (string.Equals(match.State, "HALFTIME", StringComparison.OrdinalIgnoreCase))
+        string state = (match.State ?? "").Trim().ToUpperInvariant();
+        if (state is "HALFTIME" or "HT")
         {
             mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} HT";
         }
-        else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
+        else if (state is "FINISHED_AET" or "AET")
+        {
+            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} AET";
+        }
+        else if (state is "FINISHED_PEN" or "PEN")
+        {
+            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} PEN";
+        }
+        else if (state is "FINISHED" or "FT" or "POSTMATCH")
+        {
+            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} FT";
+        }
+        else if (state is "FIRST_HALF" or "SECOND_HALF" or "EXTRA_TIME" or "LIVE" or "IN_PLAY" or "1H" or "2H" or "ET" or "BT" or "P" or "SUSP" or "INT")
+        {
+            string minText;
+            if (match.ElapsedMinute > 0)
+            {
+                minText = match.ExtraMinute > 0
+                    ? $"{match.ElapsedMinute}+{match.ExtraMinute}'"
+                    : $"{match.ElapsedMinute}'";
+            }
+            else if (state is "FIRST_HALF" or "1H") minText = "1H";
+            else if (state is "SECOND_HALF" or "2H") minText = "2H";
+            else if (state is "EXTRA_TIME" or "ET") minText = "ET";
+            else minText = "LIVE";
+
+            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} {minText}";
+        }
+        else if (state is "PREMATCH" or "NS" or "TBD")
         {
             var timeFormat = (preferences?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
             var localTime = match.KickoffTime.ToLocalTime().ToString(timeFormat);
             mainText = $"{homeCode} vs {awayCode} · {localTime}";
-        }
-        else if (string.Equals(match.State, "FINISHED", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(match.State, "POSTMATCH", StringComparison.OrdinalIgnoreCase))
-        {
-            mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} FT";
         }
         else
         {

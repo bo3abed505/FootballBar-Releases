@@ -160,6 +160,9 @@ public sealed partial class SettingsPage : Page
             // Logging
             DebugLoggingToggle.IsOn = ViewModel.IsDebugLoggingEnabled;
 
+            // Data Provider
+            SelectActiveProvider(App.CurrentPreferencesService?.Current.ActiveProvider ?? "api_football");
+
             if (!string.IsNullOrWhiteSpace(ViewModel.DiagnosticsCopyStatus))
             {
                 DiagnosticsCopyStatusText.Text = ViewModel.DiagnosticsCopyStatus;
@@ -215,6 +218,22 @@ public sealed partial class SettingsPage : Page
         if (SoundModeCombo.Items.Count > 0)
         {
             SoundModeCombo.SelectedIndex = 0;
+        }
+    }
+
+    private void SelectActiveProvider(string provider)
+    {
+        foreach (var item in ActiveProviderCombo.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is string tag && string.Equals(tag, provider, StringComparison.OrdinalIgnoreCase))
+            {
+                ActiveProviderCombo.SelectedItem = item;
+                return;
+            }
+        }
+        if (ActiveProviderCombo.Items.Count > 1)
+        {
+            ActiveProviderCombo.SelectedIndex = 1; // Default to API-Football
         }
     }
 
@@ -317,6 +336,28 @@ public sealed partial class SettingsPage : Page
             Enum.TryParse<NotificationSoundMode>(tag, true, out var mode))
         {
             await ViewModel.SetSoundModeAsync(mode);
+        }
+    }
+
+    private async void OnActiveProviderChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        if (ActiveProviderCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+        {
+            var prefService = App.CurrentPreferencesService;
+            if (prefService != null && !string.Equals(prefService.Current.ActiveProvider, tag, StringComparison.OrdinalIgnoreCase))
+            {
+                await prefService.SetActiveProviderAsync(tag);
+                
+                // Hot-swap via backend REST API without restarting the daemon
+                var apiClient = new FootballTray.Client.Services.FootballApiClient();
+                var prefs = prefService.GetPreferences();
+                await apiClient.SyncPreferencesAsync(
+                    prefs.GetFollowedCompetitionIdSet(),
+                    prefs.GetFollowedTeamIdSet(),
+                    tag
+                );
+            }
         }
     }
 

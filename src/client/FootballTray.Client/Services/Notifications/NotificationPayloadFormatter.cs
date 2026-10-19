@@ -52,6 +52,11 @@ public static class NotificationPayloadFormatter
                 body = "Half-time";
                 break;
 
+            case NotificationType.SecondHalf:
+                title = $"{candidate.HomeTeamName} {candidate.HomeScore}–{candidate.AwayScore} {candidate.AwayTeamName}";
+                body = "Second half started";
+                break;
+
             case NotificationType.MatchFinished:
                 title = $"{candidate.HomeTeamName} {candidate.HomeScore}–{candidate.AwayScore} {candidate.AwayTeamName}";
                 body = "Full-time";

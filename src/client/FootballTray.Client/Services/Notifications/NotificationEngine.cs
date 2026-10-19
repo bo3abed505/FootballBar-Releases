@@ -17,17 +17,18 @@ public sealed class NotificationEngine
 
     private static readonly HashSet<string> LiveStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "LIVE", "1H", "2H", "ET", "P", "BT", "IN_PLAY"
+        "LIVE", "1H", "2H", "ET", "P", "BT", "IN_PLAY",
+        "FIRST_HALF", "SECOND_HALF", "EXTRA_TIME", "PENALTIES"
     };
 
     private static readonly HashSet<string> HalftimeStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "HALFTIME", "HT"
+        "HALFTIME", "HT", "BT", "EXTRA_TIME_HALFTIME"
     };
 
     private static readonly HashSet<string> FinishedStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "FINISHED", "FT", "AET", "PEN", "POSTMATCH"
+        "FINISHED", "FT", "AET", "PEN", "POSTMATCH", "FINISHED_AET", "FINISHED_PEN"
     };
 
     private static readonly HashSet<string> PostponedStates = new(StringComparer.OrdinalIgnoreCase)
@@ -42,7 +43,7 @@ public sealed class NotificationEngine
 
     private static readonly HashSet<string> PrematchStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "PREMATCH", "NS", "TBD"
+        "PREMATCH", "NS", "TBD", "TIMED", "SCHEDULED", "NOT_STARTED"
     };
 
     public NotificationDeduplicationStore DeduplicationStore => _deduplicationStore;
@@ -124,6 +125,10 @@ public sealed class NotificationEngine
         {
             _deduplicationStore.MarkNotified($"match:{match.Id}:halftime");
         }
+        if (state is "SECOND_HALF" or "2H" || (LiveStates.Contains(state) && !HalftimeStates.Contains(state) && state != "FIRST_HALF" && state != "1H"))
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:secondhalf");
+        }
         if (FinishedStates.Contains(state))
         {
             _deduplicationStore.MarkNotified($"match:{match.Id}:finished");
@@ -135,6 +140,11 @@ public sealed class NotificationEngine
         if (CancelledStates.Contains(state))
         {
             _deduplicationStore.MarkNotified($"match:{match.Id}:cancelled");
+        }
+
+        if (match.Score != null)
+        {
+            _deduplicationStore.MarkNotified($"match:{match.Id}:score:{match.Score.Home}-{match.Score.Away}");
         }
 
         if (match.RecentEvents != null)
@@ -171,8 +181,9 @@ public sealed class NotificationEngine
             return;
         }
 
-        // 1. MATCH_STARTED: (PREMATCH / uninitialized) -> LIVE
-        if ((PrematchStates.Contains(prevState) || string.IsNullOrEmpty(prevState)) && LiveStates.Contains(currState))
+        // 1. Kickoff / 1st Half: transition from scheduled (NS, TIMED, SCHEDULED, NOT_STARTED, PREMATCH) to FIRST_HALF, 1H, LIVE, IN_PLAY
+        if ((PrematchStates.Contains(prevState) || string.IsNullOrEmpty(prevState)) &&
+            (currState is "FIRST_HALF" or "1H" or "LIVE" or "IN_PLAY" || LiveStates.Contains(currState)))
         {
             string key = $"match:{curr.Id}:started";
             if (!_deduplicationStore.IsAlreadyNotified(key))
@@ -181,17 +192,31 @@ public sealed class NotificationEngine
             }
         }
 
-        // 2. HALF_TIME: LIVE -> HALFTIME
-        if (LiveStates.Contains(prevState) && HalftimeStates.Contains(currState))
+        // 2. Halftime: transition into HALFTIME or HT
+        if (currState is "HALFTIME" or "HT" || HalftimeStates.Contains(currState))
         {
-            string key = $"match:{curr.Id}:halftime";
-            if (!_deduplicationStore.IsAlreadyNotified(key))
+            if (prevState is not "HALFTIME" and not "HT" && !HalftimeStates.Contains(prevState))
             {
-                candidates.Add(CreateCandidate(curr, NotificationType.HalfTime, key, prevState, curr.State ?? "HALFTIME"));
+                string key = $"match:{curr.Id}:halftime";
+                if (!_deduplicationStore.IsAlreadyNotified(key))
+                {
+                    candidates.Add(CreateCandidate(curr, NotificationType.HalfTime, key, prevState, curr.State ?? "HALFTIME"));
+                }
             }
         }
 
-        // 3. MATCH_FINISHED: (LIVE / HALFTIME / PREMATCH) -> FINISHED
+        // 3. Second Half: transition from HALFTIME/HT into SECOND_HALF or 2H
+        if ((prevState is "HALFTIME" or "HT" || HalftimeStates.Contains(prevState)) &&
+            (currState is "SECOND_HALF" or "2H" || (LiveStates.Contains(currState) && !HalftimeStates.Contains(currState))))
+        {
+            string key = $"match:{curr.Id}:secondhalf";
+            if (!_deduplicationStore.IsAlreadyNotified(key))
+            {
+                candidates.Add(CreateCandidate(curr, NotificationType.SecondHalf, key, prevState, curr.State ?? "SECOND_HALF"));
+            }
+        }
+
+        // 4. Full Time: transition into FINISHED, FT, FINISHED_AET, AET, FINISHED_PEN
         if (!FinishedStates.Contains(prevState) && FinishedStates.Contains(currState))
         {
             string key = $"match:{curr.Id}:finished";
@@ -201,7 +226,7 @@ public sealed class NotificationEngine
             }
         }
 
-        // 4. MATCH_POSTPONED: Non-postponed -> POSTPONED
+        // 5. MATCH_POSTPONED: Non-postponed -> POSTPONED
         if (!PostponedStates.Contains(prevState) && PostponedStates.Contains(currState))
         {
             string key = $"match:{curr.Id}:postponed";
@@ -211,7 +236,7 @@ public sealed class NotificationEngine
             }
         }
 
-        // 5. MATCH_CANCELLED: Non-cancelled -> CANCELLED
+        // 6. MATCH_CANCELLED: Non-cancelled -> CANCELLED
         if (!CancelledStates.Contains(prevState) && CancelledStates.Contains(currState))
         {
             string key = $"match:{curr.Id}:cancelled";
@@ -221,7 +246,7 @@ public sealed class NotificationEngine
             }
         }
 
-        // 6. MATCH_RESUMED: POSTPONED -> LIVE / PREMATCH
+        // 7. MATCH_RESUMED: POSTPONED -> LIVE / PREMATCH
         if (PostponedStates.Contains(prevState) && (LiveStates.Contains(currState) || PrematchStates.Contains(currState)))
         {
             string key = $"match:{curr.Id}:resumed";
@@ -257,11 +282,6 @@ public sealed class NotificationEngine
 
     private void EvaluateGoalEvents(TrayMatchDto? prev, TrayMatchDto curr, List<NotificationCandidate> candidates)
     {
-        if (curr.RecentEvents == null || curr.RecentEvents.Count == 0)
-        {
-            return;
-        }
-
         // Strictly suppress event-based notifications (goals, cards, penalties) if the incoming curr state
         // indicates the match is over (FT, FINISHED, etc.) AND prev was null (initial hydration).
         string currState = (curr.State ?? string.Empty).ToUpperInvariant();
@@ -270,52 +290,119 @@ public sealed class NotificationEngine
             return;
         }
 
-        var prevEventIds = prev?.RecentEvents != null
-            ? new HashSet<string>(prev.RecentEvents.Select(e => e.Id), StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool goalCandidateEmitted = false;
 
-        foreach (var ev in curr.RecentEvents)
+        // 1. Evaluate explicit recent events if present in tray payload
+        if (curr.RecentEvents != null && curr.RecentEvents.Count > 0)
         {
-            if (!IsGoalEvent(ev))
-            {
-                continue;
-            }
+            var prevEventIds = prev?.RecentEvents != null
+                ? new HashSet<string>(prev.RecentEvents.Select(e => e.Id), StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Event must be genuinely newly observed
-            if (prevEventIds.Contains(ev.Id))
-            {
-                continue;
-            }
+            int prevHome = prev?.Score?.Home ?? 0;
+            int prevAway = prev?.Score?.Away ?? 0;
+            int currHome = curr.Score?.Home ?? 0;
+            int currAway = curr.Score?.Away ?? 0;
 
-            string key = $"match:{curr.Id}:event:{ev.Id}";
-            if (_deduplicationStore.IsAlreadyNotified(key))
+            foreach (var ev in curr.RecentEvents)
             {
-                continue;
-            }
+                if (!IsGoalEvent(ev))
+                {
+                    continue;
+                }
 
-            candidates.Add(new NotificationCandidate
+                // Event must be genuinely newly observed
+                if (prevEventIds.Contains(ev.Id))
+                {
+                    continue;
+                }
+
+                string key = $"match:{curr.Id}:event:{ev.Id}";
+                if (_deduplicationStore.IsAlreadyNotified(key))
+                {
+                    continue;
+                }
+
+                // If score did NOT increase and this scoreline was already notified, this is a late-arriving event for an already-notified goal
+                if (prev != null && currHome == prevHome && currAway == prevAway &&
+                    _deduplicationStore.IsAlreadyNotified($"match:{curr.Id}:score:{currHome}-{currAway}"))
+                {
+                    _deduplicationStore.MarkNotified(key);
+                    continue;
+                }
+
+                candidates.Add(new NotificationCandidate
+                {
+                    FixtureId = curr.Id,
+                    Type = NotificationType.Goal,
+                    DeduplicationKey = key,
+                    EventUid = ev.Id,
+                    PreviousState = prev?.State,
+                    NewState = curr.State ?? "LIVE",
+                    HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
+                    AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
+                    CompetitionId = curr.Competition?.Id,
+                    CompetitionLegacyId = curr.Competition?.LegacyId,
+                    HomeTeamId = curr.HomeTeam?.Id,
+                    HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
+                    AwayTeamId = curr.AwayTeam?.Id,
+                    AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
+                    HomeScore = currHome,
+                    AwayScore = currAway,
+                    ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
+                    ExtraMinute = ev.ExtraMinute > 0 ? ev.ExtraMinute : curr.ExtraMinute,
+                    EventPlayerName = ev.PlayerName,
+                    EventDescription = ev.Description
+                });
+
+                goalCandidateEmitted = true;
+
+                // Mark current scoreline as notified to prevent duplicate score increment candidate
+                if (curr.Score != null)
+                {
+                    _deduplicationStore.MarkNotified($"match:{curr.Id}:score:{currHome}-{currAway}");
+                }
+            }
+        }
+
+        // 2. Score increment fallback (detects goals when RecentEvents is empty or not yet populated in tray payload)
+        if (prev != null && curr.Score != null)
+        {
+            int prevHome = prev.Score?.Home ?? 0;
+            int prevAway = prev.Score?.Away ?? 0;
+            int currHome = curr.Score.Home;
+            int currAway = curr.Score.Away;
+
+            if (currHome > prevHome || currAway > prevAway)
             {
-                FixtureId = curr.Id,
-                Type = NotificationType.Goal,
-                DeduplicationKey = key,
-                EventUid = ev.Id,
-                PreviousState = prev?.State,
-                NewState = curr.State ?? "LIVE",
-                HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
-                AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
-                CompetitionId = curr.Competition?.Id,
-                CompetitionLegacyId = curr.Competition?.LegacyId,
-                HomeTeamId = curr.HomeTeam?.Id,
-                HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
-                AwayTeamId = curr.AwayTeam?.Id,
-                AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
-                HomeScore = curr.Score?.Home ?? 0,
-                AwayScore = curr.Score?.Away ?? 0,
-                ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
-                ExtraMinute = ev.ExtraMinute > 0 ? ev.ExtraMinute : curr.ExtraMinute,
-                EventPlayerName = ev.PlayerName,
-                EventDescription = ev.Description
-            });
+                string scoreKey = $"match:{curr.Id}:score:{currHome}-{currAway}";
+                if (!goalCandidateEmitted && !_deduplicationStore.IsAlreadyNotified(scoreKey))
+                {
+                    candidates.Add(new NotificationCandidate
+                    {
+                        FixtureId = curr.Id,
+                        Type = NotificationType.Goal,
+                        DeduplicationKey = scoreKey,
+                        EventUid = null,
+                        PreviousState = prev.State,
+                        NewState = curr.State ?? "LIVE",
+                        HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
+                        AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
+                        CompetitionId = curr.Competition?.Id,
+                        CompetitionLegacyId = curr.Competition?.LegacyId,
+                        HomeTeamId = curr.HomeTeam?.Id,
+                        HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
+                        AwayTeamId = curr.AwayTeam?.Id,
+                        AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
+                        HomeScore = currHome,
+                        AwayScore = currAway,
+                        ElapsedMinute = curr.ElapsedMinute,
+                        ExtraMinute = curr.ExtraMinute,
+                        EventPlayerName = null, // Will be enriched on-demand if missing in NotificationService
+                        EventDescription = null
+                    });
+                }
+            }
         }
     }
 
@@ -391,7 +478,7 @@ public sealed class NotificationEngine
                (t.Contains("card") && (d.Contains("red") || d.Contains("second yellow")));
     }
 
-    private static bool IsGoalEvent(TrayEventDto ev)
+    internal static bool IsGoalEvent(TrayEventDto ev)
     {
         if (string.IsNullOrWhiteSpace(ev.Type)) return false;
         var t = ev.Type.Trim();

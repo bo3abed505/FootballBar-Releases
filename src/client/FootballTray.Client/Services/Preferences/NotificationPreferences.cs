@@ -30,6 +30,9 @@ public sealed record NotificationPreferences
     public bool HalfTimeEnabled => IsTypeEnabled(NotificationType.HalfTime);
 
     [JsonIgnore]
+    public bool SecondHalfEnabled => IsTypeEnabled(NotificationType.SecondHalf);
+
+    [JsonIgnore]
     public bool FullTimeEnabled => IsTypeEnabled(NotificationType.MatchFinished);
 
     [JsonIgnore]
@@ -46,7 +49,14 @@ public sealed record NotificationPreferences
 
     public bool IsTypeEnabled(NotificationType type)
     {
-        return GlobalEnabled && EnabledTypes != null && EnabledTypes.Contains(type);
+        if (!GlobalEnabled || EnabledTypes == null) return false;
+        if (EnabledTypes.Contains(type)) return true;
+        // Resilient fallback for existing stored configurations: if SecondHalf is not explicitly in JSON list, inherit from MatchStarted/HalfTime
+        if (type == NotificationType.SecondHalf)
+        {
+            return EnabledTypes.Contains(NotificationType.MatchStarted) || EnabledTypes.Contains(NotificationType.HalfTime);
+        }
+        return false;
     }
 
     public NotificationPreferences WithTypeEnabled(NotificationType type, bool enabled)

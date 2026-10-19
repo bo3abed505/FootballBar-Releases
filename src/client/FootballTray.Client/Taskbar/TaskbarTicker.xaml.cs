@@ -98,9 +98,7 @@ public sealed partial class TaskbarTicker : UserControl
 
                 if (HomeTeamName != null)
                 {
-                    HomeTeamName.Text = !string.IsNullOrWhiteSpace(match.HomeTeam?.ShortName)
-                        ? match.HomeTeam.ShortName
-                        : (!string.IsNullOrWhiteSpace(match.HomeTeam?.Name) ? match.HomeTeam.Name : "Home");
+                    HomeTeamName.Text = FormatTickerTeamName(match.HomeTeam?.ShortName, match.HomeTeam?.Name, "Home");
                     HomeTeamName.Visibility = Visibility.Visible;
                 }
 
@@ -160,40 +158,13 @@ public sealed partial class TaskbarTicker : UserControl
 
                 if (AwayTeamName != null)
                 {
-                    AwayTeamName.Text = !string.IsNullOrWhiteSpace(match.AwayTeam?.ShortName)
-                        ? match.AwayTeam.ShortName
-                        : (!string.IsNullOrWhiteSpace(match.AwayTeam?.Name) ? match.AwayTeam.Name : "Away");
+                    AwayTeamName.Text = FormatTickerTeamName(match.AwayTeam?.ShortName, match.AwayTeam?.Name, "Away");
                     AwayTeamName.Visibility = Visibility.Visible;
                 }
 
                 if (StatusText != null)
                 {
-                    string status;
-                    if (string.Equals(match.State, "LIVE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        status = match.ExtraMinute > 0
-                            ? $"{match.ElapsedMinute}+{match.ExtraMinute}'"
-                            : $"{match.ElapsedMinute}'";
-                    }
-                    else if (string.Equals(match.State, "HALFTIME", StringComparison.OrdinalIgnoreCase))
-                    {
-                        status = "HT";
-                    }
-                    else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var use24h = App.CurrentMainViewModel?.PreferencesService?.Current.Use24HourFormat ?? true;
-                        status = match.KickoffTime.ToLocalTime().ToString(use24h ? "HH:mm" : "h:mm tt");
-                    }
-                    else if (string.Equals(match.State, "FINISHED", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(match.State, "POSTMATCH", StringComparison.OrdinalIgnoreCase))
-                    {
-                        status = "FT";
-                    }
-                    else
-                    {
-                        status = match.State ?? "";
-                    }
-
+                    string status = FormatTickerStatusText(match);
                     StatusText.Text = status;
                     StatusText.Visibility = !string.IsNullOrWhiteSpace(status) ? Visibility.Visible : Visibility.Collapsed;
                 }
@@ -363,26 +334,86 @@ public sealed partial class TaskbarTicker : UserControl
 
             if (homeUri != null && HomeCrest != null)
             {
-                HomeCrest.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(homeUri);
+                HomeCrest.Source = CreateCrestBitmap(homeUri);
                 HomeCrest.Visibility = Visibility.Visible;
             }
             else if (HomeCrest != null)
             {
-                HomeCrest.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(ImageCacheService.DefaultFallbackShieldUri);
+                HomeCrest.Source = CreateCrestBitmap(ImageCacheService.DefaultFallbackShieldUri);
                 HomeCrest.Visibility = Visibility.Visible;
             }
 
             if (awayUri != null && AwayCrest != null)
             {
-                AwayCrest.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(awayUri);
+                AwayCrest.Source = CreateCrestBitmap(awayUri);
                 AwayCrest.Visibility = Visibility.Visible;
             }
             else if (AwayCrest != null)
             {
-                AwayCrest.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(ImageCacheService.DefaultFallbackShieldUri);
+                AwayCrest.Source = CreateCrestBitmap(ImageCacheService.DefaultFallbackShieldUri);
                 AwayCrest.Visibility = Visibility.Visible;
             }
         });
+    }
+
+    private static Microsoft.UI.Xaml.Media.Imaging.BitmapImage CreateCrestBitmap(Uri uri)
+    {
+        return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage
+        {
+            DecodePixelType = Microsoft.UI.Xaml.Media.Imaging.DecodePixelType.Logical,
+            DecodePixelWidth = 36,
+            UriSource = uri
+        };
+    }
+
+    private static string FormatTickerTeamName(string? shortName, string? fullName, string fallback)
+    {
+        string val = !string.IsNullOrWhiteSpace(shortName) ? shortName.Trim() : (!string.IsNullOrWhiteSpace(fullName) ? fullName.Trim() : fallback);
+        if (val.Length > 4)
+        {
+            return val.Substring(0, 3).ToUpperInvariant();
+        }
+        return val.ToUpperInvariant();
+    }
+
+    private static string FormatTickerStatusText(TrayMatchDto match)
+    {
+        string state = (match.State ?? "").Trim().ToUpperInvariant();
+        if (state is "HALFTIME" or "HT")
+        {
+            return "HT";
+        }
+        if (state is "FINISHED" or "FT" or "POSTMATCH")
+        {
+            return "FT";
+        }
+        if (state is "FINISHED_AET" or "AET")
+        {
+            return "AET";
+        }
+        if (state is "FINISHED_PEN" or "PEN")
+        {
+            return "PEN";
+        }
+        if (state is "FIRST_HALF" or "SECOND_HALF" or "EXTRA_TIME" or "LIVE" or "IN_PLAY" or "1H" or "2H" or "ET" or "BT" or "P" or "SUSP" or "INT")
+        {
+            if (match.ElapsedMinute > 0)
+            {
+                return match.ExtraMinute > 0
+                    ? $"{match.ElapsedMinute}+{match.ExtraMinute}'"
+                    : $"{match.ElapsedMinute}'";
+            }
+            if (state is "FIRST_HALF" or "1H") return "1H";
+            if (state is "SECOND_HALF" or "2H") return "2H";
+            if (state is "EXTRA_TIME" or "ET") return "ET";
+            return "LIVE";
+        }
+        if (state is "PREMATCH" or "NS" or "TBD")
+        {
+            var use24h = App.CurrentMainViewModel?.PreferencesService?.Current.Use24HourFormat ?? true;
+            return match.KickoffTime.ToLocalTime().ToString(use24h ? "HH:mm" : "h:mm tt");
+        }
+        return state;
     }
 
     /// <summary>

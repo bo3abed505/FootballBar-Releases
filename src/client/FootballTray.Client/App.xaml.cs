@@ -52,6 +52,7 @@ public partial class App : Application
     public static MainViewModel? CurrentMainViewModel { get; private set; }
     public static IDiagnosticsService? CurrentDiagnosticsService { get; private set; }
     public static PreferencesService? CurrentPreferencesService => _preferencesService;
+    public DaemonLifecycleManager? CurrentDaemonManager => _daemonManager;
 
     public App()
     {
@@ -82,18 +83,20 @@ public partial class App : Application
     {
         AppLogger.Info("App", "StartupBegin", "FootballTray client startup sequence initiated.");
 
-        // 0. Ensure Local Backend Engine is Active
+        // 0. Initialize Preferences first so daemon can use it
+        _preferencesService = new PreferencesService();
+
+        // 1. Ensure Local Backend Engine is Active
         _daemonManager = new DaemonLifecycleManager();
         AppDomain.CurrentDomain.ProcessExit += (s, e) => _daemonManager?.StopDaemon();
-        await _daemonManager.StartDaemonAsync(_appShutdownCts.Token);
+        await _daemonManager.StartDaemonAsync(_preferencesService.Current.ActiveProvider, _appShutdownCts.Token);
 
-        // 1. Initialize Core Client Services first
+        // 2. Initialize Core Client Services
         _apiClient = new FootballApiClient();
         _cacheService = new LocalCacheService();
-        _preferencesService = new PreferencesService();
         var audioService = new AudioPlaybackService(_preferencesService);
         AudioPlaybackService.Instance = audioService;
-        var notificationService = new NotificationService(audioService: audioService);
+        var notificationService = new NotificationService(audioService: audioService, apiClient: _apiClient);
         var notificationCoordinator = new NotificationCoordinator(_preferencesService);
         _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15), notificationCoordinator);
         _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);

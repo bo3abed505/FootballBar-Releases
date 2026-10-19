@@ -23,6 +23,18 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     private IReadOnlyList<string> _relevanceReasons = Array.Empty<string>();
     private string _relevanceDisplay = string.Empty;
 
+    private int? _homeScore;
+    private int? _awayScore;
+    private string _scoreDisplay = string.Empty;
+    private string _state = string.Empty;
+    private string _stateDisplay = string.Empty;
+    private int _elapsedMinute;
+    private int _extraMinute;
+    private string _kickoffDisplay = string.Empty;
+    private bool _isLive;
+    private bool _isFinished;
+    private bool _isPrematch;
+
     public string Id { get; init; } = string.Empty;
     public string HomeTeamId { get; init; } = string.Empty;
     public string AwayTeamId { get; init; } = string.Empty;
@@ -32,23 +44,87 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     public string AwayTeamShortName { get; init; } = string.Empty;
     public string? HomeTeamLogoUrl { get; init; }
     public string? AwayTeamLogoUrl { get; init; }
-    public int? HomeScore { get; init; }
-    public int? AwayScore { get; init; }
-    public string ScoreDisplay { get; init; } = string.Empty;
-    public string State { get; init; } = string.Empty;
-    public string StateDisplay { get; init; } = string.Empty;
-    public int ElapsedMinute { get; init; }
-    public int ExtraMinute { get; init; }
+
+    public int? HomeScore
+    {
+        get => _homeScore;
+        private set => SetProperty(ref _homeScore, value);
+    }
+
+    public int? AwayScore
+    {
+        get => _awayScore;
+        private set => SetProperty(ref _awayScore, value);
+    }
+
+    public string ScoreDisplay
+    {
+        get => _scoreDisplay;
+        private set => SetProperty(ref _scoreDisplay, value);
+    }
+
+    public string State
+    {
+        get => _state;
+        private set => SetProperty(ref _state, value);
+    }
+
+    public string StateDisplay
+    {
+        get => _stateDisplay;
+        private set => SetProperty(ref _stateDisplay, value);
+    }
+
+    public int ElapsedMinute
+    {
+        get => _elapsedMinute;
+        private set => SetProperty(ref _elapsedMinute, value);
+    }
+
+    public int ExtraMinute
+    {
+        get => _extraMinute;
+        private set => SetProperty(ref _extraMinute, value);
+    }
+
     public DateTimeOffset KickoffTime { get; init; }
-    public string KickoffDisplay { get; init; } = string.Empty;
+
+    public string KickoffDisplay
+    {
+        get => _kickoffDisplay;
+        private set => SetProperty(ref _kickoffDisplay, value);
+    }
+
     public string CompetitionId { get; init; } = string.Empty;
     public string CompetitionName { get; init; } = string.Empty;
     public string CompetitionCode { get; init; } = string.Empty;
     public string? CompetitionCountry { get; init; }
     public string? CompetitionLogoUrl { get; init; }
-    public bool IsLive { get; init; }
-    public bool IsFinished { get; init; }
-    public bool IsPrematch { get; init; }
+
+    public bool IsLive
+    {
+        get => _isLive;
+        private set
+        {
+            if (SetProperty(ref _isLive, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsLiveBadgeVisible)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsNormalBadgeVisible)));
+            }
+        }
+    }
+
+    public bool IsFinished
+    {
+        get => _isFinished;
+        private set => SetProperty(ref _isFinished, value);
+    }
+
+    public bool IsPrematch
+    {
+        get => _isPrematch;
+        private set => SetProperty(ref _isPrematch, value);
+    }
 
     public Microsoft.UI.Xaml.Visibility IsLiveBadgeVisible =>
         IsLive ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -183,6 +259,81 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         IsRelevant = FollowedByTeam || FollowedByCompetition;
     }
 
+    /// <summary>
+    /// Updates presentation state in-place from another MatchItemViewModel.
+    /// Only triggers PropertyChanged for values that have genuinely mutated, preventing UI flicker.
+    /// </summary>
+    public bool UpdateFromSource(MatchItemViewModel source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        bool changed = false;
+
+        if (SetProperty(ref _homeScore, source.HomeScore, nameof(HomeScore))) changed = true;
+        if (SetProperty(ref _awayScore, source.AwayScore, nameof(AwayScore))) changed = true;
+        if (SetProperty(ref _scoreDisplay, source.ScoreDisplay, nameof(ScoreDisplay))) changed = true;
+        if (SetProperty(ref _state, source.State, nameof(State))) changed = true;
+        if (SetProperty(ref _stateDisplay, source.StateDisplay, nameof(StateDisplay))) changed = true;
+        if (SetProperty(ref _elapsedMinute, source.ElapsedMinute, nameof(ElapsedMinute))) changed = true;
+        if (SetProperty(ref _extraMinute, source.ExtraMinute, nameof(ExtraMinute))) changed = true;
+        if (SetProperty(ref _kickoffDisplay, source.KickoffDisplay, nameof(KickoffDisplay))) changed = true;
+
+        if (SetProperty(ref _isLive, source.IsLive, nameof(IsLive)))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsLiveBadgeVisible)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsNormalBadgeVisible)));
+            changed = true;
+        }
+
+        if (SetProperty(ref _isFinished, source.IsFinished, nameof(IsFinished))) changed = true;
+        if (SetProperty(ref _isPrematch, source.IsPrematch, nameof(IsPrematch))) changed = true;
+
+        if (IsActiveTaskbarMatch != source.IsActiveTaskbarMatch)
+        {
+            IsActiveTaskbarMatch = source.IsActiveTaskbarMatch;
+            changed = true;
+        }
+
+        if (IsHomeTeamFollowed != source.IsHomeTeamFollowed)
+        {
+            IsHomeTeamFollowed = source.IsHomeTeamFollowed;
+            changed = true;
+        }
+
+        if (IsAwayTeamFollowed != source.IsAwayTeamFollowed)
+        {
+            IsAwayTeamFollowed = source.IsAwayTeamFollowed;
+            changed = true;
+        }
+
+        if (IsCompetitionFollowed != source.IsCompetitionFollowed)
+        {
+            IsCompetitionFollowed = source.IsCompetitionFollowed;
+            changed = true;
+        }
+
+        if (IsRelevant != source.IsRelevant)
+        {
+            IsRelevant = source.IsRelevant;
+            changed = true;
+        }
+
+        if (FollowedByTeam != source.FollowedByTeam)
+        {
+            FollowedByTeam = source.FollowedByTeam;
+            changed = true;
+        }
+
+        if (FollowedByCompetition != source.FollowedByCompetition)
+        {
+            FollowedByCompetition = source.FollowedByCompetition;
+            changed = true;
+        }
+
+        if (SetProperty(ref _relevanceDisplay, source.RelevanceDisplay, nameof(RelevanceDisplay))) changed = true;
+
+        return changed;
+    }
+
     public static MatchItemViewModel FromDto(
         TrayMatchDto match,
         FixtureRelevanceResult relevance,
@@ -205,7 +356,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         // 1H (First Half), 2H (Second Half), HT (Halftime), ET (Extra Time), BT (Break Time),
         // P (Penalty in progress), SUSP (Suspended), INT (Interrupted)
         // Also support verbose variants LIVE, IN_PLAY, HALFTIME, EXTRA_TIME, PENALTIES
-        bool isExplicitLiveCode = upperState is "LIVE" or "1H" or "2H" or "HT" or "ET" or "BT" or "P" or "SUSP" or "INT"
+        bool isExplicitLiveCode = upperState is "LIVE" or "FIRST_HALF" or "SECOND_HALF" or "1H" or "2H" or "HT" or "ET" or "BT" or "P" or "SUSP" or "INT"
             or "IN_PLAY" or "HALFTIME" or "EXTRA_TIME" or "PENALTIES";
 
         bool isFinished = upperState is "FT" or "AET" or "PEN" or "FINISHED";
@@ -300,8 +451,12 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
             KickoffDisplay = kickoffDisplay,
             CompetitionId = match.Competition?.Id ?? string.Empty,
             CompetitionName = match.Competition?.Name ?? "Competition",
-            CompetitionCode = match.Competition?.Code ?? "COMP",
-            CompetitionCountry = match.Competition?.Country,
+            CompetitionCode = (!string.IsNullOrWhiteSpace(match.Competition?.Code) && !string.Equals(match.Competition.Code, "COMP", StringComparison.OrdinalIgnoreCase))
+                ? match.Competition.Code
+                : (!string.IsNullOrWhiteSpace(match.Competition?.Country) && !string.Equals(match.Competition.Country, "COMP", StringComparison.OrdinalIgnoreCase) ? match.Competition.Country : string.Empty),
+            CompetitionCountry = (!string.IsNullOrWhiteSpace(match.Competition?.Country) && !string.Equals(match.Competition.Country, "COMP", StringComparison.OrdinalIgnoreCase))
+                ? match.Competition.Country
+                : null,
             CompetitionLogoUrl = match.Competition?.LogoUrl,
             IsLive = isLive,
             IsFinished = isFinished,

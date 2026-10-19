@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FootballTray.Core.Dto;
@@ -19,11 +20,13 @@ public sealed class NotificationService
     private readonly INotificationRenderer _renderer;
     private readonly NotificationDeduplicationStore _store;
     private readonly IAudioPlaybackService? _audioService;
+    private readonly FootballApiClient? _apiClient;
 
     public NotificationEngine Engine => _engine;
     public NotificationDeduplicationStore Store => _store;
     public INotificationRenderer Renderer => _renderer;
     public IAudioPlaybackService? AudioService => _audioService;
+    public FootballApiClient? ApiClient => _apiClient;
 
     public event Action<NotificationPayload>? NotificationDispatched;
 
@@ -31,12 +34,14 @@ public sealed class NotificationService
         NotificationEngine? engine = null,
         INotificationRenderer? renderer = null,
         NotificationDeduplicationStore? store = null,
-        IAudioPlaybackService? audioService = null)
+        IAudioPlaybackService? audioService = null,
+        FootballApiClient? apiClient = null)
     {
         _store = store ?? engine?.DeduplicationStore ?? new NotificationDeduplicationStore();
         _engine = engine ?? new NotificationEngine(_store);
         _renderer = renderer ?? new WindowsAppNotificationRenderer();
         _audioService = audioService;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -48,24 +53,38 @@ public sealed class NotificationService
     }
 
     /// <summary>
-    /// Backward-compatible overload without preferences.
+    /// Backward-compatible overload without preferences or pinned match.
     /// </summary>
     public Task<List<NotificationPayload>> ProcessTrayUpdateAsync(
         TrayDataDto? previous,
         TrayDataDto? current,
         CancellationToken cancellationToken = default)
     {
-        return ProcessTrayUpdateAsync(previous, current, null, cancellationToken);
+        return ProcessTrayUpdateAsync(previous, current, null, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Backward-compatible overload with preferences but without pinned match.
+    /// </summary>
+    public Task<List<NotificationPayload>> ProcessTrayUpdateAsync(
+        TrayDataDto? previous,
+        TrayDataDto? current,
+        UserPreferences? preferences,
+        CancellationToken cancellationToken = default)
+    {
+        return ProcessTrayUpdateAsync(previous, current, preferences, null, cancellationToken);
     }
 
     /// <summary>
     /// Processes snapshot transitions, filters against user following preferences & category settings,
     /// emits alerts for eligible new events/transitions, and persists deduplication state.
+    /// Pinned matches are unconditionally eligible for notifications.
     /// </summary>
     public async Task<List<NotificationPayload>> ProcessTrayUpdateAsync(
         TrayDataDto? previous,
         TrayDataDto? current,
         UserPreferences? preferences,
+        string? pinnedMatchId,
         CancellationToken cancellationToken = default)
     {
         if (current?.Matches == null)
@@ -87,6 +106,14 @@ public sealed class NotificationService
             // so that if a category/following is re-enabled later, old events do NOT replay.
             _store.MarkNotified(candidate.DeduplicationKey);
 
+            bool isPinnedMatch = false;
+            if (!string.IsNullOrWhiteSpace(pinnedMatchId) && !string.IsNullOrWhiteSpace(candidate.FixtureId))
+            {
+                isPinnedMatch = string.Equals(candidate.FixtureId, pinnedMatchId, StringComparison.OrdinalIgnoreCase)
+                    || candidate.FixtureId.EndsWith($"_{pinnedMatchId}", StringComparison.OrdinalIgnoreCase)
+                    || pinnedMatchId.EndsWith($"_{candidate.FixtureId}", StringComparison.OrdinalIgnoreCase);
+            }
+
             // 1. Check Global Enablement
             if (preferences != null && !preferences.Notifications.GlobalEnabled)
             {
@@ -101,8 +128,8 @@ public sealed class NotificationService
                 continue;
             }
 
-            // 3. Check Following Relevance (team or competition)
-            if (preferences != null)
+            // 3. Check Following Relevance (unconditionally eligible if pinned match)
+            if (!isPinnedMatch && preferences != null)
             {
                 bool homeFollowed = followedTeamIds != null && (
                     (!string.IsNullOrWhiteSpace(candidate.HomeTeamId) && followedTeamIds.Contains(candidate.HomeTeamId)) ||
@@ -120,6 +147,43 @@ public sealed class NotificationService
                 {
                     AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Match entities not followed.");
                     continue; // Suppress notification for unfollowed match
+                }
+            }
+
+            // 4. On-demand goalscorer enrichment if goalscorer name is missing from candidate
+            if (candidate.Type == NotificationType.Goal &&
+                string.IsNullOrWhiteSpace(candidate.EventPlayerName) &&
+                _apiClient != null &&
+                !string.IsNullOrWhiteSpace(candidate.FixtureId))
+            {
+                try
+                {
+                    using var detailCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    detailCts.CancelAfter(TimeSpan.FromSeconds(3));
+
+                    var detailResp = await _apiClient.GetMatchDetailsAsync(candidate.FixtureId, detailCts.Token);
+                    var matchDetail = detailResp?.Envelope?.Data;
+                    if (matchDetail?.Events != null && matchDetail.Events.Count > 0)
+                    {
+                        var latestGoal = matchDetail.Events
+                            .Where(NotificationEngine.IsGoalEvent)
+                            .OrderByDescending(e => e.Minute + (e.ExtraMinute > 0 ? e.ExtraMinute : 0))
+                            .FirstOrDefault();
+
+                        if (latestGoal != null && !string.IsNullOrWhiteSpace(latestGoal.PlayerName))
+                        {
+                            candidate.EventPlayerName = latestGoal.PlayerName;
+                            if (latestGoal.Minute > 0)
+                            {
+                                candidate.ElapsedMinute = latestGoal.Minute;
+                                candidate.ExtraMinute = latestGoal.ExtraMinute;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Debug("Notifications", "ScorerEnrichmentFallback", $"On-demand scorer enrichment for {candidate.FixtureId} timed out or failed: {ex.Message}");
                 }
             }
 

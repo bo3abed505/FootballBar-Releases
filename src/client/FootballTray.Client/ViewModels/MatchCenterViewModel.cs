@@ -176,12 +176,55 @@ public class MatchTimelineItem : INotifyPropertyChanged
     }
 }
 
-public class LineupPlayerItemViewModel
+public class LineupPlayerItemViewModel : INotifyPropertyChanged
 {
-    public string Number { get; set; } = "-";
-    public string Name { get; set; } = string.Empty;
-    public string Position { get; set; } = string.Empty;
-    public string PositionBadge { get; set; } = string.Empty;
+    private string _number = "-";
+    private string _name = string.Empty;
+    private string _position = string.Empty;
+    private string _positionBadge = string.Empty;
+
+    public string Number
+    {
+        get => _number;
+        set => SetProperty(ref _number, value);
+    }
+
+    public string Name
+    {
+        get => _name;
+        set => SetProperty(ref _name, value);
+    }
+
+    public string Position
+    {
+        get => _position;
+        set => SetProperty(ref _position, value);
+    }
+
+    public string PositionBadge
+    {
+        get => _positionBadge;
+        set => SetProperty(ref _positionBadge, value);
+    }
+
+    public void UpdateFrom(LineupPlayerItemViewModel source)
+    {
+        if (source == null) return;
+        Number = source.Number;
+        Position = source.Position;
+        PositionBadge = source.PositionBadge;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(storage, value)) return false;
+        storage = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
 }
 
 public class LineupPresentationViewModel : INotifyPropertyChanged
@@ -394,13 +437,63 @@ public class PitchPlayerNodeViewModel : INotifyPropertyChanged
     }
 }
 
-public class StatComparisonViewModel
+public class StatComparisonViewModel : INotifyPropertyChanged
 {
-    public string Name { get; set; } = string.Empty;
-    public string HomeValue { get; set; } = "0";
-    public string AwayValue { get; set; } = "0";
-    public double HomeRatio { get; set; } = 50.0;
-    public double AwayRatio { get; set; } = 50.0;
+    private string _name = string.Empty;
+    private string _homeValue = "0";
+    private string _awayValue = "0";
+    private double _homeRatio = 50.0;
+    private double _awayRatio = 50.0;
+
+    public string Name
+    {
+        get => _name;
+        set => SetProperty(ref _name, value);
+    }
+
+    public string HomeValue
+    {
+        get => _homeValue;
+        set => SetProperty(ref _homeValue, value);
+    }
+
+    public string AwayValue
+    {
+        get => _awayValue;
+        set => SetProperty(ref _awayValue, value);
+    }
+
+    public double HomeRatio
+    {
+        get => _homeRatio;
+        set => SetProperty(ref _homeRatio, value);
+    }
+
+    public double AwayRatio
+    {
+        get => _awayRatio;
+        set => SetProperty(ref _awayRatio, value);
+    }
+
+    public void UpdateFrom(StatComparisonViewModel source)
+    {
+        if (source == null) return;
+        HomeValue = source.HomeValue;
+        AwayValue = source.AwayValue;
+        HomeRatio = source.HomeRatio;
+        AwayRatio = source.AwayRatio;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(storage, value)) return false;
+        storage = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
 }
 
 public class MatchCenterViewModel : INotifyPropertyChanged
@@ -921,6 +1014,168 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
     }
 
+    public static void SmartMergeStats(
+        ObservableCollection<StatComparisonViewModel> collection,
+        IReadOnlyList<StatComparisonViewModel> incoming)
+    {
+        if (collection == null || incoming == null) return;
+
+        for (int i = collection.Count - 1; i >= 0; i--)
+        {
+            var existing = collection[i];
+            if (!incoming.Any(inc => string.Equals(inc.Name, existing.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                collection.RemoveAt(i);
+            }
+        }
+
+        for (int targetIdx = 0; targetIdx < incoming.Count; targetIdx++)
+        {
+            var inc = incoming[targetIdx];
+            int foundIdx = -1;
+            for (int j = 0; j < collection.Count; j++)
+            {
+                if (string.Equals(collection[j].Name, inc.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundIdx = j;
+                    break;
+                }
+            }
+
+            if (foundIdx >= 0)
+            {
+                collection[foundIdx].UpdateFrom(inc);
+                if (foundIdx != targetIdx && targetIdx < collection.Count)
+                {
+                    collection.Move(foundIdx, targetIdx);
+                }
+            }
+            else
+            {
+                if (targetIdx >= collection.Count)
+                {
+                    collection.Add(inc);
+                }
+                else
+                {
+                    collection.Insert(targetIdx, inc);
+                }
+            }
+        }
+    }
+
+    public static void SmartMergeLineupPlayers(
+        ObservableCollection<LineupPlayerItemViewModel> collection,
+        IReadOnlyList<LineupPlayerItemViewModel> incoming)
+    {
+        if (collection == null || incoming == null) return;
+
+        for (int i = collection.Count - 1; i >= 0; i--)
+        {
+            var existing = collection[i];
+            if (!incoming.Any(inc => string.Equals(inc.Name, existing.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                collection.RemoveAt(i);
+            }
+        }
+
+        for (int targetIdx = 0; targetIdx < incoming.Count; targetIdx++)
+        {
+            var inc = incoming[targetIdx];
+            int foundIdx = -1;
+            for (int j = 0; j < collection.Count; j++)
+            {
+                if (string.Equals(collection[j].Name, inc.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundIdx = j;
+                    break;
+                }
+            }
+
+            if (foundIdx >= 0)
+            {
+                collection[foundIdx].UpdateFrom(inc);
+                if (foundIdx != targetIdx && targetIdx < collection.Count)
+                {
+                    collection.Move(foundIdx, targetIdx);
+                }
+            }
+            else
+            {
+                if (targetIdx >= collection.Count)
+                {
+                    collection.Add(inc);
+                }
+                else
+                {
+                    collection.Insert(targetIdx, inc);
+                }
+            }
+        }
+    }
+
+    public static void SmartMergePitchPlayers(
+        ObservableCollection<PitchPlayerNodeViewModel> collection,
+        IReadOnlyList<PitchPlayerNodeViewModel> incoming)
+    {
+        if (collection == null || incoming == null) return;
+
+        for (int i = collection.Count - 1; i >= 0; i--)
+        {
+            var existing = collection[i];
+            if (!incoming.Any(inc => string.Equals(inc.Name, existing.Name, StringComparison.OrdinalIgnoreCase) && inc.IsHomeTeam == existing.IsHomeTeam))
+            {
+                collection.RemoveAt(i);
+            }
+        }
+
+        for (int targetIdx = 0; targetIdx < incoming.Count; targetIdx++)
+        {
+            var inc = incoming[targetIdx];
+            int foundIdx = -1;
+            for (int j = 0; j < collection.Count; j++)
+            {
+                if (string.Equals(collection[j].Name, inc.Name, StringComparison.OrdinalIgnoreCase) && collection[j].IsHomeTeam == inc.IsHomeTeam)
+                {
+                    foundIdx = j;
+                    break;
+                }
+            }
+
+            if (foundIdx >= 0)
+            {
+                var existing = collection[foundIdx];
+                existing.ShortDisplayName = inc.ShortDisplayName;
+                existing.Number = inc.Number;
+                existing.Position = inc.Position;
+                existing.PositionBadge = inc.PositionBadge;
+                existing.IsGoalkeeper = inc.IsGoalkeeper;
+                existing.Row = inc.Row;
+                existing.Col = inc.Col;
+                existing.XPercent = inc.XPercent;
+                existing.YPercent = inc.YPercent;
+
+                if (foundIdx != targetIdx && targetIdx < collection.Count)
+                {
+                    collection.Move(foundIdx, targetIdx);
+                }
+            }
+            else
+            {
+                if (targetIdx >= collection.Count)
+                {
+                    collection.Add(inc);
+                }
+                else
+                {
+                    collection.Insert(targetIdx, inc);
+                }
+            }
+        }
+    }
+
+    public string? LastEtag { get; set; }
+
     public async Task<bool> RefreshAsync(FootballApiClient? client = null)
     {
         if (string.IsNullOrWhiteSpace(MatchId)) return false;
@@ -933,9 +1188,19 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         try
         {
-            var response = await client.GetMatchDetailsAsync(MatchId);
+            var response = await client.GetMatchDetailsAsync(MatchId, LastEtag);
+            if (response.IsNotModified)
+            {
+                if (!string.IsNullOrEmpty(response.ETag))
+                {
+                    LastEtag = response.ETag;
+                }
+                return true;
+            }
+
             if (response.IsSuccess && response.Envelope?.Data != null)
             {
+                LastEtag = response.ETag;
                 Load(response.Envelope.Data);
                 return true;
             }
@@ -991,6 +1256,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     {
         if (match == null) return;
 
+        if (!string.Equals(MatchId, match.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            LastEtag = null;
+        }
+
         MatchId = match.Id;
         HomeTeamName = !string.IsNullOrWhiteSpace(match.HomeTeam?.Name) ? match.HomeTeam.Name : "Home Team";
         AwayTeamName = !string.IsNullOrWhiteSpace(match.AwayTeam?.Name) ? match.AwayTeam.Name : "Away Team";
@@ -1009,20 +1279,13 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         RefreshFollowAndPinStates();
 
         // Status badge
-        string state = (match.State ?? "PREMATCH").ToUpperInvariant();
-        StatusText = state switch
-        {
-            "LIVE" or "IN_PLAY" or "1H" or "2H" => $"LIVE {match.ElapsedMinute}'",
-            "HALFTIME" or "HT" => "HALF TIME",
-            "FINISHED" or "FT" or "AET" or "PEN" => "FINAL",
-            _ => state
-        };
+        StatusText = FormatStatusText(match);
 
         ScoreText = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0}";
 
         // Compute match winner based on final score for finished matches (Accent Color Foreground ONLY for winning team)
         string stateNorm = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
-        bool isConcluded = stateNorm is "FINISHED" or "FT" or "AET" or "PEN" or "POSTMATCH" or "FINAL";
+        bool isConcluded = stateNorm is "FINISHED" or "FT" or "AET" or "PEN" or "POSTMATCH" or "FINAL" or "FINISHED_AET" or "FINISHED_PEN";
 
         if (isConcluded)
         {
@@ -1486,7 +1749,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 if (isSub)
                 {
                     string outPlayer = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
-                    string inPlayer = FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups);
+                    string inPlayer = FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups, ev.AssistPlayerId);
 
                     eventTitle = !string.IsNullOrWhiteSpace(outPlayer)
                         ? $"Out: {outPlayer}"
@@ -1566,14 +1829,14 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         // Synthesize unified match-state transition whistle markers:
         // 0' Kickoff, HT, 45' Start 2nd Half, ET breaks, PEN, FT / AET / PEN
-        bool wentToExtraTime = stateNorm is "ET" or "BT" or "P" or "AET" or "PEN"
+        bool wentToExtraTime = stateNorm is "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "P" or "AET" or "PEN" or "FINISHED_AET" or "FINISHED_PEN"
             || (match.Score?.ExtraTime != null && (match.Score.ExtraTime.Home != null || match.Score.ExtraTime.Away != null))
             || match.ElapsedMinute > 90;
 
-        bool wentToPenalties = stateNorm is "P" or "PEN"
+        bool wentToPenalties = stateNorm is "PENALTIES" or "P" or "PEN" or "FINISHED_PEN"
             || (match.Score?.Penalty != null && (match.Score.Penalty.Home != null || match.Score.Penalty.Away != null));
 
-        bool hasStarted = (stateNorm is "LIVE" or "IN_PLAY" or "1H" or "HALFTIME" or "HT" or "2H" or "ET" or "BT" or "P" || isConcluded)
+        bool hasStarted = (stateNorm is "LIVE" or "IN_PLAY" or "FIRST_HALF" or "1H" or "HALFTIME" or "HT" or "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded)
             || match.ElapsedMinute > 0;
 
         void AddTimelineMarker(MatchTimelineItem marker)
@@ -1602,9 +1865,9 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
 
         // 2. Half-Time Marker (HT)
-        bool reachedHalfTime = stateNorm is "HALFTIME" or "HT" or "2H" or "ET" or "BT" or "P" || isConcluded
+        bool reachedHalfTime = stateNorm is "HALFTIME" or "HT" or "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded
             || (match.Score?.HalfTime?.Home != null && match.Score?.HalfTime?.Away != null && hasStarted)
-            || (match.ElapsedMinute >= 45 && stateNorm != "1H" && stateNorm != "PREMATCH");
+            || (match.ElapsedMinute >= 45 && stateNorm != "FIRST_HALF" && stateNorm != "1H" && stateNorm != "PREMATCH");
 
         if (reachedHalfTime && !allTimelineList.Any(i => i.IsNeutral && (i.MinuteDisplay == "HT" || i.EventTitle.Contains("Half-Time", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Half Time", StringComparison.OrdinalIgnoreCase))))
         {
@@ -1629,8 +1892,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
 
         // 3. Start 2nd Half Marker (45')
-        bool startedSecondHalf = stateNorm is "2H" or "ET" or "BT" or "P" || isConcluded
-            || (match.ElapsedMinute > 45 && stateNorm != "HALFTIME" && stateNorm != "HT" && stateNorm != "1H" && stateNorm != "PREMATCH");
+        bool startedSecondHalf = stateNorm is "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded
+            || (match.ElapsedMinute > 45 && stateNorm != "HALFTIME" && stateNorm != "HT" && stateNorm != "EXTRA_TIME_HALFTIME" && stateNorm != "BT" && stateNorm != "FIRST_HALF" && stateNorm != "1H" && stateNorm != "PREMATCH");
 
         if (startedSecondHalf && !allTimelineList.Any(i => i.EventTitle.Contains("Start 2nd Half", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Second Half", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1842,17 +2105,17 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
     private void PopulateLineups(MatchDetailDto match)
     {
-        HomeLineup.StartingXI.Clear();
-        HomeLineup.Substitutes.Clear();
-        AwayLineup.StartingXI.Clear();
-        AwayLineup.Substitutes.Clear();
-        PitchPlayers.Clear();
-
         HomeLineup.TeamName = HomeTeamName;
         AwayLineup.TeamName = AwayTeamName;
 
         if (match.Lineups == null || match.Lineups.Count == 0)
         {
+            SmartMergeLineupPlayers(HomeLineup.StartingXI, Array.Empty<LineupPlayerItemViewModel>());
+            SmartMergeLineupPlayers(HomeLineup.Substitutes, Array.Empty<LineupPlayerItemViewModel>());
+            SmartMergeLineupPlayers(AwayLineup.StartingXI, Array.Empty<LineupPlayerItemViewModel>());
+            SmartMergeLineupPlayers(AwayLineup.Substitutes, Array.Empty<LineupPlayerItemViewModel>());
+            SmartMergePitchPlayers(PitchPlayers, Array.Empty<PitchPlayerNodeViewModel>());
+
             HomeLineup.HasLineup = false;
             AwayLineup.HasLineup = false;
             HasLineups = false;
@@ -1882,6 +2145,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             awayDto = match.Lineups[1];
         }
 
+        var newHomeStarters = new List<LineupPlayerItemViewModel>();
+        var newHomeSubs = new List<LineupPlayerItemViewModel>();
         if (homeDto != null)
         {
             HomeLineup.Formation = homeDto.Formation ?? string.Empty;
@@ -1891,11 +2156,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
             foreach (var p in starters)
             {
-                HomeLineup.StartingXI.Add(CreatePlayerItem(p));
+                newHomeStarters.Add(CreatePlayerItem(p));
             }
             foreach (var p in subs)
             {
-                HomeLineup.Substitutes.Add(CreatePlayerItem(p));
+                newHomeSubs.Add(CreatePlayerItem(p));
             }
             HomeLineup.HasLineup = starters.Count > 0 || subs.Count > 0;
         }
@@ -1904,6 +2169,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             HomeLineup.HasLineup = false;
         }
 
+        var newAwayStarters = new List<LineupPlayerItemViewModel>();
+        var newAwaySubs = new List<LineupPlayerItemViewModel>();
         if (awayDto != null)
         {
             AwayLineup.Formation = awayDto.Formation ?? string.Empty;
@@ -1913,11 +2180,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
             foreach (var p in starters)
             {
-                AwayLineup.StartingXI.Add(CreatePlayerItem(p));
+                newAwayStarters.Add(CreatePlayerItem(p));
             }
             foreach (var p in subs)
             {
-                AwayLineup.Substitutes.Add(CreatePlayerItem(p));
+                newAwaySubs.Add(CreatePlayerItem(p));
             }
             AwayLineup.HasLineup = starters.Count > 0 || subs.Count > 0;
         }
@@ -1925,6 +2192,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         {
             AwayLineup.HasLineup = false;
         }
+
+        SmartMergeLineupPlayers(HomeLineup.StartingXI, newHomeStarters);
+        SmartMergeLineupPlayers(HomeLineup.Substitutes, newHomeSubs);
+        SmartMergeLineupPlayers(AwayLineup.StartingXI, newAwayStarters);
+        SmartMergeLineupPlayers(AwayLineup.Substitutes, newAwaySubs);
 
         BuildPitchPlayers(homeDto, awayDto);
 
@@ -1934,35 +2206,32 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
     private void BuildPitchPlayers(LineupDto? homeDto, LineupDto? awayDto)
     {
-        PitchPlayers.Clear();
-
         var awayStarters = awayDto?.GetStartingXI() ?? (IReadOnlyList<LineupPlayerDto>)Array.Empty<LineupPlayerDto>();
         var homeStarters = homeDto?.GetStartingXI() ?? (IReadOnlyList<LineupPlayerDto>)Array.Empty<LineupPlayerDto>();
 
         if (awayStarters.Count == 0 && homeStarters.Count == 0)
         {
+            SmartMergePitchPlayers(PitchPlayers, Array.Empty<PitchPlayerNodeViewModel>());
             return;
         }
+
+        var incomingPitch = new List<PitchPlayerNodeViewModel>();
 
         // Build Away Players (Top Half, Y ranges 0.06 -> 0.44)
         if (awayStarters.Count > 0)
         {
             var awayNodes = CreateTeamPitchNodes(awayStarters, isHomeTeam: false);
-            foreach (var node in awayNodes)
-            {
-                PitchPlayers.Add(node);
-            }
+            incomingPitch.AddRange(awayNodes);
         }
 
         // Build Home Players (Bottom Half, Y ranges 0.94 -> 0.56)
         if (homeStarters.Count > 0)
         {
             var homeNodes = CreateTeamPitchNodes(homeStarters, isHomeTeam: true);
-            foreach (var node in homeNodes)
-            {
-                PitchPlayers.Add(node);
-            }
+            incomingPitch.AddRange(homeNodes);
         }
+
+        SmartMergePitchPlayers(PitchPlayers, incomingPitch);
     }
 
     public static (int row, int col) ParseGridCoordinates(string? grid, string? position, int defaultCol)
@@ -2082,10 +2351,9 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
     private void PopulateStatistics(MatchDetailDto match)
     {
-        MatchStats.Clear();
-
         if (match.Statistics == null || match.Statistics.Count == 0)
         {
+            SmartMergeStats(MatchStats, Array.Empty<StatComparisonViewModel>());
             HasStatistics = false;
             return;
         }
@@ -2115,8 +2383,55 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         if (homeStats == null && awayStats == null)
         {
+            SmartMergeStats(MatchStats, Array.Empty<StatComparisonViewModel>());
             HasStatistics = false;
             return;
+        }
+
+        var incomingStats = new List<StatComparisonViewModel>();
+
+        void AddStat(string name, string homeDisplay, string awayDisplay, double homeRatio, double awayRatio)
+        {
+            incomingStats.Add(new StatComparisonViewModel
+            {
+                Name = name,
+                HomeValue = homeDisplay,
+                AwayValue = awayDisplay,
+                HomeRatio = Math.Clamp(homeRatio, 0.0, 100.0),
+                AwayRatio = Math.Clamp(awayRatio, 0.0, 100.0)
+            });
+        }
+
+        void AddNumericStat(string name, int? home, int? away)
+        {
+            if (!home.HasValue && !away.HasValue) return;
+
+            int hVal = home ?? 0;
+            int aVal = away ?? 0;
+            double hRatio = 50.0;
+            double aRatio = 50.0;
+
+            int total = hVal + aVal;
+            if (total > 0)
+            {
+                hRatio = Math.Round(((double)hVal / total) * 100.0, 1);
+                aRatio = 100.0 - hRatio;
+            }
+
+            AddStat(name, hVal.ToString(), aVal.ToString(), hRatio, aRatio);
+        }
+
+        // Expected Goals (xG)
+        double? homeXg = homeStats?.ExpectedGoals ?? homeStats?.Xg;
+        double? awayXg = awayStats?.ExpectedGoals ?? awayStats?.Xg;
+        if (homeXg.HasValue || awayXg.HasValue)
+        {
+            double h = homeXg ?? 0.0;
+            double a = awayXg ?? 0.0;
+            double total = h + a;
+            double hRatio = total > 0 ? Math.Round((h / total) * 100.0, 1) : 50.0;
+            double aRatio = 100.0 - hRatio;
+            AddStat("Expected Goals (xG)", h.ToString("0.00"), a.ToString("0.00"), hRatio, aRatio);
         }
 
         // Possession
@@ -2126,76 +2441,83 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         {
             int hp = homePoss ?? (awayPoss.HasValue ? 100 - awayPoss.Value : 50);
             int ap = awayPoss ?? (100 - hp);
-            AddStatItem("Ball Possession", $"{hp}%", $"{ap}%", hp, ap);
+            AddStat("Ball Possession", $"{hp}%", $"{ap}%", hp, ap);
         }
 
         // Total Shots
-        AddNumericStatItem("Total Shots", homeStats?.TotalShots, awayStats?.TotalShots);
+        AddNumericStat("Total Shots", homeStats?.TotalShots, awayStats?.TotalShots);
 
         // Shots on Goal
-        AddNumericStatItem("Shots on Target", homeStats?.ShotsOnGoal, awayStats?.ShotsOnGoal);
+        AddNumericStat("Shots on Target", homeStats?.ShotsOnGoal, awayStats?.ShotsOnGoal);
 
         // Shots off Goal
-        AddNumericStatItem("Shots off Target", homeStats?.ShotsOffGoal, awayStats?.ShotsOffGoal);
+        AddNumericStat("Shots off Target", homeStats?.ShotsOffGoal, awayStats?.ShotsOffGoal);
 
         // Total Passes
-        AddNumericStatItem("Total Passes", homeStats?.TotalPasses, awayStats?.TotalPasses);
+        AddNumericStat("Total Passes", homeStats?.TotalPasses, awayStats?.TotalPasses);
 
         // Passes Accurate
-        AddNumericStatItem("Accurate Passes", homeStats?.PassesAccurate, awayStats?.PassesAccurate);
+        AddNumericStat("Accurate Passes", homeStats?.PassesAccurate, awayStats?.PassesAccurate);
 
         // Corner Kicks
         int? homeCorners = homeStats?.CornerKicks ?? homeStats?.Corners;
         int? awayCorners = awayStats?.CornerKicks ?? awayStats?.Corners;
-        AddNumericStatItem("Corner Kicks", homeCorners, awayCorners);
+        AddNumericStat("Corner Kicks", homeCorners, awayCorners);
 
         // Fouls
-        AddNumericStatItem("Fouls", homeStats?.Fouls, awayStats?.Fouls);
+        AddNumericStat("Fouls", homeStats?.Fouls, awayStats?.Fouls);
 
         // Yellow Cards
-        AddNumericStatItem("Yellow Cards", homeStats?.YellowCards, awayStats?.YellowCards);
+        AddNumericStat("Yellow Cards", homeStats?.YellowCards, awayStats?.YellowCards);
 
         // Red Cards
-        AddNumericStatItem("Red Cards", homeStats?.RedCards, awayStats?.RedCards);
+        AddNumericStat("Red Cards", homeStats?.RedCards, awayStats?.RedCards);
 
         // Goalkeeper Saves
-        AddNumericStatItem("Goalkeeper Saves", homeStats?.GoalkeeperSaves, awayStats?.GoalkeeperSaves);
+        AddNumericStat("Goalkeeper Saves", homeStats?.GoalkeeperSaves, awayStats?.GoalkeeperSaves);
 
         // Offsides
-        AddNumericStatItem("Offsides", homeStats?.Offsides, awayStats?.Offsides);
+        AddNumericStat("Offsides", homeStats?.Offsides, awayStats?.Offsides);
 
+        SmartMergeStats(MatchStats, incomingStats);
         HasStatistics = MatchStats.Count > 0;
     }
 
-    private void AddNumericStatItem(string name, int? home, int? away)
+    private static string FormatStatusText(MatchDetailDto match)
     {
-        if (!home.HasValue && !away.HasValue) return;
+        string state = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
 
-        int hVal = home ?? 0;
-        int aVal = away ?? 0;
-        double hRatio = 50.0;
-        double aRatio = 50.0;
-
-        int total = hVal + aVal;
-        if (total > 0)
+        return state switch
         {
-            hRatio = Math.Round(((double)hVal / total) * 100.0, 1);
-            aRatio = 100.0 - hRatio;
-        }
+            // Active Play (FIRST_HALF, SECOND_HALF, EXTRA_TIME, LIVE, 1H, 2H, ET, IN_PLAY)
+            "FIRST_HALF" or "SECOND_HALF" or "EXTRA_TIME" or "LIVE" or "1H" or "2H" or "ET" or "IN_PLAY" =>
+                match.ElapsedMinute > 0
+                    ? (match.ExtraMinute > 0
+                        ? $"LIVE {match.ElapsedMinute}+{match.ExtraMinute}'"
+                        : $"LIVE {match.ElapsedMinute}'")
+                    : (state is "FIRST_HALF" or "1H"
+                        ? "LIVE 1H"
+                        : state is "SECOND_HALF" or "2H"
+                            ? "LIVE 2H"
+                            : state is "EXTRA_TIME" or "ET"
+                                ? "LIVE ET"
+                                : "LIVE"),
 
-        AddStatItem(name, hVal.ToString(), aVal.ToString(), hRatio, aRatio);
-    }
+            // Penalties (PENALTIES, P)
+            "PENALTIES" or "P" => "LIVE PEN",
 
-    private void AddStatItem(string name, string homeDisplay, string awayDisplay, double homeRatio, double awayRatio)
-    {
-        MatchStats.Add(new StatComparisonViewModel
-        {
-            Name = name,
-            HomeValue = homeDisplay,
-            AwayValue = awayDisplay,
-            HomeRatio = Math.Clamp(homeRatio, 0.0, 100.0),
-            AwayRatio = Math.Clamp(awayRatio, 0.0, 100.0)
-        });
+            // Halftime (HALFTIME, HT, EXTRA_TIME_HALFTIME, BT)
+            "HALFTIME" or "HT" or "EXTRA_TIME_HALFTIME" or "BT" => "Half Time (HT)",
+
+            // Finished (FINISHED, FT, FINISHED_AET, AET, FINISHED_PEN, PEN)
+            "FINISHED_AET" or "AET" => "Full Time (AET)",
+            "FINISHED_PEN" => "Full Time (PEN)",
+            "FINISHED" or "FT" or "POSTMATCH" or "FINAL" => "Full Time (FT)",
+            "PEN" => "Full Time (PEN)",
+
+            // Fallback
+            _ => state
+        };
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
