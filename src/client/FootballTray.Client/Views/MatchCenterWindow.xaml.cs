@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using FootballTray.Client.Services;
 using FootballTray.Client.ViewModels;
 using FootballTray.Core.Dto;
@@ -27,7 +28,8 @@ public sealed partial class MatchCenterWindow : Window
     {
         InitializeComponent();
         RootGrid.DataContext = ViewModel;
-        EventsList.ItemsSource = ViewModel.TimelineItems;
+        KeyEventsList.ItemsSource = ViewModel.KeyEvents;
+        CommentaryList.ItemsSource = ViewModel.CommentaryItems;
 
         try
         {
@@ -40,7 +42,9 @@ public sealed partial class MatchCenterWindow : Window
 
         Closed += OnWindowClosed;
         SetupSplitterCursor();
+        UpdateTabStyles();
     }
+
 
     public void Populate(MatchDetailDto match)
     {
@@ -60,7 +64,7 @@ public sealed partial class MatchCenterWindow : Window
         AwayTeamName.Text = ViewModel.AwayTeamName;
         ScoreText.Text = ViewModel.ScoreText;
 
-        // Explicitly refresh incident and timeline collections on UI if not already bound
+        // Explicitly refresh incident, key events, and commentary collections on UI if not already bound
         if (HomeIncidentsList.ItemsSource != ViewModel.HomeIncidents)
         {
             HomeIncidentsList.ItemsSource = ViewModel.HomeIncidents;
@@ -69,9 +73,13 @@ public sealed partial class MatchCenterWindow : Window
         {
             AwayIncidentsList.ItemsSource = ViewModel.AwayIncidents;
         }
-        if (EventsList.ItemsSource != ViewModel.TimelineItems)
+        if (KeyEventsList.ItemsSource != ViewModel.KeyEvents)
         {
-            EventsList.ItemsSource = ViewModel.TimelineItems;
+            KeyEventsList.ItemsSource = ViewModel.KeyEvents;
+        }
+        if (CommentaryList.ItemsSource != ViewModel.CommentaryItems)
+        {
+            CommentaryList.ItemsSource = ViewModel.CommentaryItems;
         }
 
         if (ViewModel.HasHalfTime)
@@ -96,12 +104,17 @@ public sealed partial class MatchCenterWindow : Window
         }
 
         // Empty states toggles
-        NoEventsText.Visibility = ViewModel.TimelineItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NoKeyEventsText.Visibility = ViewModel.KeyEvents.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NoCommentaryText.Visibility = ViewModel.CommentaryItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         // Delegate panel state and empty states to extracted UserControls
         StatisticsControl?.Update(ViewModel);
         LineupControl?.Update(ViewModel);
 
         UpdateStarAndPinVisuals();
+        UpdateTabStyles();
+
+        // Immediate clock and score sync to taskbar ticker
+        App.CurrentTickerCoordinator?.UpdateMatchFromDetails(match);
 
         // Check terminal state upon load and after every refresh to prevent quota drain
         string stateUpper = (match.State ?? string.Empty).Trim().ToUpperInvariant();
@@ -312,6 +325,89 @@ public sealed partial class MatchCenterWindow : Window
         }
     }
 
+    private void OnKeyEventsTabClicked(object sender, RoutedEventArgs e)
+    {
+        ViewModel.IsKeyEventsTabSelected = true;
+        UpdateTabStyles();
+    }
+
+    private void OnCommentaryTabClicked(object sender, RoutedEventArgs e)
+    {
+        ViewModel.IsKeyEventsTabSelected = false;
+        UpdateTabStyles();
+    }
+
+    private static readonly SolidColorBrush ActiveTabBg = new(Windows.UI.Color.FromArgb(255, 30, 41, 59));       // #1E293B
+    private static readonly SolidColorBrush ActiveTabBorder = new(Windows.UI.Color.FromArgb(255, 51, 65, 85));    // #334155
+    private static readonly SolidColorBrush ActiveTabFg = new(Windows.UI.Color.FromArgb(255, 248, 250, 252));    // #F8FAFC
+    private static readonly SolidColorBrush InactiveTabBg = new(Windows.UI.Color.FromArgb(0, 0, 0, 0));           // Transparent
+    private static readonly SolidColorBrush InactiveTabBorder = new(Windows.UI.Color.FromArgb(0, 0, 0, 0));       // Transparent
+    private static readonly SolidColorBrush InactiveTabFg = new(Windows.UI.Color.FromArgb(255, 148, 163, 184));  // #94A3B8
+
+    private static readonly SolidColorBrush SplitterAccent = new(Windows.UI.Color.FromArgb(255, 56, 189, 248));   // #38BDF8
+    private static readonly SolidColorBrush SplitterGripNormal = new(Windows.UI.Color.FromArgb(255, 148, 163, 184)); // #94A3B8
+    private static readonly SolidColorBrush SplitterLineNormal = new(Windows.UI.Color.FromArgb(255, 51, 65, 85));    // #334155
+
+    private void UpdateTabStyles()
+    {
+        try
+        {
+            if (KeyEventsTabButton == null || CommentaryTabButton == null) return;
+
+            bool isKeyEvents = ViewModel.IsKeyEventsTabSelected;
+
+            if (isKeyEvents)
+            {
+                KeyEventsTabButton.Background = ActiveTabBg;
+                KeyEventsTabButton.BorderBrush = ActiveTabBorder;
+                KeyEventsTabButton.BorderThickness = new Thickness(1);
+                if (KeyEventsTabText != null) KeyEventsTabText.Foreground = ActiveTabFg;
+
+                CommentaryTabButton.Background = InactiveTabBg;
+                CommentaryTabButton.BorderBrush = InactiveTabBorder;
+                CommentaryTabButton.BorderThickness = new Thickness(0);
+                if (CommentaryTabText != null) CommentaryTabText.Foreground = InactiveTabFg;
+
+                if (KeyEventsPanel != null) KeyEventsPanel.Visibility = Visibility.Visible;
+                if (CommentaryPanel != null) CommentaryPanel.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                CommentaryTabButton.Background = ActiveTabBg;
+                CommentaryTabButton.BorderBrush = ActiveTabBorder;
+                CommentaryTabButton.BorderThickness = new Thickness(1);
+                if (CommentaryTabText != null) CommentaryTabText.Foreground = ActiveTabFg;
+
+                KeyEventsTabButton.Background = InactiveTabBg;
+                KeyEventsTabButton.BorderBrush = InactiveTabBorder;
+                KeyEventsTabButton.BorderThickness = new Thickness(0);
+                if (KeyEventsTabText != null) KeyEventsTabText.Foreground = InactiveTabFg;
+
+                if (KeyEventsPanel != null) KeyEventsPanel.Visibility = Visibility.Collapsed;
+                if (CommentaryPanel != null) CommentaryPanel.Visibility = Visibility.Visible;
+            }
+
+            // Sync empty states
+            if (NoKeyEventsText != null)
+            {
+                NoKeyEventsText.Visibility = isKeyEvents && ViewModel.KeyEvents.Count == 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+            if (NoCommentaryText != null)
+            {
+                NoCommentaryText.Visibility = !isKeyEvents && ViewModel.CommentaryItems.Count == 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLogger.Error("MatchCenter", "UpdateTabStylesError", $"Error updating tab styles: {ex.Message}", ex: ex);
+        }
+    }
+
+
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         Closed -= OnWindowClosed;
@@ -327,9 +423,13 @@ public sealed partial class MatchCenterWindow : Window
             AwayTeamLogo.Source = null;
         }
 
-        if (EventsList != null)
+        if (KeyEventsList != null)
         {
-            EventsList.ItemsSource = null;
+            KeyEventsList.ItemsSource = null;
+        }
+        if (CommentaryList != null)
+        {
+            CommentaryList.ItemsSource = null;
         }
         if (RootGrid != null)
         {
@@ -367,23 +467,19 @@ public sealed partial class MatchCenterWindow : Window
 
     private void OnSplitterPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        if (!_isDraggingSplitter)
+        if (!_isDraggingSplitter && SplitterGrip != null && SplitterLine != null)
         {
-            SplitterGrip.Background = Application.Current.Resources["AccentTextFillColorPrimaryBrush"] as Microsoft.UI.Xaml.Media.Brush
-                ?? SplitterGrip.Background;
-            SplitterLine.Background = Application.Current.Resources["AccentTextFillColorPrimaryBrush"] as Microsoft.UI.Xaml.Media.Brush
-                ?? SplitterLine.Background;
+            SplitterGrip.Background = SplitterAccent;
+            SplitterLine.Background = SplitterAccent;
         }
     }
 
     private void OnSplitterPointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        if (!_isDraggingSplitter)
+        if (!_isDraggingSplitter && SplitterGrip != null && SplitterLine != null)
         {
-            SplitterGrip.Background = Application.Current.Resources["TextFillColorTertiaryBrush"] as Microsoft.UI.Xaml.Media.Brush
-                ?? SplitterGrip.Background;
-            SplitterLine.Background = Application.Current.Resources["DividerStrokeColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
-                ?? SplitterLine.Background;
+            SplitterGrip.Background = SplitterGripNormal;
+            SplitterLine.Background = SplitterLineNormal;
         }
     }
 
@@ -396,10 +492,11 @@ public sealed partial class MatchCenterWindow : Window
         _dragStartPointerX = pt.Position.X;
         _dragStartLeftColumnWidth = LeftColumnDefinition.ActualWidth;
 
-        SplitterGrip.Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
-            ?? SplitterGrip.Background;
-        SplitterLine.Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
-            ?? SplitterLine.Background;
+        if (SplitterGrip != null && SplitterLine != null)
+        {
+            SplitterGrip.Background = SplitterAccent;
+            SplitterLine.Background = SplitterAccent;
+        }
 
         e.Handled = true;
     }
@@ -437,10 +534,11 @@ public sealed partial class MatchCenterWindow : Window
             _isDraggingSplitter = false;
             TimelineSplitter.ReleasePointerCapture(e.Pointer);
 
-            SplitterGrip.Background = Application.Current.Resources["TextFillColorTertiaryBrush"] as Microsoft.UI.Xaml.Media.Brush
-                ?? SplitterGrip.Background;
-            SplitterLine.Background = Application.Current.Resources["DividerStrokeColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush
-                ?? SplitterLine.Background;
+            if (SplitterGrip != null && SplitterLine != null)
+            {
+                SplitterGrip.Background = SplitterGripNormal;
+                SplitterLine.Background = SplitterLineNormal;
+            }
 
             e.Handled = true;
         }

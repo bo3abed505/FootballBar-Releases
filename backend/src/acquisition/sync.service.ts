@@ -33,11 +33,16 @@ export class SyncService {
   public readonly acquisitionService: AcquisitionService;
   public readonly matchRepository: MatchRepository;
   public lastSyncSummary: SyncSummary | null = null;
+  private readonly matchDetailsCache = new Map<string, NormalizedMatchDetails>();
 
   constructor(provider: IDataProvider, matchRepository?: MatchRepository) {
     this.provider = provider;
     this.acquisitionService = new AcquisitionService(provider);
     this.matchRepository = matchRepository ?? new MatchRepository();
+  }
+
+  public getCachedMatchDetails(id: string): NormalizedMatchDetails | null {
+    return this.matchDetailsCache.get(id) ?? null;
   }
 
   private getProviderName(): string {
@@ -600,8 +605,11 @@ export class SyncService {
             await db
               .update(schema.fixtures)
               .set({
-                homeScore: (details?.homeTeam?.score || 0) || 0,
-                awayScore: (details?.awayTeam?.score || 0) || 0,
+                state: (details?.time?.status || details?.state || fix.state || "UNKNOWN"),
+                elapsedMinute: (details?.time?.minute ?? details?.elapsedMinute ?? fix.elapsedMinute ?? 0),
+                extraMinute: (details?.time?.addedTime ?? details?.extraMinute ?? fix.extraMinute ?? 0),
+                homeScore: (details?.homeTeam?.score ?? details?.homeScore ?? fix.homeScore ?? 0),
+                awayScore: (details?.awayTeam?.score ?? details?.awayScore ?? fix.awayScore ?? 0),
                 homeScoreHt: fix.homeScoreHt,
                 awayScoreHt: fix.awayScoreHt,
                 liveSourceProvider: this.provider.name,
@@ -908,6 +916,12 @@ export class SyncService {
       return null;
     });
     if (!details) return false;
+
+    this.matchDetailsCache.set(providerMatchId, details);
+    this.matchDetailsCache.set(dbFixture.id, details);
+    if (dbFixture.canonicalId) {
+      this.matchDetailsCache.set(dbFixture.canonicalId, details);
+    }
 
     const now = new Date();
     await db.transaction(async (tx) => {

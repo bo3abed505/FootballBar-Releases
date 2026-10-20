@@ -311,6 +311,43 @@ public class TrayEventDto
 
     [JsonPropertyName("detail")]
     public string? Detail { get; set; }
+
+    [JsonPropertyName("teamName")]
+    public string? TeamName { get; set; }
+
+    [JsonPropertyName("teamLogoUrl")]
+    public string? TeamLogoUrl { get; set; }
+}
+
+public class MatchEventDto : TrayEventDto
+{
+}
+
+public class MatchCommentaryItemDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("minute")]
+    public int Minute { get; set; }
+
+    [JsonPropertyName("extraMinute")]
+    public int ExtraMinute { get; set; }
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("text")]
+    public string Text { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamId")]
+    public string? TeamId { get; set; }
+
+    [JsonPropertyName("teamName")]
+    public string? TeamName { get; set; }
+
+    [JsonPropertyName("teamLogoUrl")]
+    public string? TeamLogoUrl { get; set; }
 }
 
 public class MatchDetailDto
@@ -359,6 +396,9 @@ public class MatchDetailDto
 
     [JsonPropertyName("events")]
     public List<TrayEventDto> Events { get; set; } = new();
+
+    [JsonPropertyName("commentary")]
+    public List<MatchCommentaryItemDto>? Commentary { get; set; }
 
     [JsonPropertyName("lineups")]
     public List<LineupDto> Lineups { get; set; } = new();

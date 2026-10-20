@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Views;
@@ -266,9 +267,14 @@ public sealed class TaskbarTickerCoordinator : IDisposable
                 _matchCenterWindow.Populate(detail);
                 _matchCenterWindow.Activate();
             }
+            else
+            {
+                AppDiagnosticsLogger.Log($"[ERROR][MatchCenter][OpenFailed] Failed to open MatchCenterWindow from ticker: API returned unsuccessful response for match {matchId} (Error: {response.ErrorMessage ?? "null payload"})");
+            }
         }
         catch (Exception ex)
         {
+            AppDiagnosticsLogger.Log($"[ERROR][MatchCenter][OpenFailed] Failed to open MatchCenterWindow from ticker: {ex.Message}\n{ex.StackTrace}");
             System.Diagnostics.Debug.WriteLine($"[TICKER] Failed to open MatchCenterWindow: {ex.Message}");
         }
     }
@@ -361,6 +367,82 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         }
 
         return PinMatch(targetId);
+    }
+
+    /// <summary>
+    /// Immediately updates clock (elapsed minute, extra minute, state) and score from a detailed match payload
+    /// into the ticker candidate and pinned match models, and re-renders the taskbar HWND.
+    /// </summary>
+    public void UpdateMatchFromDetails(MatchDetailDto? detail)
+    {
+        if (detail == null || string.IsNullOrWhiteSpace(detail.Id) || _isDisposed) return;
+
+        bool isPinnedMatch = !string.IsNullOrEmpty(_pinnedMatchId) &&
+            (string.Equals(_pinnedMatchId, detail.Id, StringComparison.OrdinalIgnoreCase) ||
+             _pinnedMatchId.EndsWith($"_{detail.Id}", StringComparison.OrdinalIgnoreCase) ||
+             detail.Id.EndsWith($"_{_pinnedMatchId}", StringComparison.OrdinalIgnoreCase));
+
+        if (isPinnedMatch && _pinnedMatch != null)
+        {
+            _pinnedMatch.ElapsedMinute = detail.ElapsedMinute;
+            _pinnedMatch.ExtraMinute = detail.ExtraMinute;
+            _pinnedMatch.State = detail.State;
+            if (detail.Score != null)
+            {
+                _pinnedMatch.Score ??= new ScoreDto();
+                _pinnedMatch.Score.Home = detail.Score.Home;
+                _pinnedMatch.Score.Away = detail.Score.Away;
+                if (detail.Score.HalfTime != null)
+                {
+                    _pinnedMatch.Score.HalfTime ??= new ScorePeriodDto();
+                    _pinnedMatch.Score.HalfTime.Home = detail.Score.HalfTime.Home;
+                    _pinnedMatch.Score.HalfTime.Away = detail.Score.HalfTime.Away;
+                }
+            }
+        }
+
+        bool updatedInCandidates = false;
+        foreach (var candidate in _state.Candidates)
+        {
+            if (string.Equals(candidate.Id, detail.Id, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Id.EndsWith($"_{detail.Id}", StringComparison.OrdinalIgnoreCase) ||
+                detail.Id.EndsWith($"_{candidate.Id}", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate.ElapsedMinute = detail.ElapsedMinute;
+                candidate.ExtraMinute = detail.ExtraMinute;
+                candidate.State = detail.State;
+                if (detail.Score != null)
+                {
+                    candidate.Score ??= new ScoreDto();
+                    candidate.Score.Home = detail.Score.Home;
+                    candidate.Score.Away = detail.Score.Away;
+                }
+                updatedInCandidates = true;
+            }
+        }
+
+        foreach (var match in TickerMatches)
+        {
+            if (string.Equals(match.Id, detail.Id, StringComparison.OrdinalIgnoreCase) ||
+                match.Id.EndsWith($"_{detail.Id}", StringComparison.OrdinalIgnoreCase) ||
+                detail.Id.EndsWith($"_{match.Id}", StringComparison.OrdinalIgnoreCase))
+            {
+                match.ElapsedMinute = detail.ElapsedMinute;
+                match.ExtraMinute = detail.ExtraMinute;
+                match.State = detail.State;
+                if (detail.Score != null)
+                {
+                    match.Score ??= new ScoreDto();
+                    match.Score.Home = detail.Score.Home;
+                    match.Score.Away = detail.Score.Away;
+                }
+            }
+        }
+
+        if (isPinnedMatch || updatedInCandidates || string.Equals(_state.CurrentCandidate?.Id, detail.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            EmitCurrentDisplay();
+        }
     }
 
     public void ApplySnapshot(TrayUpdateEventArgs updateArgs, UserPreferences? preferences = null)

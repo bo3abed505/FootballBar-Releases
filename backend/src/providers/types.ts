@@ -72,6 +72,8 @@ export interface NormalizedMatchDetails {
   homeScore?: number | null;
   awayScore?: number | null;
   elapsedMinute?: number | null;
+  extraMinute?: number | null;
+  commentary?: any[];
 }
 
 export interface IDataProvider {

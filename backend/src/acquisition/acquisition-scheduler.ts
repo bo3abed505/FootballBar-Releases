@@ -812,6 +812,22 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
           });
 
           if (plan.action === 'POLL_LIVE') {
+            // Actively refresh pinned live match's clock and details during live polling
+            const effectivePinnedIds = prefState?.pinnedMatchIds ?? Array.from(this.pinnedMatchIds);
+            if (effectivePinnedIds.length > 0) {
+              for (const pid of effectivePinnedIds) {
+                try {
+                  const pinnedFixture = await this.fixturesRepo.getByCanonicalOrLegacyId(String(pid));
+                  const LIVE_STATES = ['LIVE', '1H', '2H', 'HT', 'ET', 'P', 'BT', 'FIRST_HALF', 'SECOND_HALF', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES', 'IN_PLAY'];
+                  if (pinnedFixture && LIVE_STATES.includes(String(pinnedFixture.state || '').toUpperCase())) {
+                    await this.syncService.syncFixtureDetails(pinnedFixture.id, cycleId);
+                  }
+                } catch (err: any) {
+                  this.logger.warn(`Failed background detail refresh for pinned match ${pid}: ${err?.message}`);
+                }
+              }
+            }
+
             // The Halftime (HT) Suspend Detection:
             // If live match just entered HT status, pause polling/burst timer for 15-minute break
             const postSyncSummary = await this.fixturesRepo.getActiveSummary(currentDate, {

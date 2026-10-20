@@ -255,7 +255,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- ========================================== -->
-            <!-- SECTION LEFT: Timeline Events              -->
+            <!-- SECTION LEFT: Key Events & Commentary       -->
             <!-- ========================================== -->
             <Border
                 Grid.Column="0"
@@ -263,164 +263,348 @@
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="8"
-                Padding="14">
-                <Grid RowSpacing="8">
+                Padding="12">
+                <Grid RowSpacing="10">
                     <Grid.RowDefinitions>
+                        <!-- Row 0: Side-by-Side Segmented Toggle Switcher -->
                         <RowDefinition Height="Auto" />
+                        <!-- Row 1: Exclusive Full-Height Content Area -->
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock
+                    <!-- Row 0: Sleek Segmented Switcher Pill Container -->
+                    <Border
                         Grid.Row="0"
-                        Margin="2,0,0,4"
-                        Text="⏱️ Match Events"
-                        FontSize="14"
-                        FontWeight="SemiBold"
-                        VerticalAlignment="Center" />
+                        Background="#0F172A"
+                        BorderBrush="#334155"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="3">
+                        <Grid ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
 
-                    <ListView
-                        Grid.Row="1"
-                        x:Name="EventsList"
-                        SelectionMode="None">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="vm:MatchTimelineItem">
-                                <Grid Padding="2,4,2,4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="52" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
+                            <!-- Left Tab Button: ⏱️ Key Events -->
+                            <Button
+                                x:Name="KeyEventsTabButton"
+                                Grid.Column="0"
+                                HorizontalAlignment="Stretch"
+                                Height="32"
+                                CornerRadius="4"
+                                Background="#1E293B"
+                                BorderBrush="#334155"
+                                BorderThickness="1"
+                                Click="OnKeyEventsTabClicked">
+                                <TextBlock
+                                    x:Name="KeyEventsTabText"
+                                    Text="{x:Bind ViewModel.KeyEventsTabHeader, Mode=OneWay}"
+                                    FontWeight="SemiBold"
+                                    FontSize="12"
+                                    Foreground="#F8FAFC"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Button>
 
-                                    <!-- 1. Home Team Event (Left Side: text right-aligned + icon) -->
-                                    <Grid
-                                        Grid.Column="0"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Center"
-                                        Visibility="{x:Bind HomeVisibility, Mode=OneTime}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel
-                                            Grid.Column="0"
-                                            VerticalAlignment="Center"
-                                            HorizontalAlignment="Right"
-                                            Margin="0,0,6,0">
-                                            <TextBlock
-                                                Text="{x:Bind EventTitle, Mode=OneTime}"
-                                                FontWeight="SemiBold"
-                                                FontSize="12"
-                                                TextAlignment="Right"
-                                                HorizontalAlignment="Right"
-                                                TextWrapping="Wrap" />
-                                            <TextBlock
-                                                Text="{x:Bind EventSubtitle, Mode=OneTime}"
-                                                FontSize="10"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                TextAlignment="Right"
-                                                HorizontalAlignment="Right"
-                                                TextWrapping="Wrap"
-                                                Visibility="{x:Bind SubtitleVisibility, Mode=OneTime}" />
-                                        </StackPanel>
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            Text="{x:Bind IconGlyph, Mode=OneTime}"
-                                            FontSize="14"
-                                            VerticalAlignment="Center"
-                                            HorizontalAlignment="Center" />
-                                    </Grid>
+                            <!-- Right Tab Button: 📜 Commentary -->
+                            <Button
+                                x:Name="CommentaryTabButton"
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch"
+                                Height="32"
+                                CornerRadius="4"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="0"
+                                Click="OnCommentaryTabClicked">
+                                <TextBlock
+                                    x:Name="CommentaryTabText"
+                                    Text="{x:Bind ViewModel.CommentaryTabHeader, Mode=OneWay}"
+                                    FontWeight="SemiBold"
+                                    FontSize="12"
+                                    Foreground="#94A3B8"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Button>
+                        </Grid>
+                    </Border>
 
-                                    <!-- 2. Center Minute Node (Visible for all non-neutral events) -->
-                                    <Border
-                                        Grid.Column="1"
-                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="10"
-                                        Padding="4,2,4,2"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Visibility="{x:Bind NonNeutralVisibility, Mode=OneTime}">
-                                        <TextBlock
-                                            Text="{x:Bind MinuteDisplay, Mode=OneTime}"
-                                            FontWeight="Bold"
-                                            FontSize="11"
-                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                            HorizontalAlignment="Center" />
-                                    </Border>
+                    <!-- Row 1: Full-Height Content Area (Key Events or Commentary) -->
+                    <Grid Grid.Row="1">
+                        <!-- TAB VIEW 1: ⏱️ Key Events -->
+                        <Grid
+                            x:Name="KeyEventsPanel"
+                            Visibility="{x:Bind ViewModel.KeyEventsTabVisibility, Mode=OneWay}">
+                            <ListView
+                                x:Name="KeyEventsList"
+                                ItemsSource="{x:Bind ViewModel.KeyEvents, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:MatchTimelineItem">
+                                        <Grid Padding="2,4,2,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="52" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
 
-                                    <!-- 3. Away Team Event (Right Side: icon + text left-aligned) -->
-                                    <Grid
-                                        Grid.Column="2"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Center"
-                                        Visibility="{x:Bind AwayVisibility, Mode=OneTime}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock
-                                            Grid.Column="0"
-                                            Text="{x:Bind IconGlyph, Mode=OneTime}"
-                                            FontSize="14"
-                                            VerticalAlignment="Center"
-                                            HorizontalAlignment="Center" />
-                                        <StackPanel
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            HorizontalAlignment="Left"
-                                            Margin="6,0,0,0">
-                                            <TextBlock
-                                                Text="{x:Bind EventTitle, Mode=OneTime}"
-                                                FontWeight="SemiBold"
-                                                FontSize="12"
-                                                TextAlignment="Left"
-                                                HorizontalAlignment="Left"
-                                                TextWrapping="Wrap" />
-                                            <TextBlock
-                                                Text="{x:Bind EventSubtitle, Mode=OneTime}"
-                                                FontSize="10"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                TextAlignment="Left"
-                                                HorizontalAlignment="Left"
-                                                TextWrapping="Wrap"
-                                                Visibility="{x:Bind SubtitleVisibility, Mode=OneTime}" />
-                                        </StackPanel>
-                                    </Grid>
+                                            <!-- 1. Home Team Event (Left Side: text right-aligned + icon) -->
+                                            <Grid
+                                                Grid.Column="0"
+                                                HorizontalAlignment="Stretch"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind HomeVisibility, Mode=OneTime}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel
+                                                    Grid.Column="0"
+                                                    VerticalAlignment="Center"
+                                                    HorizontalAlignment="Right"
+                                                    Margin="0,0,6,0">
+                                                    <TextBlock
+                                                        Text="{x:Bind TeamName, Mode=OneTime}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                        TextAlignment="Right"
+                                                        HorizontalAlignment="Right"
+                                                        Visibility="{x:Bind TeamNameVisibility, Mode=OneTime}" />
+                                                    <TextBlock
+                                                        Text="{x:Bind EventTitle, Mode=OneTime}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="12"
+                                                        TextAlignment="Right"
+                                                        HorizontalAlignment="Right"
+                                                        TextWrapping="Wrap" />
+                                                    <TextBlock
+                                                        Text="{x:Bind EventSubtitle, Mode=OneTime}"
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        TextAlignment="Right"
+                                                        HorizontalAlignment="Right"
+                                                        TextWrapping="Wrap"
+                                                        Visibility="{x:Bind SubtitleVisibility, Mode=OneTime}" />
+                                                </StackPanel>
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Text="{x:Bind IconGlyph, Mode=OneTime}"
+                                                    FontSize="14"
+                                                    VerticalAlignment="Center"
+                                                    HorizontalAlignment="Center" />
+                                            </Grid>
 
-                                    <!-- 4. Neutral Match Event (Period Start/End, Half Time, Full Time: Spans all 3 columns) -->
-                                    <Border
-                                        Grid.Column="0"
-                                        Grid.ColumnSpan="3"
-                                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="12"
-                                        Padding="12,3,12,3"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Visibility="{x:Bind NeutralVisibility, Mode=OneTime}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                            <TextBlock Text="{x:Bind IconGlyph, Mode=OneTime}" FontSize="12" VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind EventTitle, Mode=OneTime}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind MinuteDisplay, Mode=OneTime}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                                            <!-- 2. Center Minute Node (Visible for all non-neutral events) -->
+                                            <Border
+                                                Grid.Column="1"
+                                                Background="#0F172A"
+                                                BorderBrush="#334155"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="4,2,4,2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind NonNeutralVisibility, Mode=OneTime}">
+                                                <TextBlock
+                                                    Text="{x:Bind MinuteDisplay, Mode=OneTime}"
+                                                    FontWeight="Bold"
+                                                    FontSize="11"
+                                                    Foreground="#38BDF8"
+                                                    HorizontalAlignment="Center" />
+                                            </Border>
 
-                    <!-- Empty Events Fallback -->
-                    <TextBlock
-                        Grid.Row="1"
-                        x:Name="NoEventsText"
-                        Text="No timeline events recorded yet."
-                        FontSize="12"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Visibility="Collapsed" />
+                                            <!-- 3. Away Team Event (Right Side: icon + text left-aligned) -->
+                                            <Grid
+                                                Grid.Column="2"
+                                                HorizontalAlignment="Stretch"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind AwayVisibility, Mode=OneTime}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    Text="{x:Bind IconGlyph, Mode=OneTime}"
+                                                    FontSize="14"
+                                                    VerticalAlignment="Center"
+                                                    HorizontalAlignment="Center" />
+                                                <StackPanel
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    HorizontalAlignment="Left"
+                                                    Margin="6,0,0,0">
+                                                    <TextBlock
+                                                        Text="{x:Bind TeamName, Mode=OneTime}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                        TextAlignment="Left"
+                                                        HorizontalAlignment="Left"
+                                                        Visibility="{x:Bind TeamNameVisibility, Mode=OneTime}" />
+                                                    <TextBlock
+                                                        Text="{x:Bind EventTitle, Mode=OneTime}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="12"
+                                                        TextAlignment="Left"
+                                                        HorizontalAlignment="Left"
+                                                        TextWrapping="Wrap" />
+                                                    <TextBlock
+                                                        Text="{x:Bind EventSubtitle, Mode=OneTime}"
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        TextAlignment="Left"
+                                                        HorizontalAlignment="Left"
+                                                        TextWrapping="Wrap"
+                                                        Visibility="{x:Bind SubtitleVisibility, Mode=OneTime}" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <!-- 4. Neutral Whistle Markers (Kickoff, HT, FT, etc.) -->
+                                            <Border
+                                                Grid.Column="0"
+                                                Grid.ColumnSpan="3"
+                                                Background="#1E293B"
+                                                BorderBrush="#334155"
+                                                BorderThickness="1"
+                                                CornerRadius="12"
+                                                Padding="12,3,12,3"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind NeutralVisibility, Mode=OneTime}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind IconGlyph, Mode=OneTime}" FontSize="12" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{x:Bind EventTitle, Mode=OneTime}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{x:Bind MinuteDisplay, Mode=OneTime}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <TextBlock
+                                x:Name="NoKeyEventsText"
+                                Text="No key events recorded yet."
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed" />
+                        </Grid>
+
+                        <!-- TAB VIEW 2: 📜 Commentary -->
+                        <Grid
+                            x:Name="CommentaryPanel"
+                            Visibility="{x:Bind ViewModel.CommentaryTabVisibility, Mode=OneWay}">
+                            <ListView
+                                x:Name="CommentaryList"
+                                ItemsSource="{x:Bind ViewModel.CommentaryItems, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:MatchCommentaryItemViewModel">
+                                        <Border
+                                            Margin="0,2,0,2"
+                                            Padding="4,5,6,5"
+                                            CornerRadius="6"
+                                            Background="#1E293B"
+                                            BorderBrush="#334155"
+                                            BorderThickness="1">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <!-- Team Crest / Whistle Badge (Column 0) -->
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <!-- Timestamp Minute badge (Column 1) -->
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <!-- Commentary Text (Column 2) -->
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Whistle icon badge (shown when IsWhistle is true) -->
+                                                <Border
+                                                    Grid.Column="0"
+                                                    Width="20"
+                                                    Height="20"
+                                                    Margin="0,1,8,0"
+                                                    VerticalAlignment="Top"
+                                                    Background="#0F172A"
+                                                    BorderBrush="#334155"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Visibility="{x:Bind WhistleVisibility, Mode=OneWay}">
+                                                    <TextBlock Text="⏱️" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+
+                                                <!-- Team Crest/Logo (shown when NOT whistle and logo present) -->
+                                                <Border
+                                                    Grid.Column="0"
+                                                    Width="18"
+                                                    Height="18"
+                                                    Margin="0,2,8,0"
+                                                    VerticalAlignment="Top"
+                                                    Visibility="{x:Bind TeamLogoVisibility, Mode=OneWay}">
+                                                    <Image Width="18" Height="18" Stretch="Uniform">
+                                                        <Image.Source>
+                                                            <BitmapImage UriSource="{x:Bind LogoUri, Mode=OneTime}" DecodePixelWidth="18" DecodePixelHeight="18" />
+                                                        </Image.Source>
+                                                    </Image>
+                                                </Border>
+
+                                                <!-- Fallback placeholder if no team logo and not whistle -->
+                                                <Border
+                                                    Grid.Column="0"
+                                                    Width="18"
+                                                    Height="18"
+                                                    Margin="0,2,8,0"
+                                                    VerticalAlignment="Top"
+                                                    Visibility="{x:Bind NoLogoVisibility, Mode=OneWay}">
+                                                    <TextBlock Text="⚽" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+
+                                                <!-- Timestamp Minute badge -->
+                                                <Border
+                                                    Grid.Column="1"
+                                                    Background="#0F172A"
+                                                    BorderBrush="#334155"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="5,1,5,1"
+                                                    Margin="0,1,8,0"
+                                                    VerticalAlignment="Top">
+                                                    <TextBlock
+                                                        Text="{x:Bind MinuteDisplay, Mode=OneTime}"
+                                                        FontWeight="Bold"
+                                                        FontSize="11"
+                                                        Foreground="#38BDF8"
+                                                        HorizontalAlignment="Center" />
+                                                </Border>
+
+                                                <!-- Commentary text -->
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Text="{x:Bind Text, Mode=OneWay}"
+                                                    FontSize="12"
+                                                    TextWrapping="Wrap"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="#F8FAFC" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <TextBlock
+                                x:Name="NoCommentaryText"
+                                Text="No commentary available yet."
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed" />
+                        </Grid>
+                    </Grid>
                 </Grid>
             </Border>
 

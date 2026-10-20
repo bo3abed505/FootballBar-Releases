@@ -1,4 +1,4 @@
-import { IDataProvider, NormalizedMatch, NormalizedLiveMatch, NormalizedMatchDetails, MatchStatus } from '../types.js';
+import { IDataProvider, NormalizedMatch, NormalizedLiveMatch, NormalizedMatchDetails, NormalizedTeam, MatchStatus } from '../types.js';
 import { ProviderChallengeError, ProviderNetworkError, ProviderSchemaError, ProviderResourceNotFoundError } from '../errors.js';
 import { FotmobMatchesResponseSchema, FotmobMatchesResponse } from './schemas/matches.schema.js';
 import { FotmobMatchDetailsResponseSchema, FotmobMatchDetailsResponse } from './schemas/match-details.schema.js';
@@ -51,7 +51,7 @@ const TLA_STOPWORDS = new Set([
 ]);
 
 /** Event markers that are not real incidents and must not render as timeline rows. */
-const NON_INCIDENT_EVENT_TYPES = new Set(['half', 'addedtime', 'halftime', 'fulltime', 'periodstart', 'periodend']);
+const NON_INCIDENT_EVENT_TYPES = new Set(['addedtime']);
 
 export class FotmobProvider implements IDataProvider {
   public readonly name = 'fotmob';
@@ -320,26 +320,30 @@ export class FotmobProvider implements IDataProvider {
       }
     }
 
-    const events = this.extractEvents(data, homeTeamRaw.id, awayTeamRaw.id);
+    const homeTeam: NormalizedTeam = {
+      providerId: homeTeamRaw.id,
+      name: homeTeamRaw.name,
+      shortName: FotmobProvider.deriveTla(homeTeamRaw.name),
+      score: homeScore,
+      logoUrl: `https://images.fotmob.com/image_resources/logo/teamlogo/${homeTeamRaw.id}.png`,
+    };
+    const awayTeam: NormalizedTeam = {
+      providerId: awayTeamRaw.id,
+      name: awayTeamRaw.name,
+      shortName: FotmobProvider.deriveTla(awayTeamRaw.name),
+      score: awayScore,
+      logoUrl: `https://images.fotmob.com/image_resources/logo/teamlogo/${awayTeamRaw.id}.png`,
+    };
+
+    const events = this.extractEvents(data, homeTeam, awayTeam, parsedTime);
     const stats = this.extractStats(data, homeTeamRaw.id, awayTeamRaw.id);
     const lineups = this.extractLineups(data, homeTeamRaw.id, awayTeamRaw.id);
+    const commentary = this.extractCommentary(data, homeTeam, awayTeam, events, parsedTime, homeScore, awayScore);
 
     return {
       providerMatchId: data.general.matchId,
-      homeTeam: {
-        providerId: homeTeamRaw.id,
-        name: homeTeamRaw.name,
-        shortName: FotmobProvider.deriveTla(homeTeamRaw.name),
-        score: homeScore,
-        logoUrl: `https://images.fotmob.com/image_resources/logo/teamlogo/${homeTeamRaw.id}.png`,
-      },
-      awayTeam: {
-        providerId: awayTeamRaw.id,
-        name: awayTeamRaw.name,
-        shortName: FotmobProvider.deriveTla(awayTeamRaw.name),
-        score: awayScore,
-        logoUrl: `https://images.fotmob.com/image_resources/logo/teamlogo/${awayTeamRaw.id}.png`,
-      },
+      homeTeam,
+      awayTeam,
       time: {
         status: parsedTime.matchStatus,
         minute: parsedTime.minute,
@@ -352,31 +356,38 @@ export class FotmobProvider implements IDataProvider {
       homeScore,
       awayScore,
       elapsedMinute: parsedTime.minute,
+      extraMinute: parsedTime.addedTime,
       stats, 
       lineups,
       events,
+      commentary,
     };
   }
 
-  private extractEvents(data: FotmobMatchDetailsResponse, homeTeamId: string, awayTeamId: string): any[] {
+  private extractEvents(
+    data: FotmobMatchDetailsResponse,
+    homeTeam: NormalizedTeam,
+    awayTeam: NormalizedTeam,
+    parsedTime: { matchStatus: MatchStatus; minute: number | null; addedTime: number | null; displayClock: string }
+  ): any[] {
     const rawEvents = data.content?.matchFacts?.events?.events ??
       data.content?.matchFacts?.events ??
       data.header?.events;
 
-    if (!rawEvents) return [];
-
     let eventList: any[] = [];
-    if (Array.isArray(rawEvents)) {
-      eventList = rawEvents;
-    } else if (typeof rawEvents === 'object') {
-      if (Array.isArray(rawEvents.home)) {
-        eventList.push(...rawEvents.home.map((e: any) => ({ ...e, teamId: homeTeamId })));
-      }
-      if (Array.isArray(rawEvents.away)) {
-        eventList.push(...rawEvents.away.map((e: any) => ({ ...e, teamId: awayTeamId })));
-      }
-      if (Array.isArray(rawEvents.events)) {
-        eventList.push(...rawEvents.events);
+    if (rawEvents) {
+      if (Array.isArray(rawEvents)) {
+        eventList = rawEvents;
+      } else if (typeof rawEvents === 'object') {
+        if (Array.isArray(rawEvents.home)) {
+          eventList.push(...rawEvents.home.map((e: any) => ({ ...e, teamId: homeTeam.providerId })));
+        }
+        if (Array.isArray(rawEvents.away)) {
+          eventList.push(...rawEvents.away.map((e: any) => ({ ...e, teamId: awayTeam.providerId })));
+        }
+        if (Array.isArray(rawEvents.events)) {
+          eventList.push(...rawEvents.events);
+        }
       }
     }
 
@@ -387,12 +398,36 @@ export class FotmobProvider implements IDataProvider {
       const rawType = String(ev.type || ev.eventType || 'Event');
       const typeLower = rawType.toLowerCase().replace(/[\s_-]/g, '');
 
-      // Drop non-incident markers ("Half", "AddedTime") that would render as blank minute rows.
+      // Drop non-incident markers ("AddedTime") that would render as blank minute rows.
       if (NON_INCIDENT_EVENT_TYPES.has(typeLower)) return;
 
-      const teamId = typeof ev.isHome === 'boolean'
-        ? (ev.isHome ? homeTeamId : awayTeamId)
-        : (ev.teamId ? String(ev.teamId) : (ev.team?.id ? String(ev.team.id) : homeTeamId));
+      const isNeutralWhistle = typeLower.includes('half') ||
+        typeLower.includes('period') ||
+        typeLower.includes('fulltime') ||
+        typeLower.includes('kickoff') ||
+        typeLower.includes('whistle');
+
+      // Skip raw period whistle markers here. We synthesize clean, deduplicated period markers with exact stoppage times below.
+      if (isNeutralWhistle) return;
+
+      let teamId: string | null = null;
+      let teamName: string | null = null;
+      let teamLogoUrl: string | null = null;
+
+      teamId = typeof ev.isHome === 'boolean'
+        ? (ev.isHome ? homeTeam.providerId : awayTeam.providerId)
+        : (ev.teamId ? String(ev.teamId) : (ev.team?.id ? String(ev.team.id) : homeTeam.providerId));
+
+      if (String(teamId) === String(homeTeam.providerId)) {
+        teamName = homeTeam.name;
+        teamLogoUrl = homeTeam.logoUrl ?? null;
+      } else if (String(teamId) === String(awayTeam.providerId)) {
+        teamName = awayTeam.name;
+        teamLogoUrl = awayTeam.logoUrl ?? null;
+      } else {
+        teamName = homeTeam.name;
+        teamLogoUrl = homeTeam.logoUrl ?? null;
+      }
 
       let type = rawType;
       let detail: string | null = null;
@@ -425,8 +460,6 @@ export class FotmobProvider implements IDataProvider {
         detail = 'Substitution';
         const swap = Array.isArray(ev.swap) ? ev.swap : [];
         if (swap.length >= 2) {
-          // FotMob event.swap: swap[0] is incoming player (In), swap[1] is outgoing player (Out).
-          // Client MatchCenterViewModel formats PlayerName as "Out:" and AssistPlayerName as "In:".
           playerName = swap[1]?.name || ev.player?.name || playerName;
           playerId = swap[1]?.id != null ? String(swap[1].id) : (ev.player?.id ? String(ev.player.id) : playerId);
           assistName = swap[0]?.name ?? assistName;
@@ -452,6 +485,8 @@ export class FotmobProvider implements IDataProvider {
         eventUid,
         fixtureId: data.general.matchId,
         teamId,
+        teamName,
+        teamLogoUrl,
         type,
         detail,
         minute,
@@ -466,8 +501,400 @@ export class FotmobProvider implements IDataProvider {
       });
     });
 
+    // Keep events (the incident array) strictly for real match incidents (Goals, Cards, Substitutions, Penalty Misses, VAR).
+    // Whistle markers are excluded from events so client-side timeline and rich broadcast commentary maintain clean separation without duplicate rows.
+    results.sort((a, b) => {
+      if (a.minute !== b.minute) return a.minute - b.minute;
+      if (a.extraMinute !== b.extraMinute) return a.extraMinute - b.extraMinute;
+      return 0;
+    });
+
     return results;
   }
+
+  private extractCommentary(
+    data: FotmobMatchDetailsResponse,
+    homeTeam: NormalizedTeam,
+    awayTeam: NormalizedTeam,
+    events: any[],
+    parsedTime?: { matchStatus: MatchStatus; minute: number | null; addedTime: number | null; displayClock: string },
+    homeScore?: number | null,
+    awayScore?: number | null
+  ): any[] {
+    const items: any[] = [];
+    const seenItemIds = new Set<string>();
+
+    const addItem = (item: any) => {
+      if (!item || !item.id || seenItemIds.has(item.id)) return;
+      seenItemIds.add(item.id);
+      items.push(item);
+    };
+
+    const stateStr = String(parsedTime?.matchStatus ?? data.header?.status?.matchStatus ?? '').toUpperCase();
+    const isStarted = !['SCHEDULED', 'TIMED', 'NOT_STARTED', 'POSTPONED', 'CANCELLED', 'UNKNOWN'].includes(stateStr);
+    const reachedHt = ['HALFTIME', 'HT', 'SECOND_HALF', '2H', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'FINISHED', 'FINISHED_AET', 'FINISHED_PEN'].includes(stateStr) || (parsedTime?.minute ?? 0) >= 45;
+    const reached2H = ['SECOND_HALF', '2H', 'EXTRA_TIME', 'EXTRA_TIME_HALFTIME', 'PENALTIES', 'FINISHED', 'FINISHED_AET', 'FINISHED_PEN'].includes(stateStr) || (parsedTime?.minute ?? 0) >= 46;
+    const isFinished = ['FINISHED', 'FT', 'FINISHED_AET', 'FINISHED_PEN'].includes(stateStr);
+
+    const rawEvents = data.content?.matchFacts?.events?.events ??
+      data.content?.matchFacts?.events ??
+      data.header?.events;
+
+    // Compute max 1st-half stoppage time from events, shots, and added-time announcements
+    let maxHtExtraMinute = 0;
+    events.forEach((ev: any) => {
+      if (ev.minute === 45 && ev.extraMinute > maxHtExtraMinute) {
+        maxHtExtraMinute = ev.extraMinute;
+      }
+    });
+
+    if (Array.isArray(data.content?.shotmap?.shots)) {
+      data.content.shotmap.shots.forEach((s: any) => {
+        const min = typeof s.min === 'number' ? s.min : (parseInt(String(s.min || '0'), 10) || 0);
+        const extra = typeof s.minAdded === 'number' ? s.minAdded : (parseInt(String(s.minAdded || '0'), 10) || 0);
+        if (min === 45 && extra > maxHtExtraMinute) {
+          maxHtExtraMinute = extra;
+        }
+      });
+    }
+
+    if (Array.isArray(rawEvents)) {
+      rawEvents.forEach((rev: any) => {
+        const revType = String(rev?.type || '').toLowerCase();
+        const min = typeof rev?.time === 'number' ? rev.time : (parseInt(String(rev?.time || rev?.minute || '0'), 10) || 0);
+        if (min === 45 && (revType.includes('addedtime') || rev?.minutesAdded || rev?.minutesAddedStr)) {
+          const added = parseInt(String(rev?.minutesAdded || rev?.minutesAddedStr || '0'), 10) || 0;
+          if (added > maxHtExtraMinute) {
+            maxHtExtraMinute = added;
+          }
+        }
+      });
+    }
+
+    // Compute max regulation/extra-time minute and stoppage time
+    let maxFtMinute = Math.max(90, parsedTime?.minute ?? 90);
+    let maxFtExtraMinute = 0;
+    events.forEach((ev: any) => {
+      if (ev.minute > maxFtMinute) {
+        maxFtMinute = ev.minute;
+        maxFtExtraMinute = ev.extraMinute ?? 0;
+      } else if (ev.minute === maxFtMinute && (ev.extraMinute ?? 0) > maxFtExtraMinute) {
+        maxFtExtraMinute = ev.extraMinute ?? 0;
+      }
+    });
+
+    if (Array.isArray(data.content?.shotmap?.shots)) {
+      data.content.shotmap.shots.forEach((s: any) => {
+        const min = typeof s.min === 'number' ? s.min : (parseInt(String(s.min || '0'), 10) || 0);
+        const extra = typeof s.minAdded === 'number' ? s.minAdded : (parseInt(String(s.minAdded || '0'), 10) || 0);
+        if (min > maxFtMinute) {
+          maxFtMinute = min;
+          maxFtExtraMinute = extra;
+        } else if (min === maxFtMinute && extra > maxFtExtraMinute) {
+          maxFtExtraMinute = extra;
+        }
+      });
+    }
+
+    if (Array.isArray(rawEvents)) {
+      rawEvents.forEach((rev: any) => {
+        const revType = String(rev?.type || '').toLowerCase();
+        const min = typeof rev?.time === 'number' ? rev.time : (parseInt(String(rev?.time || rev?.minute || '0'), 10) || 0);
+        if (min >= 90 && (revType.includes('addedtime') || rev?.minutesAdded || rev?.minutesAddedStr)) {
+          const added = parseInt(String(rev?.minutesAdded || rev?.minutesAddedStr || '0'), 10) || 0;
+          if (min > maxFtMinute) {
+            maxFtMinute = min;
+            maxFtExtraMinute = added;
+          } else if (min === maxFtMinute && added > maxFtExtraMinute) {
+            maxFtExtraMinute = added;
+          }
+        }
+      });
+    }
+    if (Array.isArray(rawEvents)) {
+      rawEvents.forEach((rev: any, idx: number) => {
+        if (!rev || typeof rev !== 'object') return;
+        const revType = String(rev.type || '').toLowerCase();
+        if (revType.includes('addedtime') || rev.minutesAddedStr || rev.minutesAdded) {
+          const mins = rev.minutesAddedStr || rev.minutesAdded || 'a few';
+          const min = typeof rev.time === 'number' ? rev.time : (parseInt(String(rev.time || rev.minute || '45'), 10) || 45);
+          addItem({
+            id: `comm_${data.general.matchId}_whistle_added_${min}_${idx}`,
+            minute: min,
+            extraMinute: 0,
+            type: 'whistle',
+            text: `The fourth official indicates ${mins} minutes of added stoppage time.`,
+            teamId: null,
+            teamName: null,
+            teamLogoUrl: null,
+          });
+        }
+      });
+    }
+
+    // 2. Period Whistle Markers (Always Include with Neutral/Whistle Icon)
+    if (isStarted) {
+      addItem({
+        id: `comm_${data.general.matchId}_whistle_kickoff`,
+        minute: 1,
+        extraMinute: 0,
+        type: 'whistle',
+        text: `First half kicks off! ${homeTeam.name} vs ${awayTeam.name} is underway.`,
+        teamId: null,
+        teamName: null,
+        teamLogoUrl: null,
+      });
+    }
+
+    if (reachedHt) {
+      addItem({
+        id: `comm_${data.general.matchId}_whistle_halftime`,
+        minute: 45,
+        extraMinute: maxHtExtraMinute,
+        type: 'whistle',
+        text: `Half-time whistle blows! Score at the break: ${homeTeam.name} ${homeScore ?? 0}–${awayScore ?? 0} ${awayTeam.name}.`,
+        teamId: null,
+        teamName: null,
+        teamLogoUrl: null,
+      });
+    }
+
+    if (reached2H) {
+      addItem({
+        id: `comm_${data.general.matchId}_whistle_secondhalf`,
+        minute: 46,
+        extraMinute: 0,
+        type: 'whistle',
+        text: 'Second half is underway!',
+        teamId: null,
+        teamName: null,
+        teamLogoUrl: null,
+      });
+    }
+
+    if (isFinished) {
+      addItem({
+        id: `comm_${data.general.matchId}_whistle_fulltime`,
+        minute: maxFtMinute,
+        extraMinute: maxFtExtraMinute,
+        type: 'whistle',
+        text: `Full-time whistle! The referee brings the match to an end: ${homeTeam.name} ${homeScore ?? 0}–${awayScore ?? 0} ${awayTeam.name}.`,
+        teamId: null,
+        teamName: null,
+        teamLogoUrl: null,
+      });
+    }
+
+    // 3. Shots, Saves, Woodwork & Set-Piece Situations (from content.shotmap.shots)
+    const rawShots = data.content?.shotmap?.shots;
+    if (Array.isArray(rawShots)) {
+      rawShots.forEach((shot: any, idx: number) => {
+        if (!shot || typeof shot !== 'object') return;
+        const evType = String(shot.eventType || '');
+        const minute = typeof shot.min === 'number' ? shot.min : (parseInt(String(shot.min || '0'), 10) || 0);
+        const extraMinute = typeof shot.minAdded === 'number' ? shot.minAdded : (parseInt(String(shot.minAdded || '0'), 10) || 0);
+
+        // Skip shots that correspond to goals already in events list
+        if (evType.toLowerCase() === 'goal') {
+          const hasGoalEvent = events.some(e => e.type === 'Goal' && Math.abs((e.minute ?? 0) - minute) <= 1);
+          if (hasGoalEvent) return;
+        }
+
+        const isHome = String(shot.teamId) === String(homeTeam.providerId);
+        const teamId = isHome ? homeTeam.providerId : awayTeam.providerId;
+        const teamName = isHome ? homeTeam.name : awayTeam.name;
+        const teamLogoUrl = isHome ? homeTeam.logoUrl : awayTeam.logoUrl;
+        const playerName = shot.playerName || (isHome ? homeTeam.name : awayTeam.name);
+
+        const location = shot.insideBox ? 'inside the box' : 'outside the box';
+        const xGVal = typeof shot.expectedGoals === 'number' ? shot.expectedGoals : parseFloat(String(shot.expectedGoals || '0'));
+        const xGText = xGVal > 0 ? ` (xG: ${xGVal.toFixed(2)})` : '';
+        const situation = String(shot.situation || '');
+        const shotTypeStr = shot.shotType ? String(shot.shotType).toLowerCase() : 'shot';
+
+        let prefix = '';
+        if (situation === 'FromCorner') {
+          prefix = `Corner kick for ${teamName} — ${playerName} connects with a ${shotTypeStr} from ${location}. `;
+        } else if (situation === 'FreeKick') {
+          prefix = `Foul gives ${teamName} a dangerous free kick! ${playerName} strikes it from ${location}. `;
+        } else if (situation === 'FastBreak') {
+          prefix = `Quick counter-attack by ${teamName}! ${playerName} fires a shot from ${location}. `;
+        }
+
+        let outcome = '';
+        let cType = 'shot';
+
+        if (evType === 'Post' || /post|woodwork/i.test(evType)) {
+          cType = 'woodwork';
+          outcome = `Off the woodwork! A blistering effort by ${playerName} (${teamName}) rattles the frame of the goal!`;
+        } else if (shot.isBlocked === true || evType === 'Blocked') {
+          cType = 'block';
+          outcome = `Blocked! ${playerName} (${teamName}) tries an effort from ${location}, but the defense throws a body in the way.`;
+        } else if (evType === 'AttemptSaved' || shot.isOnTarget === true) {
+          cType = 'save';
+          outcome = `Save by the keeper! ${playerName} (${teamName}) unleashes a shot from ${location}${xGText}, parried away by the goalkeeper.`;
+        } else if (evType === 'Miss') {
+          cType = 'shot';
+          outcome = `Just wide! ${playerName} (${teamName}) lets fly from ${location}, but the effort drifts off target.`;
+        } else {
+          cType = 'shot';
+          outcome = `${playerName} (${teamName}) has an effort on goal from ${location}${xGText}.`;
+        }
+
+        const text = prefix ? `${prefix}${outcome}` : outcome;
+        addItem({
+          id: `comm_${data.general.matchId}_shot_${shot.id || `${minute}_${extraMinute}_${idx}`}`,
+          minute,
+          extraMinute,
+          type: cType,
+          text,
+          teamId,
+          teamName,
+          teamLogoUrl,
+        });
+      });
+    }
+
+    // 4. Goals, Cards (Foul context), Substitutions, VAR & Stoppages from Events
+    events.forEach((ev: any, idx: number) => {
+      const rawType = String(ev.type || '');
+      const typeLower = rawType.toLowerCase();
+
+      // Skip period whistle markers since we generate rich broadcast markers above
+      if (typeLower.includes('half') || typeLower.includes('period') || typeLower.includes('fulltime') || typeLower.includes('kickoff')) {
+        return;
+      }
+
+      let cType = 'event';
+      let text = ev.description;
+
+      if (ev.type === 'Goal') {
+        cType = 'goal';
+        const assistText = ev.assistPlayerName ? ` (Assist: ${ev.assistPlayerName})` : '';
+        const scoreText = (homeScore != null && awayScore != null) ? ` (${homeScore}–${awayScore})` : '';
+        text = `GOAL! ${ev.playerName || 'Player'} finds the back of the net for ${ev.teamName || 'their team'}!${assistText}${scoreText}`;
+      } else if (ev.type === 'YellowCard') {
+        cType = 'card';
+        text = `Yellow card shown to ${ev.playerName || 'Player'} (${ev.teamName || 'team'}) following a foul. Play briefly stops for the referee's booking.`;
+      } else if (ev.type === 'RedCard') {
+        cType = 'card';
+        text = `RED CARD! ${ev.playerName || 'Player'} (${ev.teamName || 'team'}) is sent off following a serious foul! Play halts as the player leaves the pitch.`;
+      } else if (ev.type === 'Substitution') {
+        cType = 'sub';
+        if (ev.injured) {
+          text = `Injury substitution for ${ev.teamName || 'team'}: ${ev.playerName || 'injured player'} cannot continue and is replaced by ${ev.assistPlayerName || 'substitute'}.`;
+        } else {
+          text = `Tactical substitution for ${ev.teamName || 'team'}: ${ev.assistPlayerName || 'Incoming player'} comes on to replace ${ev.playerName || 'outgoing player'}.`;
+        }
+      } else if (ev.type === 'VarDecision') {
+        cType = 'var';
+        text = `VAR Review: ${ev.detail || 'The referee is consulting VAR on a potential match incident'}.`;
+      }
+
+      addItem({
+        id: `comm_${ev.id || ev.eventUid || idx}`,
+        minute: ev.minute ?? 0,
+        extraMinute: ev.extraMinute ?? 0,
+        type: cType,
+        text: text || `${ev.type} - ${ev.playerName || ''}`,
+        teamId: ev.teamId ?? null,
+        teamName: ev.teamName ?? null,
+        teamLogoUrl: ev.teamLogoUrl ?? null,
+      });
+
+      // Injury Stoppage Narration
+      if (ev.type === 'Substitution' && ev.injured) {
+        addItem({
+          id: `comm_${ev.id || ev.eventUid || idx}_stoppage`,
+          minute: ev.minute ?? 0,
+          extraMinute: (ev.extraMinute ?? 0) + 1,
+          type: 'stoppage',
+          text: `Play resumes after a brief injury timeout for ${ev.teamName || 'the player'}.`,
+          teamId: ev.teamId ?? null,
+          teamName: ev.teamName ?? null,
+          teamLogoUrl: ev.teamLogoUrl ?? null,
+        });
+      }
+    });
+
+    // 5. FotMob liveticker text entries (if provided by provider)
+    const liveticker = data.content?.liveticker;
+    let rawLivetickerEntries: any[] = [];
+    if (Array.isArray(liveticker)) {
+      rawLivetickerEntries = liveticker;
+    } else if (liveticker && typeof liveticker === 'object') {
+      if (Array.isArray(liveticker.entries)) {
+        rawLivetickerEntries = liveticker.entries;
+      } else if (Array.isArray(liveticker.liveticker)) {
+        rawLivetickerEntries = liveticker.liveticker;
+      } else if (liveticker.langs && typeof liveticker.langs === 'object') {
+        const langs = liveticker.langs;
+        const enLang = langs.en || Object.values(langs)[0];
+        if (enLang && Array.isArray(enLang.entries)) {
+          rawLivetickerEntries = enLang.entries;
+        }
+      }
+    }
+
+    if (rawLivetickerEntries.length > 0) {
+      rawLivetickerEntries.forEach((entry: any, idx: number) => {
+        const text = String(entry.text || entry.description || entry.comment || '').trim();
+        if (!text) return;
+
+        const minute = typeof entry.time === 'number'
+          ? entry.time
+          : (parseInt(String(entry.time || entry.minute || '0'), 10) || 0);
+        const extraMinute = typeof entry.overloadTime === 'number'
+          ? entry.overloadTime
+          : (parseInt(String(entry.overloadTime || entry.extraMinute || '0'), 10) || 0);
+        const rawType = String(entry.type || entry.eventType || 'commentary');
+
+        let teamId: string | null = null;
+        let teamName: string | null = null;
+        let teamLogoUrl: string | null = null;
+
+        if (entry.isHome === true || String(entry.teamId) === String(homeTeam.providerId)) {
+          teamId = homeTeam.providerId;
+          teamName = homeTeam.name;
+          teamLogoUrl = homeTeam.logoUrl ?? null;
+        } else if (entry.isHome === false || String(entry.teamId) === String(awayTeam.providerId)) {
+          teamId = awayTeam.providerId;
+          teamName = awayTeam.name;
+          teamLogoUrl = awayTeam.logoUrl ?? null;
+        }
+
+        addItem({
+          id: String(entry.id || entry.entryId || `comm_${data.general.matchId}_lt_${minute}_${extraMinute}_${idx}`),
+          minute,
+          extraMinute,
+          type: rawType,
+          text,
+          teamId,
+          teamName,
+          teamLogoUrl,
+        });
+      });
+    }
+
+    // 6. Reverse-chronological order: most recent minute on top
+    items.sort((a, b) => {
+      if (b.minute !== a.minute) return b.minute - a.minute;
+      if (b.extraMinute !== a.extraMinute) return b.extraMinute - a.extraMinute;
+      // Reverse-chronological tie-breaker at same minute:
+      // FullTime & HalfTime whistles sit above incidents at that same minute
+      // Kickoff & SecondHalf whistles sit below incidents at that same minute
+      const revPriority = (item: any) => {
+        const id = String(item.id || '');
+        if (id.includes('fulltime') || id.includes('halftime')) return 2;
+        if (id.includes('kickoff') || id.includes('secondhalf')) return 0;
+        return 1;
+      };
+      return revPriority(b) - revPriority(a);
+    });
+
+    return items;
+  }
+
 
   private extractStats(data: FotmobMatchDetailsResponse, homeTeamId: string, awayTeamId: string): any {
     const periodStats = data.content?.stats?.Periods?.All?.stats;

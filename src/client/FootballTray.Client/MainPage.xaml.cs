@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Notifications;
@@ -373,9 +374,14 @@ public sealed partial class MainPage : Page
                 window.Populate(response.Envelope.Data);
                 window.Activate();
             }
+            else
+            {
+                AppDiagnosticsLogger.Log($"[ERROR][MatchCenter][OpenFailed] Failed to open MatchCenterWindow: API returned unsuccessful response for match {matchId} (Error: {response.ErrorMessage ?? "null payload"})");
+            }
         }
         catch (Exception ex)
         {
+            AppDiagnosticsLogger.Log($"[ERROR][MatchCenter][OpenFailed] Failed to open MatchCenterWindow: {ex.Message}\n{ex.StackTrace}");
             System.Diagnostics.Debug.WriteLine($"[MAIN] Failed to open MatchCenterWindow: {ex.Message}");
         }
     }

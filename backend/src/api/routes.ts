@@ -317,6 +317,32 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         toDate: windowEnd,
       });
 
+      // Ensure pinned match is always present in response regardless of calendar date
+      const prefService = (fastify as any).preferencesService;
+      const pinnedMatchIds: string[] = [];
+      const queryPinnedId = (request.query as any).pinnedMatchId;
+      if (queryPinnedId && typeof queryPinnedId === 'string' && queryPinnedId.trim().length > 0) {
+        pinnedMatchIds.push(queryPinnedId.trim());
+      }
+      if (prefService) {
+        const prefPinned = prefService.getPreferences()?.pinnedMatchIds;
+        if (Array.isArray(prefPinned)) {
+          pinnedMatchIds.push(...prefPinned.map(String).filter((id: string) => id.trim().length > 0));
+        }
+      }
+
+      for (const pinnedId of pinnedMatchIds) {
+        const alreadyInMatches = matches.some(
+          (m: any) => m.id === pinnedId || m.canonicalId === pinnedId
+        );
+        if (!alreadyInMatches) {
+          const pinnedRow = await fixturesRepo.getByCanonicalOrLegacyId(pinnedId);
+          if (pinnedRow) {
+            matches.push(pinnedRow);
+          }
+        }
+      }
+
       const formattedMatches = matches.map((m) => formatV2TrayMatch(m));
 
       let quotaExhausted = false;
@@ -512,7 +538,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
 
     try {
       // 1. Strictly query SQLite canonical tables directly
-      let fixture = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
+      let fixture: any = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
       if (!fixture) {
         return reply.status(404).send(
           createErrorEnvelope('MATCH_NOT_FOUND', `No match found with ID '${id}'.`, undefined, { schemaVersion: '2.0' })
@@ -534,30 +560,51 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         const hasDetails = (fixture.statistics && fixture.statistics.length > 0) || (fixture.lineups && fixture.lineups.length > 0);
         const LIVE_STATES = ['LIVE', '1H', '2H', 'HT', 'ET', 'P', 'BT', 'FIRST_HALF', 'SECOND_HALF', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES', 'IN_PLAY'];
         const isLive = LIVE_STATES.includes(String(fixture.state || '').toUpperCase());
+        const isFinished = ['FINISHED', 'FT', 'FINISHED_AET', 'FINISHED_PEN'].includes(String(fixture.state || '').toUpperCase());
+        const isStarted = isLive || isFinished || String(fixture.state || '').toUpperCase() === 'HALFTIME';
         const lastUpdatedMs = fixture.updatedAt ? new Date(fixture.updatedAt).getTime() : 0;
         const isStale = (Date.now() - lastUpdatedMs) > 15000;
 
-        if (!hasDetails || (isLive && isStale)) {
+        let cached = typeof syncService.getCachedMatchDetails === 'function'
+          ? (syncService.getCachedMatchDetails(fixture.id) || syncService.getCachedMatchDetails(id.trim()))
+          : null;
+
+        const hasRichCommentary = cached?.commentary &&
+          Array.isArray(cached.commentary) &&
+          cached.commentary.length > 0 &&
+          cached.commentary.some((c: any) => c.type === 'whistle' || c.type === 'shot' || c.type === 'save' || c.type === 'block' || c.type === 'woodwork');
+
+        if (!hasDetails || (isLive && isStale) || (isStarted && !hasRichCommentary)) {
           try {
-            const synced = await syncService.syncFixtureDetails(fixture.id);
+            const timeoutPromise = new Promise<false>((resolve) =>
+              setTimeout(() => resolve(false), 2500)
+            );
+            const syncPromise = syncService.syncFixtureDetails(fixture.id);
+            const synced = await Promise.race([syncPromise, timeoutPromise]);
             if (synced) {
               const updated = await fixturesRepo.getByCanonicalOrLegacyId(id.trim());
               if (updated) fixture = updated;
+              cached = syncService.getCachedMatchDetails(fixture.id) || syncService.getCachedMatchDetails(id.trim());
             }
           } catch (syncErr: any) {
             request.log.warn(`On-demand match hydration failed for '${id}': ${syncErr?.message}`);
           }
         }
+
+        if (cached?.commentary && Array.isArray(cached.commentary)) {
+          fixture.commentary = cached.commentary;
+        }
       }
 
-      // 3. Compute fixture ETag based on entity updatedAt timestamp, events count, and stats/lineups hash
+      // 3. Compute fixture ETag based on entity updatedAt timestamp, events count, commentary count, and stats/lineups hash
       const fixtureUpdatedMs = fixture.updatedAt ? new Date(fixture.updatedAt).getTime() : 0;
       const eventCount = fixture.events?.length ?? 0;
+      const commentaryCount = fixture.commentary?.length ?? 0;
       const detailsDigest = createHash('md5')
         .update(JSON.stringify(fixture.statistics || []) + JSON.stringify(fixture.lineups || []))
         .digest('hex')
         .slice(0, 8);
-      const etag = `W/"match-${fixture.id}-${fixtureUpdatedMs}-${eventCount}-${detailsDigest}"`;
+      const etag = `W/"match-${fixture.id}-${fixtureUpdatedMs}-${eventCount}-${commentaryCount}-${detailsDigest}"`;
 
       // 4. ETag 304 Validation
       const ifNoneMatch = request.headers['if-none-match'];

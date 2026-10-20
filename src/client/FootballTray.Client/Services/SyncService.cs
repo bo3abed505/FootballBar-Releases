@@ -382,11 +382,13 @@ public class SyncService : ISyncService
             }
 
             AppLogger.Debug("Sync", "PollStarted", $"Checking backend sync (Date: {queryDate:yyyy-MM-dd}, Teams: {teamIdList.Count}, Competitions: {compIdList.Count}, ETag: '{etagToSend ?? "none"}')...");
+            string? pinnedMatchId = App.CurrentTickerCoordinator?.PinnedMatchId ?? App.CurrentMainViewModel?.ManualPinnedMatchId;
             var response = await _apiClient.GetTrayAsync(
                 etagToSend,
                 queryDate,
                 teamIdList,
                 compIdList,
+                pinnedMatchId,
                 cancellationToken);
             sw.Stop();
             _lastRefreshDurationMs = sw.ElapsedMilliseconds;
@@ -485,7 +487,7 @@ public class SyncService : ISyncService
                 if (_notificationService != null)
                 {
                     var preferences = _preferencesService?.GetPreferences();
-                    string? pinnedMatchId = App.CurrentTickerCoordinator?.PinnedMatchId ?? App.CurrentMainViewModel?.ManualPinnedMatchId;
+                    pinnedMatchId ??= App.CurrentTickerCoordinator?.PinnedMatchId ?? App.CurrentMainViewModel?.ManualPinnedMatchId;
                     await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, pinnedMatchId, cancellationToken);
                 }
 

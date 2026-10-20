@@ -209,7 +209,7 @@ public static class TrayTickerFormatter
 
             mainText = $"{homeCode} {match.Score.Home}–{match.Score.Away} {awayCode} {minText}";
         }
-        else if (state is "PREMATCH" or "NS" or "TBD")
+        else if (state is "PREMATCH" or "NS" or "TBD" or "SCHEDULED" or "TIMED" or "NOT_STARTED")
         {
             var timeFormat = (preferences?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
             var localTime = match.KickoffTime.ToLocalTime().ToString(timeFormat);

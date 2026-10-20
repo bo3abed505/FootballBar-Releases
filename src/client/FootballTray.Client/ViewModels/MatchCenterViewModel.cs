@@ -157,12 +157,174 @@ public class MatchTimelineItem : INotifyPropertyChanged
 
     public bool HasSubtitle => !string.IsNullOrWhiteSpace(EventSubtitle);
 
+    private string? _teamName;
+    private string? _teamLogoUrl;
+
+    public string? TeamName
+    {
+        get => _teamName;
+        set
+        {
+            if (SetProperty(ref _teamName, value))
+            {
+                OnPropertyChanged(nameof(HasTeamName));
+                OnPropertyChanged(nameof(TeamNameVisibility));
+            }
+        }
+    }
+
+    public string? TeamLogoUrl
+    {
+        get => _teamLogoUrl;
+        set
+        {
+            if (SetProperty(ref _teamLogoUrl, value))
+            {
+                OnPropertyChanged(nameof(HasTeamLogo));
+                OnPropertyChanged(nameof(TeamLogoVisibility));
+            }
+        }
+    }
+
+    public bool HasTeamName => !string.IsNullOrWhiteSpace(TeamName);
+    public Visibility TeamNameVisibility => HasTeamName ? Visibility.Visible : Visibility.Collapsed;
+    public bool HasTeamLogo => !string.IsNullOrWhiteSpace(TeamLogoUrl);
+    public Visibility TeamLogoVisibility => HasTeamLogo ? Visibility.Visible : Visibility.Collapsed;
+
     // Direct Visibility properties for clean WinUI 3 XAML bindings without converters
     public Visibility HomeVisibility => IsHomeTeam ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AwayVisibility => IsAwayTeam ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NonNeutralVisibility => !IsNeutral ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NeutralVisibility => IsNeutral ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SubtitleVisibility => HasSubtitle ? Visibility.Visible : Visibility.Collapsed;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(storage, value)) return false;
+        storage = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+}
+
+public class MatchCommentaryItemViewModel : INotifyPropertyChanged
+{
+    private string _id = string.Empty;
+    private int _minute;
+    private int? _extraMinute;
+    private string _minuteDisplay = string.Empty;
+    private string _type = string.Empty;
+    private string _text = string.Empty;
+    private string? _teamId;
+    private string? _teamName;
+    private string? _teamLogoUrl;
+
+    public string Id
+    {
+        get => _id;
+        set => SetProperty(ref _id, value);
+    }
+
+    public int Minute
+    {
+        get => _minute;
+        set => SetProperty(ref _minute, value);
+    }
+
+    public int? ExtraMinute
+    {
+        get => _extraMinute;
+        set => SetProperty(ref _extraMinute, value);
+    }
+
+    public string MinuteDisplay
+    {
+        get => _minuteDisplay;
+        set => SetProperty(ref _minuteDisplay, value);
+    }
+
+    public string Type
+    {
+        get => _type;
+        set
+        {
+            if (SetProperty(ref _type, value))
+            {
+                OnPropertyChanged(nameof(IsWhistle));
+                OnPropertyChanged(nameof(WhistleVisibility));
+                OnPropertyChanged(nameof(TeamLogoVisibility));
+                OnPropertyChanged(nameof(NoLogoVisibility));
+                OnPropertyChanged(nameof(RowHighlightVisibility));
+            }
+        }
+    }
+
+    public string Text
+    {
+        get => _text;
+        set => SetProperty(ref _text, value);
+    }
+
+    public string? TeamId
+    {
+        get => _teamId;
+        set => SetProperty(ref _teamId, value);
+    }
+
+    public string? TeamName
+    {
+        get => _teamName;
+        set => SetProperty(ref _teamName, value);
+    }
+
+    public string? TeamLogoUrl
+    {
+        get => _teamLogoUrl;
+        set
+        {
+            if (SetProperty(ref _teamLogoUrl, value))
+            {
+                OnPropertyChanged(nameof(LogoUri));
+                OnPropertyChanged(nameof(TeamLogoVisibility));
+                OnPropertyChanged(nameof(NoLogoVisibility));
+            }
+        }
+    }
+
+    public bool IsWhistle => string.Equals(Type, "whistle", StringComparison.OrdinalIgnoreCase);
+    public Visibility WhistleVisibility => IsWhistle ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility RowHighlightVisibility => IsWhistle ? Visibility.Visible : Visibility.Collapsed;
+
+    public Uri? LogoUri
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_teamLogoUrl) && Uri.TryCreate(_teamLogoUrl, UriKind.Absolute, out var uri))
+            {
+                return uri;
+            }
+            return null;
+        }
+    }
+
+    public Visibility TeamLogoVisibility => !IsWhistle && LogoUri != null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NoLogoVisibility => !IsWhistle && LogoUri == null ? Visibility.Visible : Visibility.Collapsed;
+
+    public void UpdateFrom(MatchCommentaryItemViewModel source)
+    {
+        if (source == null) return;
+        Minute = source.Minute;
+        ExtraMinute = source.ExtraMinute;
+        MinuteDisplay = source.MinuteDisplay;
+        Type = source.Type;
+        Text = source.Text;
+        TeamId = source.TeamId;
+        TeamName = source.TeamName;
+        TeamLogoUrl = source.TeamLogoUrl;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -864,6 +1026,44 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     public ObservableCollection<MatchTimelineItem> TimelineItems { get; } = new();
     public ObservableCollection<MatchTimelineItem> KeyTimelineItems { get; } = new();
     public ObservableCollection<MatchTimelineItem> AllTimelineItems { get; } = new();
+    public ObservableCollection<MatchTimelineItem> KeyEvents { get; } = new();
+    public ObservableCollection<MatchCommentaryItemViewModel> CommentaryItems { get; } = new();
+
+    public bool HasKeyEvents => KeyEvents.Count > 0;
+    public bool HasCommentary => CommentaryItems.Count > 0;
+
+    private bool _isKeyEventsTabSelected = true;
+    public bool IsKeyEventsTabSelected
+    {
+        get => _isKeyEventsTabSelected;
+        set
+        {
+            if (SetProperty(ref _isKeyEventsTabSelected, value))
+            {
+                OnPropertyChanged(nameof(IsCommentaryTabSelected));
+                OnPropertyChanged(nameof(KeyEventsTabVisibility));
+                OnPropertyChanged(nameof(CommentaryTabVisibility));
+            }
+        }
+    }
+
+    public bool IsCommentaryTabSelected
+    {
+        get => !_isKeyEventsTabSelected;
+        set
+        {
+            if (value != !_isKeyEventsTabSelected)
+            {
+                IsKeyEventsTabSelected = !value;
+            }
+        }
+    }
+
+    public Visibility KeyEventsTabVisibility => _isKeyEventsTabSelected ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility CommentaryTabVisibility => !_isKeyEventsTabSelected ? Visibility.Visible : Visibility.Collapsed;
+
+    public string KeyEventsTabHeader => KeyEvents.Count > 0 ? $"⏱️ Key Events ({KeyEvents.Count})" : "⏱️ Key Events";
+    public string CommentaryTabHeader => CommentaryItems.Count > 0 ? $"📜 Commentary ({CommentaryItems.Count})" : "📜 Commentary";
 
     private bool _isKeyEventsViewSelected = true;
     public bool IsKeyEventsViewSelected
@@ -935,9 +1135,61 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         target.IsAwayTeam = source.IsAwayTeam;
         target.EventTitle = source.EventTitle;
         target.EventSubtitle = source.EventSubtitle;
+        target.TeamName = source.TeamName;
+        target.TeamLogoUrl = source.TeamLogoUrl;
         if (!string.IsNullOrEmpty(source.EventId))
         {
             target.EventId = source.EventId;
+        }
+    }
+
+    public static void SmartMergeCommentary(
+        ObservableCollection<MatchCommentaryItemViewModel> collection,
+        IReadOnlyList<MatchCommentaryItemViewModel> incoming)
+    {
+        if (collection == null || incoming == null) return;
+
+        for (int i = collection.Count - 1; i >= 0; i--)
+        {
+            var existing = collection[i];
+            if (!incoming.Any(inc => string.Equals(inc.Id, existing.Id, StringComparison.Ordinal)))
+            {
+                collection.RemoveAt(i);
+            }
+        }
+
+        for (int targetIdx = 0; targetIdx < incoming.Count; targetIdx++)
+        {
+            var inc = incoming[targetIdx];
+            int foundIdx = -1;
+            for (int j = 0; j < collection.Count; j++)
+            {
+                if (string.Equals(collection[j].Id, inc.Id, StringComparison.Ordinal))
+                {
+                    foundIdx = j;
+                    break;
+                }
+            }
+
+            if (foundIdx >= 0)
+            {
+                collection[foundIdx].UpdateFrom(inc);
+                if (foundIdx != targetIdx && targetIdx < collection.Count)
+                {
+                    collection.Move(foundIdx, targetIdx);
+                }
+            }
+            else
+            {
+                if (targetIdx >= collection.Count)
+                {
+                    collection.Add(inc);
+                }
+                else
+                {
+                    collection.Insert(targetIdx, inc);
+                }
+            }
         }
     }
 
@@ -1371,59 +1623,60 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         var allTimelineList = new List<MatchTimelineItem>();
         var keyTimelineList = new List<MatchTimelineItem>();
 
+        // Helper to determine if an event belongs to a team, supporting canonical IDs, legacy IDs, prefix stripping, and integer comparison
+        bool IsTeamMatch(string? eventTeamId, TeamSummaryDto? team, string? fallbackTeamId = null)
+        {
+            if (string.IsNullOrWhiteSpace(eventTeamId)) return false;
+
+            string evId = eventTeamId.Trim();
+            var candidates = new List<string>();
+
+            if (team != null)
+            {
+                if (!string.IsNullOrWhiteSpace(team.Id)) candidates.Add(team.Id.Trim());
+                if (!string.IsNullOrWhiteSpace(team.LegacyId)) candidates.Add(team.LegacyId.Trim());
+            }
+            if (!string.IsNullOrWhiteSpace(fallbackTeamId))
+            {
+                candidates.Add(fallbackTeamId.Trim());
+            }
+
+            if (candidates.Count == 0) return false;
+
+            foreach (var c in candidates)
+            {
+                if (string.Equals(evId, c, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            static string StripPrefix(string val)
+            {
+                if (val.StartsWith("ft_team_", StringComparison.OrdinalIgnoreCase))
+                    return val.Substring(8);
+                if (val.StartsWith("team_", StringComparison.OrdinalIgnoreCase))
+                    return val.Substring(5);
+                return val;
+            }
+
+            string evStripped = StripPrefix(evId);
+            foreach (var c in candidates)
+            {
+                string cStripped = StripPrefix(c);
+                if (string.Equals(evStripped, cStripped, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (long.TryParse(evStripped, out long evNum) && long.TryParse(cStripped, out long cNum))
+                {
+                    if (evNum == cNum)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
         if (match.Events != null && match.Events.Count > 0)
         {
-            // Helper to determine if an event belongs to a team, supporting canonical IDs, legacy IDs, prefix stripping, and integer comparison
-            bool IsTeamMatch(string? eventTeamId, TeamSummaryDto? team, string? fallbackTeamId = null)
-            {
-                if (string.IsNullOrWhiteSpace(eventTeamId)) return false;
-
-                string evId = eventTeamId.Trim();
-                var candidates = new List<string>();
-
-                if (team != null)
-                {
-                    if (!string.IsNullOrWhiteSpace(team.Id)) candidates.Add(team.Id.Trim());
-                    if (!string.IsNullOrWhiteSpace(team.LegacyId)) candidates.Add(team.LegacyId.Trim());
-                }
-                if (!string.IsNullOrWhiteSpace(fallbackTeamId))
-                {
-                    candidates.Add(fallbackTeamId.Trim());
-                }
-
-                if (candidates.Count == 0) return false;
-
-                foreach (var c in candidates)
-                {
-                    if (string.Equals(evId, c, StringComparison.OrdinalIgnoreCase))
-                        return true;
-                }
-
-                static string StripPrefix(string val)
-                {
-                    if (val.StartsWith("ft_team_", StringComparison.OrdinalIgnoreCase))
-                        return val.Substring(8);
-                    if (val.StartsWith("team_", StringComparison.OrdinalIgnoreCase))
-                        return val.Substring(5);
-                    return val;
-                }
-
-                string evStripped = StripPrefix(evId);
-                foreach (var c in candidates)
-                {
-                    string cStripped = StripPrefix(c);
-                    if (string.Equals(evStripped, cStripped, StringComparison.OrdinalIgnoreCase))
-                        return true;
-
-                    if (long.TryParse(evStripped, out long evNum) && long.TryParse(cStripped, out long cNum))
-                    {
-                        if (evNum == cNum)
-                            return true;
-                    }
-                }
-
-                return false;
-            }
 
             bool IsEventForTeam(TrayEventDto e, TeamSummaryDto? team, string? fallbackTeamId = null)
             {
@@ -1681,6 +1934,17 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 string typeLower = (ev.Type ?? string.Empty).ToLowerInvariant();
                 string detailLower = (ev.Detail ?? string.Empty).ToLowerInvariant();
                 string descLower = (ev.Description ?? string.Empty).ToLowerInvariant();
+
+                bool isWhistleOrPeriod = typeLower is "periodstart" or "periodend" or "halftime" or "fulltime" or "kickoff" or "half" or "whistle"
+                    || typeLower.Contains("period") || typeLower.Contains("halftime") || typeLower.Contains("fulltime") || typeLower.Contains("whistle") || typeLower.Contains("half")
+                    || detailLower.Contains("period") || detailLower.Contains("halftime") || detailLower.Contains("fulltime") || detailLower.Contains("whistle") || detailLower.Contains("half")
+                    || descLower.Contains("half time") || descLower.Contains("full time") || descLower.Contains("kickoff") || descLower.Contains("whistle");
+
+                if (isWhistleOrPeriod)
+                {
+                    continue; // Skip raw/backend period markers here so KeyEvents and Timeline have strictly deduplicated, correctly ordered whistle markers
+                }
+
                 bool isMissedPen = IsMissedPenalty(ev);
                 string icon = isMissedPen ? "❌" : typeLower switch
                 {
@@ -1790,6 +2054,13 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     eventSubtitle = string.Empty;
                 }
 
+                string? evTeamName = !string.IsNullOrWhiteSpace(ev.TeamName)
+                    ? ev.TeamName
+                    : (isHome ? HomeTeamName : (isAway ? AwayTeamName : null));
+                string? evTeamLogo = !string.IsNullOrWhiteSpace(ev.TeamLogoUrl)
+                    ? ev.TeamLogoUrl
+                    : (isHome ? match.HomeTeam?.LogoUrl : (isAway ? match.AwayTeam?.LogoUrl : null));
+
                 var timelineItem = new MatchTimelineItem
                 {
                     EventId = ev.Id ?? string.Empty,
@@ -1803,7 +2074,9 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     IsHomeTeam = isHome,
                     IsAwayTeam = isAway,
                     EventTitle = eventTitle,
-                    EventSubtitle = eventSubtitle
+                    EventSubtitle = eventSubtitle,
+                    TeamName = isNeutralType ? null : evTeamName,
+                    TeamLogoUrl = isNeutralType ? null : evTeamLogo
                 };
 
                 allTimelineList.Add(timelineItem);
@@ -1814,11 +2087,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     || typeLower.Contains("card")
                     || detailLower.Contains("card")
                     || typeLower.Contains("sub")
-                    || typeLower.Contains("var")
-                    || typeLower.Contains("period")
-                    || typeLower.Contains("halftime")
-                    || typeLower.Contains("fulltime")
-                    || typeLower.Contains("kickoff");
+                    || typeLower.Contains("var");
 
                 if (isKeyEvent)
                 {
@@ -1827,8 +2096,54 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             }
         }
 
+        // Compute true end minutes and stoppage times for 1st-half (HT) and regulation/ET (FT)
+        int maxHtExtraMinute = 0;
+        int maxFtMinute = Math.Max(90, match.ElapsedMinute > 90 ? match.ElapsedMinute : 90);
+        int maxFtExtraMinute = 0;
+
+        if (match.Events != null)
+        {
+            foreach (var ev in match.Events)
+            {
+                if (ev.Minute == 45 && ev.ExtraMinute > maxHtExtraMinute)
+                {
+                    maxHtExtraMinute = ev.ExtraMinute;
+                }
+                if (ev.Minute > maxFtMinute)
+                {
+                    maxFtMinute = ev.Minute;
+                    maxFtExtraMinute = ev.ExtraMinute;
+                }
+                else if (ev.Minute == maxFtMinute && ev.ExtraMinute > maxFtExtraMinute)
+                {
+                    maxFtExtraMinute = ev.ExtraMinute;
+                }
+            }
+        }
+
+        if (match.Commentary != null)
+        {
+            foreach (var c in match.Commentary)
+            {
+                int em = c.ExtraMinute;
+                if (c.Minute == 45 && em > maxHtExtraMinute)
+                {
+                    maxHtExtraMinute = em;
+                }
+                if (c.Minute > maxFtMinute)
+                {
+                    maxFtMinute = c.Minute;
+                    maxFtExtraMinute = em;
+                }
+                else if (c.Minute == maxFtMinute && em > maxFtExtraMinute)
+                {
+                    maxFtExtraMinute = em;
+                }
+            }
+        }
+
         // Synthesize unified match-state transition whistle markers:
-        // 0' Kickoff, HT, 45' Start 2nd Half, ET breaks, PEN, FT / AET / PEN
+        // 1' Kickoff, HT (45+x'), 46' Start 2nd Half, ET breaks, PEN, FT / AET / PEN (at very top)
         bool wentToExtraTime = stateNorm is "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "P" or "AET" or "PEN" or "FINISHED_AET" or "FINISHED_PEN"
             || (match.Score?.ExtraTime != null && (match.Score.ExtraTime.Home != null || match.Score.ExtraTime.Away != null))
             || match.ElapsedMinute > 90;
@@ -1845,8 +2160,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             keyTimelineList.Add(marker);
         }
 
-        // 1. Kickoff Marker (0')
-        if (hasStarted && !allTimelineList.Any(i => i.IsNeutral && (i.MinuteDisplay == "0'" || i.EventTitle.Contains("Kickoff", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Kickoff", StringComparison.OrdinalIgnoreCase) || i.EventTitle.Contains("First Half", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("First Half", StringComparison.OrdinalIgnoreCase))))
+        // 1. Kickoff Marker (1') - sorts at the very bottom (key = 0)
+        if (hasStarted && !allTimelineList.Any(i => i.EventId == "marker_kickoff"))
         {
             AddTimelineMarker(new MatchTimelineItem
             {
@@ -1854,7 +2169,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 Minute = 0,
                 ExtraMinute = 0,
                 SortPriority = 0,
-                MinuteDisplay = "0'",
+                MinuteDisplay = "1'",
                 IconGlyph = "⏱️",
                 EventTitle = "Kickoff",
                 EventSubtitle = "Match Started",
@@ -1864,24 +2179,25 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             });
         }
 
-        // 2. Half-Time Marker (HT)
+        // 2. Half-Time Marker (HT or 45+x') - sorts strictly above 45+x' 1st-half events and below 46' 2nd-half events
         bool reachedHalfTime = stateNorm is "HALFTIME" or "HT" or "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded
             || (match.Score?.HalfTime?.Home != null && match.Score?.HalfTime?.Away != null && hasStarted)
             || (match.ElapsedMinute >= 45 && stateNorm != "FIRST_HALF" && stateNorm != "1H" && stateNorm != "PREMATCH");
 
-        if (reachedHalfTime && !allTimelineList.Any(i => i.IsNeutral && (i.MinuteDisplay == "HT" || i.EventTitle.Contains("Half-Time", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Half Time", StringComparison.OrdinalIgnoreCase))))
+        if (reachedHalfTime && !allTimelineList.Any(i => i.EventId == "marker_halftime"))
         {
             string htScore = (match.Score?.HalfTime?.Home != null && match.Score?.HalfTime?.Away != null)
                 ? $"({match.Score.HalfTime.Home} - {match.Score.HalfTime.Away})"
                 : "First half ends";
+            string htMinuteDisplay = maxHtExtraMinute > 0 ? $"45+{maxHtExtraMinute}'" : "HT";
 
             AddTimelineMarker(new MatchTimelineItem
             {
                 EventId = "marker_halftime",
                 Minute = 45,
                 ExtraMinute = 90,
-                SortPriority = 1,
-                MinuteDisplay = "HT",
+                SortPriority = 9,
+                MinuteDisplay = htMinuteDisplay,
                 IconGlyph = "🏁",
                 EventTitle = "Half-Time",
                 EventSubtitle = htScore,
@@ -1891,19 +2207,19 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             });
         }
 
-        // 3. Start 2nd Half Marker (45')
+        // 3. Start 2nd Half Marker (46' - added only to allTimelineList, kept out of KeyEvents to avoid clutter)
         bool startedSecondHalf = stateNorm is "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded
             || (match.ElapsedMinute > 45 && stateNorm != "HALFTIME" && stateNorm != "HT" && stateNorm != "EXTRA_TIME_HALFTIME" && stateNorm != "BT" && stateNorm != "FIRST_HALF" && stateNorm != "1H" && stateNorm != "PREMATCH");
 
-        if (startedSecondHalf && !allTimelineList.Any(i => i.EventTitle.Contains("Start 2nd Half", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Second Half", StringComparison.OrdinalIgnoreCase)))
+        if (startedSecondHalf && !allTimelineList.Any(i => i.EventId == "marker_2h"))
         {
-            AddTimelineMarker(new MatchTimelineItem
+            allTimelineList.Add(new MatchTimelineItem
             {
                 EventId = "marker_2h",
                 Minute = 45,
-                ExtraMinute = 90,
-                SortPriority = 2,
-                MinuteDisplay = "45'",
+                ExtraMinute = 91,
+                SortPriority = 8,
+                MinuteDisplay = "46'",
                 IconGlyph = "⏱️",
                 EventTitle = "Start 2nd Half",
                 EventSubtitle = "Second half begins",
@@ -1913,13 +2229,13 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             });
         }
 
-        // 4. Extra Time Markers (if match went the distance)
+        // 4. Extra Time Markers (if match went the distance - added only to allTimelineList)
         if (wentToExtraTime)
         {
             // End of 90 Min (Regular Time Whistle)
-            if (!allTimelineList.Any(i => i.IsNeutral && (i.EventTitle.Contains("End of 90", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("End of 90", StringComparison.OrdinalIgnoreCase))))
+            if (!allTimelineList.Any(i => i.EventId == "marker_end_90"))
             {
-                AddTimelineMarker(new MatchTimelineItem
+                allTimelineList.Add(new MatchTimelineItem
                 {
                     EventId = "marker_end_90",
                     Minute = 90,
@@ -1936,9 +2252,9 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             }
 
             // Extra Time 1st Half Kickoff
-            if (!allTimelineList.Any(i => i.IsNeutral && (i.EventTitle.Contains("Extra Time Kickoff", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Extra Time Kickoff", StringComparison.OrdinalIgnoreCase))))
+            if (!allTimelineList.Any(i => i.EventId == "marker_et_start"))
             {
-                AddTimelineMarker(new MatchTimelineItem
+                allTimelineList.Add(new MatchTimelineItem
                 {
                     EventId = "marker_et_start",
                     Minute = 90,
@@ -1959,9 +2275,9 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 || (match.ElapsedMinute >= 105 && stateNorm != "ET")
                 || isConcluded;
 
-            if (reachedEtBreak && !allTimelineList.Any(i => i.IsNeutral && (i.EventTitle.Contains("Extra Time Half-Time", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Extra Time Half-Time", StringComparison.OrdinalIgnoreCase))))
+            if (reachedEtBreak && !allTimelineList.Any(i => i.EventId == "marker_et_ht"))
             {
-                AddTimelineMarker(new MatchTimelineItem
+                allTimelineList.Add(new MatchTimelineItem
                 {
                     EventId = "marker_et_ht",
                     Minute = 105,
@@ -1982,9 +2298,9 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 || (match.ElapsedMinute > 105 && stateNorm != "BT")
                 || isConcluded;
 
-            if (startedEt2h && !allTimelineList.Any(i => i.IsNeutral && (i.EventTitle.Contains("Start Extra Time 2nd Half", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Extra Time 2nd Half", StringComparison.OrdinalIgnoreCase))))
+            if (startedEt2h && !allTimelineList.Any(i => i.EventId == "marker_et_2h"))
             {
-                AddTimelineMarker(new MatchTimelineItem
+                allTimelineList.Add(new MatchTimelineItem
                 {
                     EventId = "marker_et_2h",
                     Minute = 105,
@@ -2004,7 +2320,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         // 5. Penalty Shootout Marker (if match went to penalties)
         if (wentToPenalties)
         {
-            if (!allTimelineList.Any(i => i.IsNeutral && (i.MinuteDisplay == "PEN" || i.EventTitle.Contains("Penalty Shootout", StringComparison.OrdinalIgnoreCase))))
+            if (!allTimelineList.Any(i => i.EventId == "marker_pen_start"))
             {
                 string penSubtitle = (match.Score?.Penalty?.Home != null && match.Score?.Penalty?.Away != null)
                     ? $"Shootout ({match.Score.Penalty.Home} - {match.Score.Penalty.Away})"
@@ -2027,8 +2343,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             }
         }
 
-        // 6. Full-Time Final Whistle (FT, AET, PEN)
-        if (isConcluded && !allTimelineList.Any(i => i.IsNeutral && (i.EventTitle.StartsWith("Full-Time", StringComparison.OrdinalIgnoreCase) || i.Description.StartsWith("Full-Time", StringComparison.OrdinalIgnoreCase) || i.Description.StartsWith("Full Time", StringComparison.OrdinalIgnoreCase))))
+        // 6. Full-Time Final Whistle (FT, AET, PEN) - sorts at the very top (key = 99,999,909)
+        if (isConcluded && !allTimelineList.Any(i => i.EventId.StartsWith("marker_fulltime")))
         {
             if (wentToPenalties)
             {
@@ -2051,13 +2367,14 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             else if (wentToExtraTime)
             {
                 string aetScore = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0}";
+                string aetDisplay = maxFtExtraMinute > 0 ? $"{maxFtMinute}+{maxFtExtraMinute}'" : "AET";
                 AddTimelineMarker(new MatchTimelineItem
                 {
                     EventId = "marker_fulltime_aet",
                     Minute = 999,
                     ExtraMinute = 999,
                     SortPriority = 9,
-                    MinuteDisplay = "AET",
+                    MinuteDisplay = aetDisplay,
                     IconGlyph = "🏁",
                     EventTitle = "Full-Time (AET)",
                     EventSubtitle = $"Final whistle ({aetScore})",
@@ -2069,13 +2386,14 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             else
             {
                 string finalScore = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0}";
+                string ftDisplay = maxFtExtraMinute > 0 ? $"{maxFtMinute}+{maxFtExtraMinute}'" : "FT";
                 AddTimelineMarker(new MatchTimelineItem
                 {
                     EventId = "marker_fulltime",
                     Minute = 999,
                     ExtraMinute = 999,
                     SortPriority = 9,
-                    MinuteDisplay = "FT",
+                    MinuteDisplay = ftDisplay,
                     IconGlyph = "🏁",
                     EventTitle = "Full-Time",
                     EventSubtitle = $"Final whistle ({finalScore})",
@@ -2091,10 +2409,127 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         SmartMergeTimeline(AllTimelineItems, sortedAll);
         SmartMergeTimeline(KeyTimelineItems, sortedKey);
+        SmartMergeTimeline(KeyEvents, sortedKey);
         ApplyTimelineView();
 
         SmartMergeIncidents(HomeIncidents, newHomeIncidents);
         SmartMergeIncidents(AwayIncidents, newAwayIncidents);
+
+        // Populate Commentary collection (reverse-chronological)
+        var commentaryList = new List<MatchCommentaryItemViewModel>();
+        if (match.Commentary != null && match.Commentary.Count > 0)
+        {
+            foreach (var c in match.Commentary)
+            {
+                string idLower = (c.Id ?? string.Empty).ToLowerInvariant();
+                string textLower = (c.Text ?? string.Empty).ToLowerInvariant();
+                string typeLower = (c.Type ?? string.Empty).ToLowerInvariant();
+                bool isWhistle = typeLower == "whistle" || idLower.Contains("whistle");
+
+                string minDisplay;
+                if (isWhistle && (idLower.Contains("fulltime") || textLower.Contains("full-time") || textLower.Contains("full time")))
+                {
+                    minDisplay = c.ExtraMinute > 0 ? $"{c.Minute}+{c.ExtraMinute}'" : "FT";
+                }
+                else if (isWhistle && (idLower.Contains("halftime") || textLower.Contains("half-time") || textLower.Contains("half time")))
+                {
+                    minDisplay = c.ExtraMinute > 0 ? $"45+{c.ExtraMinute}'" : "HT";
+                }
+                else if (isWhistle && (idLower.Contains("kickoff") || textLower.Contains("kicks off")))
+                {
+                    minDisplay = "1'";
+                }
+                else
+                {
+                    minDisplay = c.ExtraMinute > 0
+                        ? $"{c.Minute}+{c.ExtraMinute}'"
+                        : $"{c.Minute}'";
+                }
+
+                string? logo = c.TeamLogoUrl;
+                if (string.IsNullOrWhiteSpace(logo))
+                {
+                    if (IsTeamMatch(c.TeamId, match.HomeTeam, match.HomeTeamId))
+                        logo = match.HomeTeam?.LogoUrl ?? HomeTeamLogoUrl;
+                    else if (IsTeamMatch(c.TeamId, match.AwayTeam, match.AwayTeamId))
+                        logo = match.AwayTeam?.LogoUrl ?? AwayTeamLogoUrl;
+                }
+
+                commentaryList.Add(new MatchCommentaryItemViewModel
+                {
+                    Id = c.Id ?? $"{c.Minute}_{c.Type}_{c.Text?.GetHashCode()}",
+                    Minute = c.Minute,
+                    ExtraMinute = c.ExtraMinute > 0 ? c.ExtraMinute : null,
+                    MinuteDisplay = minDisplay,
+                    Type = c.Type ?? "commentary",
+                    Text = c.Text ?? string.Empty,
+                    TeamId = c.TeamId,
+                    TeamName = c.TeamName,
+                    TeamLogoUrl = logo
+                });
+            }
+        }
+        else
+        {
+            // Graceful synthetic fallback if upstream commentary was empty
+            foreach (var item in sortedAll)
+            {
+                commentaryList.Add(new MatchCommentaryItemViewModel
+                {
+                    Id = $"synthetic_{item.EventId}_{item.Minute}_{item.GetHashCode()}",
+                    Minute = item.Minute,
+                    ExtraMinute = item.ExtraMinute > 0 ? item.ExtraMinute : null,
+                    MinuteDisplay = item.MinuteDisplay,
+                    Type = item.IconGlyph,
+                    Text = !string.IsNullOrWhiteSpace(item.Description)
+                        ? item.Description
+                        : $"{item.EventTitle}{(item.HasSubtitle ? $" ({item.EventSubtitle})" : "")}",
+                    TeamName = item.TeamName,
+                    TeamLogoUrl = item.TeamLogoUrl
+                });
+            }
+        }
+
+        // Guarantee reverse-chronological order with whistles placed at exact boundaries:
+        // FullTime at very top, HalfTime between 45+x and 46, Kickoff at very bottom
+        commentaryList = commentaryList
+            .OrderByDescending(c =>
+            {
+                string idLower = (c.Id ?? string.Empty).ToLowerInvariant();
+                string textLower = (c.Text ?? string.Empty).ToLowerInvariant();
+                string typeLower = (c.Type ?? string.Empty).ToLowerInvariant();
+                bool isWhistle = typeLower == "whistle" || idLower.Contains("whistle");
+
+                if (isWhistle && (idLower.Contains("fulltime") || textLower.Contains("full-time") || textLower.Contains("full time") || c.MinuteDisplay == "FT"))
+                {
+                    return 999999999L;
+                }
+
+                if (isWhistle && (idLower.Contains("halftime") || textLower.Contains("half-time") || textLower.Contains("half time") || c.MinuteDisplay == "HT"))
+                {
+                    return (45L * 100000L) + (90L * 100L) + 9L;
+                }
+
+                if (isWhistle && (idLower.Contains("kickoff") || textLower.Contains("kicks off")))
+                {
+                    return 0L;
+                }
+
+                long m = c.Minute;
+                long em = c.ExtraMinute ?? 0;
+                return (m * 100000L) + (em * 100L) + 5L;
+            })
+            .ToList();
+
+        SmartMergeCommentary(CommentaryItems, commentaryList);
+
+        OnPropertyChanged(nameof(HasKeyEvents));
+        OnPropertyChanged(nameof(HasCommentary));
+        OnPropertyChanged(nameof(KeyEventsTabHeader));
+        OnPropertyChanged(nameof(CommentaryTabHeader));
+
+        // Hook real-time clock/score sync to taskbar ticker coordinator
+        App.CurrentTickerCoordinator?.UpdateMatchFromDetails(match);
 
         // 2. Populate Lineups
         PopulateLineups(match);

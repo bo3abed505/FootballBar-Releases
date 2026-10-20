@@ -1163,9 +1163,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (_syncService is SyncService sync) sync.NotificationService?.Engine?.IngestMatchBaseline(pinnedMatch);
             string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
             string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
-            string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
-            string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : pinnedMatch.State);
-            ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+            string stateNorm = (pinnedMatch.State ?? string.Empty).Trim().ToUpperInvariant();
+            bool isPreMatch = stateNorm is "SCHEDULED" or "TIMED" or "NOT_STARTED" or "NS" or "TBD" or "PREMATCH";
+            var prefs = _preferencesService?.GetPreferences();
+
+            if (isPreMatch)
+            {
+                var timeFormat = (prefs?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
+                string time = pinnedMatch.KickoffTime != default ? pinnedMatch.KickoffTime.ToLocalTime().ToString(timeFormat) : "Upcoming";
+                ActiveTickerText = $"📌 Pinned: {home} vs {away} ({time})";
+            }
+            else
+            {
+                string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
+                string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : (pinnedMatch.State ?? "LIVE"));
+                ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+            }
         }
         else
         {
@@ -1212,9 +1225,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (_syncService is SyncService sync) sync.NotificationService?.Engine?.IngestMatchBaseline(pinnedMatch);
                 string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
                 string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
-                string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
-                string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : pinnedMatch.State);
-                ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+                string stateNorm = (pinnedMatch.State ?? string.Empty).Trim().ToUpperInvariant();
+                bool isPreMatch = stateNorm is "SCHEDULED" or "TIMED" or "NOT_STARTED" or "NS" or "TBD" or "PREMATCH";
+                var prefs = _preferencesService?.GetPreferences();
+
+                if (isPreMatch)
+                {
+                    var timeFormat = (prefs?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
+                    string time = pinnedMatch.KickoffTime != default ? pinnedMatch.KickoffTime.ToLocalTime().ToString(timeFormat) : "Upcoming";
+                    ActiveTickerText = $"📌 Pinned: {home} vs {away} ({time})";
+                }
+                else
+                {
+                    string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
+                    string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : (pinnedMatch.State ?? "LIVE"));
+                    ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+                }
             }
         }
         else
@@ -1476,9 +1502,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
                 string away = pinnedMatch.AwayTeam?.ShortName ?? pinnedMatch.AwayTeam?.Name ?? "Away";
-                string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
-                string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : pinnedMatch.State);
-                ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+                string stateNorm = (pinnedMatch.State ?? string.Empty).Trim().ToUpperInvariant();
+                bool isPreMatch = stateNorm is "SCHEDULED" or "TIMED" or "NOT_STARTED" or "NS" or "TBD" or "PREMATCH";
+
+                if (isPreMatch)
+                {
+                    var timeFormat = (prefs?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
+                    string time = pinnedMatch.KickoffTime != default ? pinnedMatch.KickoffTime.ToLocalTime().ToString(timeFormat) : "Upcoming";
+                    ActiveTickerText = $"📌 Pinned: {home} vs {away} ({time})";
+                }
+                else
+                {
+                    string score = $"{pinnedMatch.Score?.Home ?? 0}–{pinnedMatch.Score?.Away ?? 0}";
+                    string time = pinnedMatch.State == "HT" ? "HT" : (pinnedMatch.ElapsedMinute > 0 ? $"{pinnedMatch.ElapsedMinute}'" : (pinnedMatch.State ?? "LIVE"));
+                    ActiveTickerText = $"📌 Pinned: {home} {score} {away} ({time})";
+                }
             }
             else
             {
@@ -1504,22 +1542,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
-            var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
-            ActiveMatchId = activeMatch?.Id;
+            // No manual pin active: do NOT set ActiveMatchId so unpinned matches are never falsely marked pinned
+            ActiveMatchId = null;
 
-            if (activeMatch != null)
+            if (prefs?.EnableTickerCarousel == true)
             {
-                string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
-                string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
-                string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
-                string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : activeMatch.State);
-                ActiveTickerText = $"{home} {score} {away} ({time})";
+                var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
+                if (activeMatch != null)
+                {
+                    string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
+                    string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
+                    string stateNorm = (activeMatch.State ?? string.Empty).Trim().ToUpperInvariant();
+                    bool isPreMatch = stateNorm is "SCHEDULED" or "TIMED" or "NOT_STARTED" or "NS" or "TBD" or "PREMATCH";
+
+                    if (isPreMatch)
+                    {
+                        var timeFormat = (prefs?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
+                        string time = activeMatch.KickoffTime != default ? activeMatch.KickoffTime.ToLocalTime().ToString(timeFormat) : "Upcoming";
+                        ActiveTickerText = $"{home} vs {away} ({time})";
+                    }
+                    else
+                    {
+                        string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
+                        string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : (activeMatch.State ?? "LIVE"));
+                        ActiveTickerText = $"{home} {score} {away} ({time})";
+                    }
+                }
+                else
+                {
+                    ActiveTickerText = "📌 Auto-Rotate Ticker (Carousel Mode)";
+                }
             }
             else
             {
-                ActiveTickerText = prefs?.EnableTickerCarousel == true
-                    ? "📌 Auto-Rotate Ticker (Carousel Mode)"
-                    : "📌 No pinned matches";
+                ActiveTickerText = "📌 No pinned matches";
             }
         }
 
@@ -1549,7 +1605,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         foreach (var match in dateFiltered)
         {
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
-            bool isActive = match.Id == ActiveMatchId;
+            bool isExplicitlyPinned = !string.IsNullOrEmpty(ManualPinnedMatchId) &&
+                string.Equals(match.Id, ManualPinnedMatchId, StringComparison.Ordinal);
             bool homeFollowed = (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
                 || (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId))
                 || (!string.IsNullOrEmpty(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name))
@@ -1578,7 +1635,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             viewModels.Add(MatchItemViewModel.FromDto(
                 match,
                 relevance,
-                isActive,
+                isExplicitlyPinned,
                 prefs?.Use24HourFormat ?? true,
                 homeFollowed,
                 awayFollowed,

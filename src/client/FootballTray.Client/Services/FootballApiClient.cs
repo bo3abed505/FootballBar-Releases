@@ -153,20 +153,21 @@ public class FootballApiClient : IDisposable
     /// Fetches the tray match collection from /api/v2/tray with optional date, followed teams, and ETag 304 validation.
     /// </summary>
     public Task<TrayApiResponse> GetTrayAsync(string? ifNoneMatch, CancellationToken cancellationToken) =>
-        GetTrayAsync(ifNoneMatch, null, null, null, cancellationToken);
+        GetTrayAsync(ifNoneMatch, null, null, null, null, cancellationToken);
 
     public Task<TrayApiResponse> GetTrayAsync(
         string? ifNoneMatch,
         DateTime? date,
         IEnumerable<string>? teams,
         CancellationToken cancellationToken) =>
-        GetTrayAsync(ifNoneMatch, date, teams, null, cancellationToken);
+        GetTrayAsync(ifNoneMatch, date, teams, null, null, cancellationToken);
 
     public async Task<TrayApiResponse> GetTrayAsync(
         string? ifNoneMatch = null,
         DateTime? date = null,
         IEnumerable<string>? teams = null,
         IEnumerable<string>? competitions = null,
+        string? pinnedMatchId = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -193,6 +194,10 @@ public class FootballApiClient : IDisposable
                 {
                     uriBuilder.Append($"competitions={Uri.EscapeDataString(string.Join(",", compList))}&");
                 }
+            }
+            if (!string.IsNullOrWhiteSpace(pinnedMatchId))
+            {
+                uriBuilder.Append($"pinnedMatchId={Uri.EscapeDataString(pinnedMatchId.Trim())}&");
             }
             string uri = uriBuilder.ToString().TrimEnd('?', '&');
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);

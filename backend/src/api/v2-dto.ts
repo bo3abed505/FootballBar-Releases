@@ -107,6 +107,7 @@ export interface V2MatchDetail {
   referee?: string | null;
   kickoffTime: Date | string;
   events: any[];
+  commentary: any[];
   lineups: any[];
   statistics: any[];
   trust: V2TrustMetadata;
@@ -312,7 +313,193 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     venue: fixture.venue,
     referee: fixture.referee,
     kickoffTime: fixture.kickoffTime,
-    events: fixture.events || [],
+    events: (() => {
+      const homeTeamId = fixture.homeTeam?.canonicalId || fixture.homeTeam?.id || fixture.homeTeamId;
+      const awayTeamId = fixture.awayTeam?.canonicalId || fixture.awayTeam?.id || fixture.awayTeamId;
+      const homeTeamName = fixture.homeTeam?.name;
+      const awayTeamName = fixture.awayTeam?.name;
+      const homeTeamLogoUrl = fixture.homeTeam?.logoUrl;
+      const awayTeamLogoUrl = fixture.awayTeam?.logoUrl;
+
+      return (fixture.events || []).map((e: any) => {
+        const typeLower = String(e.type || '').toLowerCase();
+        const evMin = typeof e.minute === 'number' ? e.minute : (parseInt(String(e.minute || e.time || '0'), 10) || 0);
+        const isFt = typeLower.includes('fulltime') ||
+          typeLower.includes('full_time') ||
+          typeLower.includes('full-time') ||
+          e.halfStrShort === 'FT' ||
+          ((typeLower === 'half' || typeLower.includes('half')) && evMin >= 80);
+        const isSecondHalf = !isFt && (typeLower.includes('secondhalf') || typeLower.includes('2ndhalf') || evMin === 46);
+        const isHt = !isFt && !isSecondHalf && (typeLower.includes('half') || e.halfStrShort === 'HT');
+
+        let sanitizedType = e.type;
+        let sanitizedDetail = e.detail;
+        let sanitizedDesc = e.description;
+
+        if (isFt) {
+          sanitizedType = 'FullTime';
+          sanitizedDetail = 'Full Time';
+          sanitizedDesc = String(sanitizedDesc || '').toLowerCase().includes('half time')
+            ? 'Full Time whistle. The match concludes.'
+            : (sanitizedDesc || 'Full Time whistle. The match concludes.');
+        } else if (isSecondHalf) {
+          sanitizedType = 'PeriodStart';
+          sanitizedDetail = 'Second Half';
+          sanitizedDesc = sanitizedDesc || 'Second half is underway.';
+        } else if (isHt) {
+          sanitizedType = 'HalfTime';
+          sanitizedDetail = 'Half Time';
+          sanitizedDesc = sanitizedDesc || 'Half Time whistle.';
+        }
+
+        const isNeutral = isFt || isSecondHalf || isHt ||
+          typeLower.includes('period') ||
+          typeLower.includes('kickoff') ||
+          typeLower.includes('whistle');
+
+        let teamId = e.teamId ?? null;
+        let teamName = e.teamName ?? null;
+        let teamLogoUrl = e.teamLogoUrl ?? null;
+
+        if (!isNeutral) {
+          if (!teamName || !teamLogoUrl) {
+            if (teamId === homeTeamId || teamId === fixture.homeTeam?.id || teamId === fixture.homeTeamId) {
+              teamName = homeTeamName ?? null;
+              teamLogoUrl = homeTeamLogoUrl ?? null;
+            } else if (teamId === awayTeamId || teamId === fixture.awayTeam?.id || teamId === fixture.awayTeamId) {
+              teamName = awayTeamName ?? null;
+              teamLogoUrl = awayTeamLogoUrl ?? null;
+            }
+          }
+        } else {
+          teamId = null;
+          teamName = null;
+          teamLogoUrl = null;
+        }
+
+        return {
+          ...e,
+          type: sanitizedType,
+          detail: sanitizedDetail,
+          description: sanitizedDesc,
+          teamId,
+          teamName,
+          teamLogoUrl,
+        };
+      });
+    })(),
+    commentary: (() => {
+      if (Array.isArray(fixture.commentary) && fixture.commentary.length > 0) {
+        return fixture.commentary;
+      }
+
+      // Graceful fallback: synthesize reverse-chronological commentary from events + whistle markers
+      const synthCommentary: any[] = [];
+      const homeTeamId = fixture.homeTeam?.canonicalId || fixture.homeTeam?.id || fixture.homeTeamId;
+      const awayTeamId = fixture.awayTeam?.canonicalId || fixture.awayTeam?.id || fixture.awayTeamId;
+      const homeTeamName = fixture.homeTeam?.name;
+      const awayTeamName = fixture.awayTeam?.name;
+      const homeTeamLogoUrl = fixture.homeTeam?.logoUrl;
+      const awayTeamLogoUrl = fixture.awayTeam?.logoUrl;
+
+      const eventList = fixture.events || [];
+      eventList.forEach((ev: any, idx: number) => {
+        const typeLower = String(ev.type || '').toLowerCase();
+        const evMin = typeof ev.minute === 'number' ? ev.minute : (parseInt(String(ev.minute || ev.time || '0'), 10) || 0);
+        const isFt = typeLower.includes('fulltime') ||
+          typeLower.includes('full_time') ||
+          typeLower.includes('full-time') ||
+          ev.halfStrShort === 'FT' ||
+          ((typeLower === 'half' || typeLower.includes('half')) && evMin >= 80);
+        const isSecondHalf = !isFt && (typeLower.includes('secondhalf') || typeLower.includes('2ndhalf') || evMin === 46);
+        const isHt = !isFt && !isSecondHalf && (typeLower.includes('half') || ev.halfStrShort === 'HT');
+
+        const isNeutral = isFt || isSecondHalf || isHt ||
+          typeLower.includes('period') ||
+          typeLower.includes('kickoff') ||
+          typeLower.includes('whistle');
+
+        let teamId = ev.teamId ?? null;
+        let teamName = ev.teamName ?? null;
+        let teamLogoUrl = ev.teamLogoUrl ?? null;
+
+        if (!isNeutral) {
+          if (!teamName || !teamLogoUrl) {
+            if (teamId === homeTeamId || teamId === fixture.homeTeam?.id || teamId === fixture.homeTeamId) {
+              teamName = homeTeamName ?? null;
+              teamLogoUrl = homeTeamLogoUrl ?? null;
+            } else if (teamId === awayTeamId || teamId === fixture.awayTeam?.id || teamId === fixture.awayTeamId) {
+              teamName = awayTeamName ?? null;
+              teamLogoUrl = awayTeamLogoUrl ?? null;
+            }
+          }
+        } else {
+          teamId = null;
+          teamName = null;
+          teamLogoUrl = null;
+        }
+
+        let cType = ev.type;
+        let text = ev.description;
+        if (isNeutral) {
+          cType = 'whistle';
+          if (typeLower.includes('kickoff') || typeLower.includes('periodstart')) {
+            text = `First half kicks off! ${homeTeamName || 'Home'} vs ${awayTeamName || 'Away'} is underway.`;
+          } else if (isSecondHalf) {
+            text = 'Second half is underway!';
+          } else if (isHt) {
+            text = `Half-time whistle blows! Score at the break: ${homeTeamName || 'Home'} ${fixture.homeScore ?? 0}–${fixture.awayScore ?? 0} ${awayTeamName || 'Away'}.`;
+          } else if (isFt) {
+            text = `Full-time whistle! The referee brings the match to an end: ${homeTeamName || 'Home'} ${fixture.homeScore ?? 0}–${fixture.awayScore ?? 0} ${awayTeamName || 'Away'}.`;
+          }
+        } else if (!text || text === ev.type) {
+          if (ev.type === 'Goal') {
+            cType = 'goal';
+            text = `GOAL! ${ev.playerName || 'Goal'} finds the back of the net for ${teamName || 'their team'}!${ev.assistPlayerName ? ` (Assist: ${ev.assistPlayerName})` : ''} (${fixture.homeScore ?? 0}–${fixture.awayScore ?? 0})`;
+          } else if (ev.type === 'YellowCard') {
+            cType = 'card';
+            text = `Yellow card shown to ${ev.playerName || 'Player'} (${teamName || 'team'}) following a foul. Play briefly stops for the referee's booking.`;
+          } else if (ev.type === 'RedCard') {
+            cType = 'card';
+            text = `RED CARD! ${ev.playerName || 'Player'} (${teamName || 'team'}) is sent off following a serious foul! Play halts as the player leaves the pitch.`;
+          } else if (ev.type === 'Substitution') {
+            cType = 'sub';
+            text = `Tactical substitution for ${teamName || 'team'}: ${ev.assistPlayerName || 'Incoming player'} comes on to replace ${ev.playerName || 'outgoing player'}.`;
+          } else {
+            text = `${ev.type}${ev.playerName ? ` - ${ev.playerName}` : ''}`;
+          }
+        }
+
+        synthCommentary.push({
+          id: `comm_${ev.id || ev.eventUid || idx}`,
+          minute: evMin,
+          extraMinute: ev.extraMinute ?? 0,
+          type: cType,
+          text,
+          teamId,
+          teamName,
+          teamLogoUrl,
+        });
+      });
+
+      // Reverse-chronological order: most recent minute on top
+      synthCommentary.sort((a, b) => {
+        if (b.minute !== a.minute) return b.minute - a.minute;
+        if (b.extraMinute !== a.extraMinute) return b.extraMinute - a.extraMinute;
+        const revPriority = (item: any) => {
+          const id = String(item.id || '');
+          const t = String(item.text || '').toLowerCase();
+          if (id.includes('fulltime') || t.includes('full-time') || t.includes('full time')) return 2;
+          if (id.includes('halftime') || t.includes('half-time') || t.includes('half time')) return 2;
+          if (id.includes('kickoff') || t.includes('kicks off') || id.includes('secondhalf') || t.includes('second half')) return 0;
+          return 1;
+        };
+        return revPriority(b) - revPriority(a);
+      });
+
+
+      return synthCommentary;
+    })(),
     lineups: fixture.lineups || [],
     statistics: (fixture.statistics || []).map((s: any) => ({
       ...s,
