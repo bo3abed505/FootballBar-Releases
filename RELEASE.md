@@ -32,12 +32,12 @@
                     │ SQL
                     ▼
 ┌────────────────────────────────────────┐
-│   PostgreSQL Persistence Database      │
+│ Embedded SQLite Database (better-sqlite3)│
 └────────────────────────────────────────┘
 ```
 
 > [!IMPORTANT]
-> The Windows Desktop client is completely decoupled from backend credentials and third-party API keys. It contains **zero** database connection strings, **zero** API-Football keys, and **zero** development paths.
+> The Windows Desktop client is completely decoupled from backend credentials and third-party API keys. It contains **zero** database connection strings, **zero** provider API keys, and **zero** development paths.
 
 ---
 
@@ -251,8 +251,8 @@ FootballTray includes local, bounded, non-intrusive diagnostics designed to diag
 | **Client displays "Stale Data" badge** | Backend unreachable or poll timeout | Check `footballtray.log` for `[Sync][PollFailed]` errors. Verify `GET /health` on backend. | Ensure backend service is running; client will automatically resume fresh sync on next poll. |
 | **Taskbar ticker not visible** | Explorer restart or HWND re-docking | Check Diagnostics UI: Taskbar Host will show `Unattached` or `Recovering`. | Taskbar watcher automatically detects `TaskbarCreated` message and re-attaches within 5 seconds. |
 | **Notifications not appearing** | Notifications disabled in Windows Settings or preferences | Check Diagnostics UI for Notification Engine status (`Registered` vs `Disabled`). Check `preferences.json`. | Enable notifications in Windows App Settings or toggle "Enable Notifications" in FootballTray UI. |
-| **Backend reports Provider Quota Exhaustion** | Daily API-Football request budget limit reached | Check `/api/diagnostics` -> `budget.isExhausted`. | Acquisition scheduler automatically enters fallback idle mode until daily budget resets at 00:00 UTC. |
-| **Database disconnected** | PostgreSQL service stopped or invalid credentials in `.env` | Check `GET /health` -> `"database": "disconnected"`. | Restart PostgreSQL service and check `DATABASE_URL` in backend `.env`. |
+| **Backend reports Provider Quota Exhaustion** | Fallback API-Football request budget limit reached | Check `/api/diagnostics` -> `budget.isExhausted`. | Acquisition scheduler prioritizes unmetered FotMob primary with automated circuit-breaker fallback to API-Football. |
+| **Database disconnected or locked** | SQLite database file inaccessible or locked | Check `GET /health` -> `"database": "disconnected"`. | Ensure SQLite database file has write permissions and disk space available (`better-sqlite3` WAL mode). |
 
 ---
 

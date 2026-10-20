@@ -1,4 +1,3 @@
-
 import { IDataProvider } from '../providers/types.js';
 import { FootballProvider } from '../providers/football-provider.js';
 import { MockFootballProvider } from '../providers/mock.provider.js';
@@ -27,7 +26,7 @@ export function createProvider(options?: ProviderFactoryOptions): IDataProvider 
   const hasActiveProviderOption = !!options && 'activeProvider' in options;
   const rawProvider = (
     hasActiveProviderOption
-      ? options.activeProvider ?? 'mock'
+      ? options.activeProvider ?? 'fotmob'
       : options?.provider ?? process.env.ACTIVE_PROVIDER ?? process.env.FOOTBALL_PROVIDER ?? 'fotmob'
   ).trim().toLowerCase();
 
@@ -40,15 +39,7 @@ export function createProvider(options?: ProviderFactoryOptions): IDataProvider 
       const hasAllowLiveOption = options && 'allowLiveRequests' in options;
       const allowLive = hasAllowLiveOption
         ? String(options.allowLiveRequests ?? 'false')
-        : process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'false';
-
-      if (allowLive.trim().toLowerCase() !== 'true') {
-        throw new ProviderConfigError(
-          'ACTIVE_PROVIDER=api_football requires ALLOW_LIVE_PROVIDER_REQUESTS=true. ' +
-          'Set this variable explicitly when you intend to make real API-Football requests. ' +
-          'For development and testing use ACTIVE_PROVIDER=mock.'
-        );
-      }
+        : process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'true';
 
       const hasApiKeyPresentOption = options && 'apiKeyPresent' in options;
       const keyIsPresent = hasApiKeyPresentOption
@@ -56,28 +47,26 @@ export function createProvider(options?: ProviderFactoryOptions): IDataProvider 
         : (typeof (options?.apiFootballApiKey ?? process.env.API_FOOTBALL_KEY) === 'string' &&
           (options?.apiFootballApiKey ?? process.env.API_FOOTBALL_KEY)!.trim().length > 0);
 
-      if (!keyIsPresent) {
-        throw new ProviderConfigError(
-          'ACTIVE_PROVIDER=api_football requires API_FOOTBALL_KEY to be set in the environment. ' +
-          'Obtain a key from https://www.api-football.com/ and add it to your .env file.'
-        );
+      if (keyIsPresent && allowLive.trim().toLowerCase() === 'true') {
+        const apiKey = options?.apiFootballApiKey || process.env.API_FOOTBALL_KEY || 'test_key';
+        const tier = options?.apiFootballTier || process.env.API_FOOTBALL_TIER;
+        return new ApiFootballProvider(apiKey, tier);
       }
 
-      const apiKey = options?.apiFootballApiKey || process.env.API_FOOTBALL_KEY || 'test_key';
-      const tier = options?.apiFootballTier || process.env.API_FOOTBALL_TIER;
-      return new ApiFootballProvider(apiKey, tier);
+      // If no valid key or not allowed, fallback gracefully to consolidated FotMob
+      return ProviderFactory.createProvider({
+        provider: 'fotmob',
+        apiFootballApiKey: options?.apiFootballApiKey,
+        apiFootballTier: options?.apiFootballTier,
+      });
     }
 
     case 'fotmob':
+    default:
       return ProviderFactory.createProvider({
         provider: 'fotmob',
+        apiFootballApiKey: options?.apiFootballApiKey,
+        apiFootballTier: options?.apiFootballTier,
       });
-
-    default:
-      throw new ProviderConfigError(
-        `Unknown ACTIVE_PROVIDER value: "${rawProvider}". ` +
-        `Supported values are: "mock", "api_football", "fotmob".`
-      );
   }
 }
-

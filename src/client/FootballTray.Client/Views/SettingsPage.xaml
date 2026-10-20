@@ -78,6 +78,8 @@
                 <!-- ======================================================== -->
                 <!-- CARD 1.5: DATA PROVIDER                                  -->
                 <!-- ======================================================== -->
+                <!-- CARD 1: DATA PROVIDER (READ-ONLY)                        -->
+                <!-- ======================================================== -->
                 <Border
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -90,21 +92,20 @@
                             <TextBlock Text="Data Provider" FontSize="16" FontWeight="SemiBold" />
                         </StackPanel>
                         <TextBlock
-                            Text="Select the backend data source used for match tracking."
+                            Text="Backend data source used for match tracking and live events."
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             TextWrapping="Wrap" />
 
                         <StackPanel Spacing="6">
                             <TextBlock Text="Active Football Provider" FontWeight="Medium" FontSize="13" />
-                            <ComboBox x:Name="ActiveProviderCombo" SelectionChanged="OnActiveProviderChanged" Width="240">
-                                <ComboBoxItem Tag="fotmob">FotMob</ComboBoxItem>
-                                <ComboBoxItem Tag="api_football">API-Football</ComboBoxItem>
-                            </ComboBox>
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                                <TextBlock Text="FotMob (Primary)" FontWeight="SemiBold" FontSize="14" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            </StackPanel>
                         </StackPanel>
                         
                         <TextBlock
-                            x:Name="ProviderRestartNote"
-                            Text="* Changing the provider will restart the background synchronization daemon."
+                            Text="Automated circuit-breaker fallback is enabled for unmetered reliability."
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             FontSize="12"
                             TextWrapping="Wrap" />

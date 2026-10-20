@@ -240,7 +240,7 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
     this.now = deps.nowFn ?? (() => new Date());
     this.sleep = deps.sleepFn ?? defaultSleep;
     this.targetCompetitionIds = deps.targetCompetitionIds;
-    this.providerName = deps.providerName ?? 'api_football';
+    this.providerName = deps.providerName ?? 'fotmob';
     this.onCycleComplete = deps.onCycleComplete;
     this.onErrorCallback = deps.onError;
     this.logger = deps.logger ?? {
@@ -255,13 +255,11 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
   }
 
   /**
-   * Queues a dynamic provider swap for the next tick boundary.
+   * Deprecated in v1.2: Provider hot-swapping is disabled.
+   * FotMob is the single consolidated primary provider with automated circuit-breaker fallback.
    */
   public swapProvider(newProviderName: string): void {
-    if (this.providerName === newProviderName || this.pendingProviderName === newProviderName) return;
-    
-    this.logger.info(`Queuing active provider swap from ${this.providerName} to ${newProviderName} for next cycle boundary.`);
-    this.pendingProviderName = newProviderName;
+    this.logger.info(`swapProvider('${newProviderName}') ignored: FotMob is the consolidated primary provider in v1.2.`);
   }
 
   public setPinnedMatchIds(ids: Array<string | number>): void {
@@ -658,15 +656,6 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
     let plan: SyncPlan | undefined;
     let syncSummary: SyncSummary | null = null;
     let targetComps = this.targetCompetitionIds;
-
-    // Apply any queued provider swaps safely before making any API requests
-    if (this.pendingProviderName) {
-      this.logger.info(`Applying queued provider swap to ${this.pendingProviderName}`);
-      this.providerName = this.pendingProviderName;
-      this.pendingProviderName = null;
-      const newProvider = createProvider({ provider: this.providerName as any });
-      this.syncService = new SyncService(newProvider);
-    }
 
     try {
       const currentDate = this.now();

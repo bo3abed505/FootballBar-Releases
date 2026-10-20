@@ -8,8 +8,8 @@
 
 - **Native WinUI 3 Desktop Client**: Built with modern Windows App SDK and WinUI 3 controls for a fluent, high-performance UI experience matching Windows 11 aesthetics.
 - **Native Taskbar Integration (No TaskbarWidgets)**: Taskbar integration is implemented using a native HWND/Win32 window positioning and embedding approach (inspired by the proven methodology in **Awqat-Salaat**). **TaskbarWidgets is NOT a dependency.**
-- **Dedicated Backend Service**: A TypeScript/Node.js backend coordinates polling schedules, data normalization, database persistence (PostgreSQL), and rate-limit budgeting so the desktop client remains lightweight and decoupled.
-- **Initial Data Provider**: **API-Football** (API-Sports) serves as the primary provider, normalized into domain-driven models for future multi-provider extensibility.
+- **Dedicated Backend Service**: A TypeScript/Node.js backend coordinates polling schedules, data normalization, embedded SQLite persistence (`better-sqlite3` WAL mode), and caching so the desktop client remains lightweight and decoupled.
+- **Authoritative Primary Data Provider**: **FotMob** serves as the primary provider for unmetered live matches, schedules, lineups, timeline events, and broadcast commentary, featuring automated circuit-breaker fallback to **API-Football**.
 - **Clean Architecture**: Strong boundary separation between presentation, provider-agnostic domain logic (`FootballTray.Core`), and backend ingestion.
 
 ---
@@ -20,7 +20,7 @@
 FootballTray/
 ├── docs/                     # Technical specifications and architectural design documents
 │   ├── ARCHITECTURE.md       # High-level system architecture and component separation
-│   ├── DATABASE.md           # PostgreSQL schema, indexing, and migration strategy
+│   ├── DATABASE.md           # SQLite schema, WAL mode, indexing, and migration strategy
 │   ├── API_CONTRACT.md       # REST and streaming API definitions
 │   ├── TASKBAR_INTEGRATION.md# Native Win32/HWND taskbar docking specification
 │   ├── REQUEST_BUDGET.md     # API request budgeting and adaptive polling strategy
@@ -56,9 +56,9 @@ FootballTray/
   - Windows 11 (Build 22000+ recommended)
 - **Backend**:
   - Node.js (LTS) & TypeScript
-  - PostgreSQL (Database)
-- **Provider**:
-  - API-Football (API-Sports)
+  - Embedded SQLite (`better-sqlite3` WAL mode)
+- **Data Provider**:
+  - FotMob (Authoritative Primary) + API-Football (Automated Circuit-Breaker Fallback)
 
 ---
 

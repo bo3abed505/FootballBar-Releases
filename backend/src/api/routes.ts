@@ -549,7 +549,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       let syncService = (request.server as any).syncService || (fastify as any).syncService;
       if (!syncService) {
         try {
-          const provider = createProvider();
+          const provider = createProvider({ provider: 'fotmob' });
           syncService = new SyncService(provider);
           (fastify as any).syncService = syncService;
         } catch {

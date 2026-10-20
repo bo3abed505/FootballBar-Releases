@@ -24,8 +24,6 @@
 import { FastifyInstance } from 'fastify';
 import { IDataProvider } from '../providers/types.js';
 import { createProvider } from '../acquisition/provider-factory.js';
-import { EmptyFootballProvider } from '../providers/empty.provider.js';
-import { ApiFootballProvider } from '../providers/api-football/api-football.provider.js';
 import { SyncService } from '../acquisition/sync.service.js';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
 import { AcquisitionScheduler } from '../acquisition/acquisition-scheduler.js';
@@ -78,30 +76,12 @@ export class AppRuntime {
       error: (msg, meta) => console.error(`[RUNTIME:ERROR] ${msg}`, meta ? JSON.stringify(meta) : ''),
     };
 
-    // 1. Construct Provider via ProviderFactory (boundary enforcement)
-    if ((options.provider as any)) {
-      this.provider = (options.provider as any);
+    // 1. Construct Provider via ProviderFactory (Directive 2: fotmob primary + automated fallback)
+    if (options.provider) {
+      this.provider = options.provider;
     } else {
-      const isProduction = process.env.NODE_ENV === 'production';
-      const keyIsPresent = typeof process.env.API_FOOTBALL_KEY === 'string' &&
-        process.env.API_FOOTBALL_KEY.trim().length > 0;
-
-      if (process.env.ACTIVE_PROVIDER === 'fotmob') {
-        process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'true';
-        this.provider = createProvider({ provider: 'fotmob' });
-      } else if (!keyIsPresent) {
-        this.logger.warn(
-          'API_FOOTBALL_KEY is not configured in the environment. ' +
-          'Live match synchronization is disabled. ' +
-          'Returning an empty active calendar; mock provider fallback is completely disabled.'
-        );
-        this.provider = new EmptyFootballProvider();
-      } else if (isProduction || process.env.ACTIVE_PROVIDER === 'api_football' || (!process.env.ACTIVE_PROVIDER && keyIsPresent)) {
-        process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'true';
-        this.provider = new ApiFootballProvider(process.env.API_FOOTBALL_KEY || '', process.env.API_FOOTBALL_TIER);
-      } else {
-        this.provider = createProvider();
-      }
+      process.env.ALLOW_LIVE_PROVIDER_REQUESTS = process.env.ALLOW_LIVE_PROVIDER_REQUESTS ?? 'true';
+      this.provider = createProvider({ provider: 'fotmob' });
     }
 
     // 2. Initialize Repositories and Services

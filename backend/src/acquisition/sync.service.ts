@@ -612,7 +612,7 @@ export class SyncService {
                 awayScore: (details?.awayTeam?.score ?? details?.awayScore ?? fix.awayScore ?? 0),
                 homeScoreHt: fix.homeScoreHt,
                 awayScoreHt: fix.awayScoreHt,
-                liveSourceProvider: this.provider.name,
+                liveSourceProvider: (this.provider as any).activeProviderName || this.provider.name,
                 liveObservedAt: now,
                 lastPolledAt: now,
                 finalizedAt: now,

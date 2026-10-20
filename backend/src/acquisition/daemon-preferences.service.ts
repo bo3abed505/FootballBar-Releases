@@ -44,7 +44,7 @@ export class DaemonPreferencesService {
   private effectiveCompetitionNumericIds: number[] = [];
   private effectiveTeamNumericIds: number[] = [];
   private lastUpdatedAt: Date = new Date();
-  private activeProvider: string = 'api_football';
+  private activeProvider: string = 'fotmob';
   private scheduler: IProviderSwapObserver | null = null;
 
   constructor() {
@@ -223,11 +223,8 @@ export class DaemonPreferencesService {
     }
     
     if (payload.activeProvider && typeof payload.activeProvider === 'string') {
-      const isChanged = this.activeProvider !== payload.activeProvider;
-      this.activeProvider = payload.activeProvider;
-      if (isChanged && this.scheduler) {
-        this.scheduler.swapProvider(this.activeProvider);
-      }
+      // Directive 2: FotMob is the authoritative consolidated provider in v1.2.
+      this.activeProvider = 'fotmob';
     }
 
     return this.getPreferences();

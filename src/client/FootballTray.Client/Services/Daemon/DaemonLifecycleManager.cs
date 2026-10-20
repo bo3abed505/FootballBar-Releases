@@ -129,7 +129,7 @@ public sealed class DaemonLifecycleManager : IDisposable
     /// Ensures the backend daemon is running. If not already active, launches node dist/server.js
     /// in the background without creating a console window.
     /// </summary>
-    public async Task<bool> StartDaemonAsync(string activeProvider = "api_football", CancellationToken cancellationToken = default)
+    public async Task<bool> StartDaemonAsync(string activeProvider = "fotmob", CancellationToken cancellationToken = default)
     {
         // 1. Pre-flight check: Is the backend already running?
         if (await IsDaemonHealthyAsync(cancellationToken))
