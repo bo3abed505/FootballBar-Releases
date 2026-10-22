@@ -412,6 +412,12 @@ public class MatchDetailDto
     [JsonPropertyName("historicalLeg")]
     public string? HistoricalLeg { get; set; }
 
+    [JsonPropertyName("heatmaps")]
+    public List<TeamHeatmapDto>? Heatmaps { get; set; }
+
+    [JsonPropertyName("h2hAndPredictions")]
+    public H2HAndPredictionsDto? H2HAndPredictions { get; set; }
+
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }
 }
@@ -442,14 +448,162 @@ public class LineupPlayerDto
     [JsonPropertyName("number")]
     public int? Number { get; set; }
 
+    [JsonPropertyName("shirtNumber")]
+    public int? ShirtNumber { get; set; }
+
     [JsonPropertyName("position")]
     public string? Position { get; set; }
 
     [JsonPropertyName("grid")]
     public string? Grid { get; set; }
 
+    [JsonPropertyName("row")]
+    public int? Row { get; set; }
+
+    [JsonPropertyName("col")]
+    public int? Col { get; set; }
+
     [JsonPropertyName("isStarter")]
     public bool IsStarter { get; set; }
+
+    [JsonPropertyName("rating")]
+    public double? Rating { get; set; }
+
+    [JsonPropertyName("isTopRating")]
+    public bool IsManOfTheMatch { get; set; }
+
+    [JsonPropertyName("isCaptain")]
+    public bool? IsCaptain { get; set; }
+
+    public int? EffectiveNumber => Number ?? ShirtNumber;
+}
+
+public class UnavailablePlayerDto
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("position")]
+    public string? Position { get; set; }
+
+    [JsonPropertyName("shirtNumber")]
+    public int? ShirtNumber { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    [JsonPropertyName("expectedReturn")]
+    public string? ExpectedReturn { get; set; }
+}
+
+public class HeatmapPointDto
+{
+    [JsonPropertyName("x")]
+    public double X { get; set; }
+
+    [JsonPropertyName("y")]
+    public double Y { get; set; }
+
+    [JsonPropertyName("intensity")]
+    public double Intensity { get; set; }
+
+    [JsonPropertyName("teamId")]
+    public string? TeamId { get; set; }
+}
+
+public class TeamHeatmapDto
+{
+    [JsonPropertyName("teamId")]
+    public string TeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("attackingThirdPct")]
+    public int AttackingThirdPct { get; set; }
+
+    [JsonPropertyName("middleThirdPct")]
+    public int MiddleThirdPct { get; set; }
+
+    [JsonPropertyName("defensiveThirdPct")]
+    public int DefensiveThirdPct { get; set; }
+
+    [JsonPropertyName("points")]
+    public List<HeatmapPointDto> Points { get; set; } = new();
+}
+
+public class H2HMeetingDto
+{
+    [JsonPropertyName("matchId")]
+    public string MatchId { get; set; } = string.Empty;
+
+    [JsonPropertyName("dateUtc")]
+    public string DateUtc { get; set; } = string.Empty;
+
+    [JsonPropertyName("competitionName")]
+    public string? CompetitionName { get; set; }
+
+    [JsonPropertyName("homeTeamName")]
+    public string HomeTeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("awayTeamName")]
+    public string AwayTeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("homeScore")]
+    public int HomeScore { get; set; }
+
+    [JsonPropertyName("awayScore")]
+    public int AwayScore { get; set; }
+
+    public string ScoreDisplay => $"{HomeScore} - {AwayScore}";
+}
+
+public class FormMatchDto
+{
+    [JsonPropertyName("result")]
+    public string Result { get; set; } = "D"; // "W", "D", "L"
+
+    [JsonPropertyName("opponentName")]
+    public string OpponentName { get; set; } = string.Empty;
+
+    [JsonPropertyName("score")]
+    public string Score { get; set; } = string.Empty;
+
+    [JsonPropertyName("isHome")]
+    public bool? IsHome { get; set; }
+
+    [JsonPropertyName("dateUtc")]
+    public string? DateUtc { get; set; }
+}
+
+public class H2HAndPredictionsDto
+{
+    [JsonPropertyName("homeWins")]
+    public int HomeWins { get; set; }
+
+    [JsonPropertyName("draws")]
+    public int Draws { get; set; }
+
+    [JsonPropertyName("awayWins")]
+    public int AwayWins { get; set; }
+
+    [JsonPropertyName("lastFiveMeetings")]
+    public List<H2HMeetingDto> LastFiveMeetings { get; set; } = new();
+
+    [JsonPropertyName("homeForm")]
+    public List<FormMatchDto> HomeForm { get; set; } = new();
+
+    [JsonPropertyName("awayForm")]
+    public List<FormMatchDto> AwayForm { get; set; } = new();
+
+    [JsonPropertyName("homeWinProbabilityPct")]
+    public int HomeWinProbabilityPct { get; set; }
+
+    [JsonPropertyName("drawProbabilityPct")]
+    public int DrawProbabilityPct { get; set; }
+
+    [JsonPropertyName("awayWinProbabilityPct")]
+    public int AwayWinProbabilityPct { get; set; }
 }
 
 public class LineupDto
@@ -478,8 +632,29 @@ public class LineupDto
     [JsonPropertyName("startingXI")]
     public List<LineupPlayerDto> StartingXI { get; set; } = new();
 
+    [JsonPropertyName("startXi")]
+    public List<LineupPlayerDto>? StartXi { get; set; }
+
+    [JsonPropertyName("starters")]
+    public List<LineupPlayerDto>? Starters { get; set; }
+
     [JsonPropertyName("substitutes")]
     public List<LineupPlayerDto> Substitutes { get; set; } = new();
+
+    [JsonPropertyName("subs")]
+    public List<LineupPlayerDto>? Subs { get; set; }
+
+    [JsonPropertyName("bench")]
+    public List<LineupPlayerDto>? Bench { get; set; }
+
+    [JsonPropertyName("unavailable")]
+    public List<UnavailablePlayerDto> UnavailablePlayers { get; set; } = new();
+
+    [JsonPropertyName("naPlayers")]
+    public List<UnavailablePlayerDto>? NaPlayers { get; set; }
+
+    [JsonPropertyName("injured")]
+    public List<UnavailablePlayerDto>? Injured { get; set; }
 
     [JsonPropertyName("players")]
     public List<LineupPlayerDto>? Players { get; set; }
@@ -493,9 +668,30 @@ public class LineupDto
             return StartingXI;
         }
 
+        if (StartXi != null && StartXi.Count > 0)
+        {
+            return StartXi;
+        }
+
+        if (Starters != null && Starters.Count > 0)
+        {
+            return Starters;
+        }
+
         if (Players != null && Players.Count > 0)
         {
-            return Players.FindAll(p => p.IsStarter);
+            var starters = Players.FindAll(p => p.IsStarter);
+            if (starters.Count > 0)
+            {
+                return starters;
+            }
+
+            if (Players.Count >= 11)
+            {
+                return Players.Take(11).ToList();
+            }
+
+            return Players;
         }
 
         return Array.Empty<LineupPlayerDto>();
@@ -508,12 +704,51 @@ public class LineupDto
             return Substitutes;
         }
 
+        if (Subs != null && Subs.Count > 0)
+        {
+            return Subs;
+        }
+
+        if (Bench != null && Bench.Count > 0)
+        {
+            return Bench;
+        }
+
         if (Players != null && Players.Count > 0)
         {
-            return Players.FindAll(p => !p.IsStarter);
+            var subs = Players.FindAll(p => !p.IsStarter);
+            if (subs.Count > 0)
+            {
+                return subs;
+            }
+
+            if (Players.Count > 11)
+            {
+                return Players.Skip(11).ToList();
+            }
         }
 
         return Array.Empty<LineupPlayerDto>();
+    }
+
+    public IReadOnlyList<UnavailablePlayerDto> GetUnavailable()
+    {
+        if (UnavailablePlayers.Count > 0)
+        {
+            return UnavailablePlayers;
+        }
+
+        if (NaPlayers != null && NaPlayers.Count > 0)
+        {
+            return NaPlayers;
+        }
+
+        if (Injured != null && Injured.Count > 0)
+        {
+            return Injured;
+        }
+
+        return Array.Empty<UnavailablePlayerDto>();
     }
 }
 

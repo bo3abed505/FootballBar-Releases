@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace FootballTray.Client.Services.Preferences;
 
 /// <summary>
-/// Canonical provider and domain entity identifiers established by API-Football mapper and TARGET_COMPETITION_IDS.
+/// Canonical provider and domain entity identifiers established by telemetry mapper and TARGET_COMPETITION_IDS.
 /// Serves as the single source of truth for canonical followed teams and competitions on the client.
 /// </summary>
 public static class CanonicalEntityIds

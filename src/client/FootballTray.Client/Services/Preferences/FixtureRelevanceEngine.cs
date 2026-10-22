@@ -188,6 +188,14 @@ public static class FixtureRelevanceEngine
 
     public static bool IsPrematch(TrayMatchDto? match)
     {
-        return match != null && !string.IsNullOrWhiteSpace(match.State) && PrematchStates.Contains(match.State);
+        if (match == null) return false;
+        if (string.IsNullOrWhiteSpace(match.State))
+        {
+            return match.KickoffTime > DateTimeOffset.UtcNow;
+        }
+        string state = match.State.Trim();
+        if (PrematchStates.Contains(state)) return true;
+        if (LiveStates.Contains(state) || FinishedStates.Contains(state)) return false;
+        return match.KickoffTime > DateTimeOffset.UtcNow;
     }
 }

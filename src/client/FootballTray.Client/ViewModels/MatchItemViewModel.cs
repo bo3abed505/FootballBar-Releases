@@ -88,6 +88,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     }
 
     public DateTimeOffset KickoffTime { get; init; }
+    public DateTime StartTimeUtc => KickoffTime.UtcDateTime;
 
     public string KickoffDisplay
     {
@@ -352,7 +353,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
 
         string upperState = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
 
-        // API-Football short status codes:
+        // Live and in-play short status codes:
         // 1H (First Half), 2H (Second Half), HT (Halftime), ET (Extra Time), BT (Break Time),
         // P (Penalty in progress), SUSP (Suspended), INT (Interrupted)
         // Also support verbose variants LIVE, IN_PLAY, HALFTIME, EXTRA_TIME, PENALTIES

@@ -6,7 +6,7 @@ namespace FootballTray.Client.Services.Preferences;
 
 /// <summary>
 /// Factory providing deterministic default preferences for initial launch or corruption recovery.
-/// All default followed entities use the canonical provider IDs matching API-Football and TARGET_COMPETITION_IDS.
+/// All default followed entities use canonical IDs matching TARGET_COMPETITION_IDS.
 /// </summary>
 public static class DefaultPreferences
 {

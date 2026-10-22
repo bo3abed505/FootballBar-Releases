@@ -38,6 +38,7 @@ public sealed class NotificationCoordinator
 
             var prefs = preferences ?? _preferencesService.GetPreferences();
             if (!prefs.IsKickoffReminderEnabled) return;
+            if (prefs.Notifications != null && !prefs.Notifications.GlobalEnabled) return;
             if (prefs.Notifications != null && !prefs.Notifications.IsTypeEnabled(NotificationType.Kickoff)) return;
 
             int offsetMinutes = prefs.KickoffReminderOffsetMinutes;
@@ -45,19 +46,28 @@ public sealed class NotificationCoordinator
             var now = DateTimeOffset.UtcNow;
             var followedTeamIds = prefs.GetFollowedTeamIdSet();
             var followedCompIds = prefs.GetFollowedCompetitionIdSet();
+            bool hasFollowPreferences = (followedTeamIds != null && followedTeamIds.Count > 0) ||
+                                        (followedCompIds != null && followedCompIds.Count > 0);
+            string? pinnedMatchId = App.CurrentTickerCoordinator?.PinnedMatchId;
 
             foreach (var match in trayData.Matches)
             {
                 if (match == null || match.KickoffTime == default) continue;
 
                 // Only evaluate prematch fixtures
-                string stateUpper = (match.State ?? string.Empty).Trim().ToUpperInvariant();
-                bool isPrematch = stateUpper is "PREMATCH" or "NS" or "TBD";
-                if (!isPrematch) continue;
+                if (!FixtureRelevanceEngine.IsPrematch(match)) continue;
 
-                // Check whether fixture involves a followed team or competition
-                var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, followedTeamIds, followedCompIds);
-                if (!relevance.IsRelevant) continue;
+                bool isPinned = !string.IsNullOrWhiteSpace(pinnedMatchId) && !string.IsNullOrWhiteSpace(match.Id) &&
+                               (string.Equals(match.Id, pinnedMatchId, StringComparison.OrdinalIgnoreCase)
+                                || match.Id.EndsWith($"_{pinnedMatchId}", StringComparison.OrdinalIgnoreCase)
+                                || pinnedMatchId.EndsWith($"_{match.Id}", StringComparison.OrdinalIgnoreCase));
+
+                // Check whether fixture involves a followed team or competition (or is pinned, or no teams followed yet)
+                if (!isPinned && hasFollowPreferences)
+                {
+                    var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, followedTeamIds!, followedCompIds!);
+                    if (!relevance.IsRelevant) continue;
+                }
 
                 var kickoffTime = match.KickoffTime;
                 var timeUntilKickoff = kickoffTime - now;
@@ -78,16 +88,18 @@ public sealed class NotificationCoordinator
                     string awayName = match.AwayTeam?.Name ?? "Away";
                     string localKickoff = kickoffTime.ToLocalTime().ToString("t");
 
-                    string title = offsetMinutes switch
+                    int remainingMinutes = Math.Max(0, (int)Math.Ceiling(timeUntilKickoff.TotalMinutes));
+
+                    string title = remainingMinutes switch
                     {
                         <= 0 => $"⏰ Kickoff Now: {homeName} vs {awayName}",
-                        _ => $"⏰ Kickoff in {offsetMinutes}m: {homeName} vs {awayName}"
+                        _ => $"⏰ Kickoff in {remainingMinutes}m: {homeName} vs {awayName}"
                     };
 
-                    string body = offsetMinutes switch
+                    string body = remainingMinutes switch
                     {
                         <= 0 => $"{homeName} vs {awayName} is kicking off now ({localKickoff})!",
-                        _ => $"{homeName} vs {awayName} kicks off in {offsetMinutes} minutes ({localKickoff})."
+                        _ => $"{homeName} vs {awayName} kicks off in {remainingMinutes} minutes ({localKickoff})."
                     };
 
                     var payload = new NotificationPayload
@@ -100,7 +112,7 @@ public sealed class NotificationCoordinator
                         FixtureId = match.Id ?? string.Empty
                     };
 
-                    AppLogger.Info("Notifications", "KickoffReminderTriggered", $"Dispatching kickoff reminder for {homeName} vs {awayName} (offset: {offsetMinutes}m)");
+                    AppLogger.Info("Notifications", "KickoffReminderTriggered", $"Dispatching kickoff reminder for {homeName} vs {awayName} (offset: {offsetMinutes}m, remaining: {remainingMinutes}m)");
 
                     try
                     {
@@ -109,16 +121,24 @@ public sealed class NotificationCoordinator
                         {
                             AppLogger.Warn("Notifications", "ToastNotRendered", $"Toast renderer returned false for {homeName} vs {awayName} (permission or environment limitation).");
                         }
-
-                        if (prefs.IsAudioEnabled)
-                        {
-                            AudioPlaybackService.Instance.PlaySound(NotificationType.Kickoff);
-                        }
                     }
                     catch (Exception ex)
                     {
                         // Gracefully fail if OS notifications are denied or system toast service is unavailable
                         AppLogger.Warn("Notifications", "ToastDispatchException", $"Failed to display Windows notification: {ex.Message}", ex: ex);
+                    }
+
+                    // Always attempt audio alert playback independently of toast status
+                    if (prefs.IsAudioEnabled)
+                    {
+                        try
+                        {
+                            AudioPlaybackService.Instance.PlaySound(NotificationType.Kickoff);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.Debug("Notifications", "KickoffAudioError", $"Audio playback failed for Kickoff: {ex.Message}");
+                        }
                     }
                 }
             }

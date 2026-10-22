@@ -251,7 +251,7 @@ FootballTray includes local, bounded, non-intrusive diagnostics designed to diag
 | **Client displays "Stale Data" badge** | Backend unreachable or poll timeout | Check `footballtray.log` for `[Sync][PollFailed]` errors. Verify `GET /health` on backend. | Ensure backend service is running; client will automatically resume fresh sync on next poll. |
 | **Taskbar ticker not visible** | Explorer restart or HWND re-docking | Check Diagnostics UI: Taskbar Host will show `Unattached` or `Recovering`. | Taskbar watcher automatically detects `TaskbarCreated` message and re-attaches within 5 seconds. |
 | **Notifications not appearing** | Notifications disabled in Windows Settings or preferences | Check Diagnostics UI for Notification Engine status (`Registered` vs `Disabled`). Check `preferences.json`. | Enable notifications in Windows App Settings or toggle "Enable Notifications" in FootballTray UI. |
-| **Backend reports Provider Quota Exhaustion** | Fallback API-Football request budget limit reached | Check `/api/diagnostics` -> `budget.isExhausted`. | Acquisition scheduler prioritizes unmetered FotMob primary with automated circuit-breaker fallback to API-Football. |
+| **Backend reports Ingestion Quota Limits** | Telemetry ingestion rate limit reached | Check `/api/diagnostics` -> `budget.isExhausted`. | Acquisition scheduler operates with unmetered primary live ingestion and automated circuit-breaker resilience. |
 | **Database disconnected or locked** | SQLite database file inaccessible or locked | Check `GET /health` -> `"database": "disconnected"`. | Ensure SQLite database file has write permissions and disk space available (`better-sqlite3` WAL mode). |
 
 ---

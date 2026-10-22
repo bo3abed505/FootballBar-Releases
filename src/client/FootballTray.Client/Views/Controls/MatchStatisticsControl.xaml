@@ -147,6 +147,247 @@
                             TextAlignment="Center" />
                     </StackPanel>
                 </Border>
+
+                <!-- ============================================== -->
+                <!-- SECTION 2: 🔮 Predictions & History            -->
+                <!-- ============================================== -->
+                <!-- Win Probability Card -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="🔮 Match Win Probability" FontSize="13" FontWeight="Bold" />
+
+                        <!-- Percentage Values Header -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{Binding HomeTeamName}" FontSize="11" FontWeight="SemiBold" Foreground="#0078D4" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Text="Draw" FontSize="11" FontWeight="SemiBold" Foreground="#94A3B8" Margin="8,0,8,0" />
+                            <TextBlock Grid.Column="2" Text="{Binding AwayTeamName}" FontSize="11" FontWeight="SemiBold" Foreground="#D13438" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+
+                        <!-- Segmented 3-Way Win Probability Bar -->
+                        <Grid Height="24" CornerRadius="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{Binding HomeWinGridLength}" />
+                                <ColumnDefinition Width="{Binding DrawGridLength}" />
+                                <ColumnDefinition Width="{Binding AwayGridLength}" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="#0078D4" CornerRadius="4,0,0,4">
+                                <TextBlock Text="{Binding HomeWinPctDisplay}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <Border Grid.Column="1" Background="#64748B">
+                                <TextBlock Text="{Binding DrawPctDisplay}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <Border Grid.Column="2" Background="#D13438" CornerRadius="0,4,4,0">
+                                <TextBlock Text="{Binding AwayWinPctDisplay}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Recent Team Form Card -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="📈 Recent Form (Last 5)" FontSize="13" FontWeight="Bold" />
+
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Home Form -->
+                            <StackPanel Grid.Column="0" Spacing="6">
+                                <TextBlock Text="{Binding HomeTeamName}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis" />
+                                <ItemsControl ItemsSource="{Binding HomeFormBadges}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="24" Height="24" Background="{Binding BackgroundBrush}" CornerRadius="4" ToolTipService.ToolTip="{Binding TooltipText}">
+                                                <TextBlock Text="{Binding Result}" FontSize="11" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+
+                            <!-- Away Form -->
+                            <StackPanel Grid.Column="1" Spacing="6">
+                                <TextBlock Text="{Binding AwayTeamName}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                <ItemsControl ItemsSource="{Binding AwayFormBadges}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="24" Height="24" Background="{Binding BackgroundBrush}" CornerRadius="4" ToolTipService.ToolTip="{Binding TooltipText}">
+                                                <TextBlock Text="{Binding Result}" FontSize="11" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Head-to-Head History Card -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="⚔️ Head-to-Head Summary" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4" Padding="8,2">
+                                <TextBlock Text="{Binding H2HRecordDisplay}" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Text="Last 5 Head-to-Head Meetings" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
+
+                        <ItemsControl ItemsSource="{Binding LastFiveMeetings}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10,6" Margin="0,0,0,4">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding HomeTeamName}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding DateDisplay}" FontSize="9" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                            </StackPanel>
+                                            <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="3" Padding="8,2" Margin="6,0,6,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding ScoreDisplay}" FontSize="11" FontWeight="Bold" />
+                                            </Border>
+                                            <StackPanel Grid.Column="2" Spacing="2">
+                                                <TextBlock Text="{Binding AwayTeamName}" FontSize="11" FontWeight="SemiBold" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding CompetitionName}" FontSize="9" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- ============================================== -->
+                <!-- SECTION 3: 🔥 Tactical Pitch Heatmap           -->
+                <!-- ============================================== -->
+                <Border
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="🔥 Tactical Action &amp; Pitch Heatmap" FontSize="13" FontWeight="Bold" />
+
+                        <!-- Territorial Thirds Percentages Summary -->
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Background="#1E293B" CornerRadius="6" Padding="8,6">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="TOP THIRD" FontSize="9" FontWeight="Bold" Foreground="#F87171" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding AwayAttackingThirdPct}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    <TextBlock Text="Away Attacking" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="#1E293B" CornerRadius="6" Padding="8,6">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="MIDFIELD" FontSize="9" FontWeight="Bold" Foreground="#FBBF24" HorizontalAlignment="Center" />
+                                    <TextBlock Text="Contest" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    <TextBlock Text="Battle Zone" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Background="#1E293B" CornerRadius="6" Padding="8,6">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="BOTTOM THIRD" FontSize="9" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding HomeAttackingThirdPct}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    <TextBlock Text="Home Attacking" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Dedicated Visual Pitch Heatmap Graphic -->
+                        <Border
+                            Background="#164E24"
+                            BorderBrush="#257A38"
+                            BorderThickness="2"
+                            CornerRadius="8"
+                            Padding="6"
+                            HorizontalAlignment="Center">
+                            <Viewbox MaxWidth="340" MaxHeight="430" Stretch="Uniform">
+                                <Grid Width="340" Height="420">
+                                    <!-- Pitch Grass Surface -->
+                                    <Border Background="#1A5627" CornerRadius="4" />
+
+                                    <!-- Pitch Markings (White lines) -->
+                                    <Border Margin="12" BorderBrush="#85FFFFFF" BorderThickness="1.5" CornerRadius="2" />
+                                    <Rectangle Margin="12,0,12,0" Height="1.5" Fill="#85FFFFFF" VerticalAlignment="Center" />
+                                    <Ellipse Width="64" Height="64" Stroke="#85FFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Ellipse Width="4" Height="4" Fill="#85FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                    <!-- Top Box (Away Defending) -->
+                                    <Border Margin="0,12,0,0" Width="120" Height="52" BorderBrush="#85FFFFFF" BorderThickness="1.5,0,1.5,1.5" HorizontalAlignment="Center" VerticalAlignment="Top" />
+                                    <!-- Bottom Box (Home Defending) -->
+                                    <Border Margin="0,0,0,12" Width="120" Height="52" BorderBrush="#85FFFFFF" BorderThickness="1.5,1.5,1.5,0" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
+
+                                    <!-- Heatmap Bands & Activity Overlay via Canvas -->
+                                    <Canvas x:Name="HeatmapPitchCanvas" Width="340" Height="420" />
+                                </Grid>
+                            </Viewbox>
+                        </Border>
+
+                        <!-- Heatmap Legend -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16" Margin="0,2,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <Ellipse Width="10" Height="10" Fill="#0EA5E9" />
+                                <TextBlock Text="{Binding HomeTeamName}" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <Ellipse Width="10" Height="10" Fill="#EF4444" />
+                                <TextBlock Text="{Binding AwayTeamName}" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </ScrollViewer>
     </Grid>

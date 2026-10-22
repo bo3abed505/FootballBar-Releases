@@ -131,22 +131,36 @@ public sealed class NotificationService
             // 3. Check Following Relevance (unconditionally eligible if pinned match)
             if (!isPinnedMatch && preferences != null)
             {
-                bool homeFollowed = followedTeamIds != null && (
-                    (!string.IsNullOrWhiteSpace(candidate.HomeTeamId) && followedTeamIds.Contains(candidate.HomeTeamId)) ||
-                    (!string.IsNullOrWhiteSpace(candidate.HomeTeamLegacyId) && followedTeamIds.Contains(candidate.HomeTeamLegacyId)));
+                bool hasFollowPreferences = (followedTeamIds != null && followedTeamIds.Count > 0) ||
+                                            (followedCompIds != null && followedCompIds.Count > 0);
 
-                bool awayFollowed = followedTeamIds != null && (
-                    (!string.IsNullOrWhiteSpace(candidate.AwayTeamId) && followedTeamIds.Contains(candidate.AwayTeamId)) ||
-                    (!string.IsNullOrWhiteSpace(candidate.AwayTeamLegacyId) && followedTeamIds.Contains(candidate.AwayTeamLegacyId)));
-
-                bool compFollowed = followedCompIds != null && (
-                    (!string.IsNullOrWhiteSpace(candidate.CompetitionId) && followedCompIds.Contains(candidate.CompetitionId)) ||
-                    (!string.IsNullOrWhiteSpace(candidate.CompetitionLegacyId) && followedCompIds.Contains(candidate.CompetitionLegacyId)));
-
-                if (!homeFollowed && !awayFollowed && !compFollowed)
+                if (hasFollowPreferences)
                 {
-                    AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Match entities not followed.");
-                    continue; // Suppress notification for unfollowed match
+                    bool homeFollowed = followedTeamIds != null && (
+                        (!string.IsNullOrWhiteSpace(candidate.HomeTeamId) && followedTeamIds.Contains(candidate.HomeTeamId)) ||
+                        (!string.IsNullOrWhiteSpace(candidate.HomeTeamLegacyId) && followedTeamIds.Contains(candidate.HomeTeamLegacyId)) ||
+                        (!string.IsNullOrWhiteSpace(candidate.HomeTeamName) && followedTeamIds.Contains(candidate.HomeTeamName)) ||
+                        (CanonicalEntityIds.TryTranslateLegacyId(candidate.HomeTeamId, out var homeCanon) && followedTeamIds.Contains(homeCanon)) ||
+                        (CanonicalEntityIds.TryTranslateLegacyId(candidate.HomeTeamLegacyId, out var homeLegCanon) && followedTeamIds.Contains(homeLegCanon)));
+
+                    bool awayFollowed = followedTeamIds != null && (
+                        (!string.IsNullOrWhiteSpace(candidate.AwayTeamId) && followedTeamIds.Contains(candidate.AwayTeamId)) ||
+                        (!string.IsNullOrWhiteSpace(candidate.AwayTeamLegacyId) && followedTeamIds.Contains(candidate.AwayTeamLegacyId)) ||
+                        (!string.IsNullOrWhiteSpace(candidate.AwayTeamName) && followedTeamIds.Contains(candidate.AwayTeamName)) ||
+                        (CanonicalEntityIds.TryTranslateLegacyId(candidate.AwayTeamId, out var awayCanon) && followedTeamIds.Contains(awayCanon)) ||
+                        (CanonicalEntityIds.TryTranslateLegacyId(candidate.AwayTeamLegacyId, out var awayLegCanon) && followedTeamIds.Contains(awayLegCanon)));
+
+                    bool compFollowed = followedCompIds != null && (
+                        (!string.IsNullOrWhiteSpace(candidate.CompetitionId) && followedCompIds.Contains(candidate.CompetitionId)) ||
+                        (!string.IsNullOrWhiteSpace(candidate.CompetitionLegacyId) && followedCompIds.Contains(candidate.CompetitionLegacyId)) ||
+                        (CanonicalEntityIds.TryTranslateLegacyId(candidate.CompetitionId, out var compCanon) && followedCompIds.Contains(compCanon)) ||
+                        (CanonicalEntityIds.TryTranslateLegacyId(candidate.CompetitionLegacyId, out var compLegCanon) && followedCompIds.Contains(compLegCanon)));
+
+                    if (!homeFollowed && !awayFollowed && !compFollowed)
+                    {
+                        AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Match entities not followed.");
+                        continue; // Suppress notification for unfollowed match
+                    }
                 }
             }
 
@@ -156,6 +170,7 @@ public sealed class NotificationService
                 _apiClient != null &&
                 !string.IsNullOrWhiteSpace(candidate.FixtureId))
             {
+                int clockMinute = candidate.ElapsedMinute;
                 try
                 {
                     using var detailCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -177,6 +192,13 @@ public sealed class NotificationService
                             {
                                 candidate.ElapsedMinute = latestGoal.Minute;
                                 candidate.ExtraMinute = latestGoal.ExtraMinute;
+                            }
+
+                            // If the latest goal actually occurred > 4 minutes before the current match clock, suppress the stale toast
+                            if (clockMinute > 0 && latestGoal.Minute > 0 && (clockMinute - latestGoal.Minute > 4))
+                            {
+                                AppLogger.Debug("Notifications", "StaleGoalSuppressed", $"Suppressed stale goal alert for {candidate.FixtureId}: Goal occurred at {latestGoal.Minute}' while match is at {clockMinute}'.");
+                                continue;
                             }
                         }
                     }

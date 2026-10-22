@@ -110,6 +110,8 @@ export interface V2MatchDetail {
   commentary: any[];
   lineups: any[];
   statistics: any[];
+  h2hAndPredictions?: any;
+  heatmaps?: any;
   trust: V2TrustMetadata;
 }
 
@@ -129,6 +131,8 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
   let provider: string | null = null;
   let freshnessState: 'FRESH' | 'STALE' | 'FINAL' | 'UNKNOWN' = 'UNKNOWN';
 
+  const sanitizeProvider = (p: any): string | null => (p ? 'live-telemetry' : null);
+
   if (LIVE_STATES.includes(state)) {
     // Live match: observation timestamp from live polling
     if (fixture.liveObservedAt) {
@@ -138,7 +142,7 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
     } else if (fixture.updatedAt) {
       sourceObservedAt = new Date(fixture.updatedAt);
     }
-    provider = fixture.liveSourceProvider || null;
+    provider = sanitizeProvider(fixture.liveSourceProvider);
 
     if (sourceObservedAt && !isNaN(sourceObservedAt.getTime())) {
       const dataAgeSeconds = Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000));
@@ -160,7 +164,7 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
     } else if (fixture.updatedAt) {
       sourceObservedAt = new Date(fixture.updatedAt);
     }
-    provider = fixture.liveSourceProvider || fixture.scheduleSourceProvider || null;
+    provider = sanitizeProvider(fixture.liveSourceProvider || fixture.scheduleSourceProvider);
 
     return {
       freshnessState: 'FINAL',
@@ -177,7 +181,7 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
     } else if (fixture.updatedAt) {
       sourceObservedAt = new Date(fixture.updatedAt);
     }
-    provider = fixture.scheduleSourceProvider || null;
+    provider = sanitizeProvider(fixture.scheduleSourceProvider);
 
     if (sourceObservedAt && !isNaN(sourceObservedAt.getTime())) {
       const dataAgeSeconds = Math.max(0, Math.floor((now.getTime() - sourceObservedAt.getTime()) / 1000));
@@ -200,7 +204,7 @@ export function calculateTrustMetadata(fixture: any, now: Date = new Date()): V2
       freshnessState: 'UNKNOWN',
       sourceObservedAt: sourceObservedAt ? sourceObservedAt.toISOString() : null,
       dataAgeSeconds,
-      provider,
+      provider: sanitizeProvider(fixture.liveSourceProvider || fixture.scheduleSourceProvider),
     };
   }
 
@@ -506,6 +510,8 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
       expectedGoals: s.expectedGoals ?? null,
       xg: s.expectedGoals ?? null,
     })),
+    h2hAndPredictions: fixture.h2hAndPredictions ?? null,
+    heatmaps: fixture.heatmaps ?? null,
     trust: calculateTrustMetadata(fixture, now),
   };
 }

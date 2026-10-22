@@ -57,6 +57,82 @@ export interface NormalizedLiveMatch {
 
 export type NormalizedMatch = NormalizedLiveMatch;
 
+export interface NormalizedUnavailablePlayer {
+  id: string;
+  name: string;
+  position?: string | null;
+  shirtNumber?: number | null;
+  reason?: string | null;
+  expectedReturn?: string | null;
+}
+
+export interface NormalizedLineupPlayer {
+  id: string;
+  name: string;
+  number?: number | null;
+  position?: string | null;
+  grid?: string | null;
+  isStarter: boolean;
+  rating?: number | null;
+  isTopRating?: boolean;
+  isCaptain?: boolean;
+}
+
+export interface NormalizedTeamLineup {
+  teamId: string;
+  formation?: string | null;
+  coachName?: string | null;
+  coachId?: string | null;
+  startXi: NormalizedLineupPlayer[];
+  substitutes: NormalizedLineupPlayer[];
+  unavailable?: NormalizedUnavailablePlayer[];
+}
+
+export interface NormalizedH2HMeeting {
+  matchId: string;
+  dateUtc: string;
+  competitionName?: string | null;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeScore: number;
+  awayScore: number;
+}
+
+export interface NormalizedFormMatch {
+  result: 'W' | 'D' | 'L';
+  opponentName: string;
+  score: string;
+  isHome?: boolean;
+  dateUtc?: string;
+}
+
+export interface NormalizedH2HAndPredictions {
+  homeWins: number;
+  draws: number;
+  awayWins: number;
+  lastFiveMeetings: NormalizedH2HMeeting[];
+  homeForm: NormalizedFormMatch[];
+  awayForm: NormalizedFormMatch[];
+  homeWinProbabilityPct: number;
+  drawProbabilityPct: number;
+  awayWinProbabilityPct: number;
+}
+
+export interface NormalizedHeatmapPoint {
+  x: number;
+  y: number;
+  intensity: number;
+  teamId?: string | null;
+}
+
+export interface NormalizedTeamHeatmap {
+  teamId: string;
+  attackingThirdPct: number;
+  middleThirdPct: number;
+  defensiveThirdPct: number;
+  points: NormalizedHeatmapPoint[];
+}
+
 export interface NormalizedMatchDetails {
   providerMatchId: string;
   time: NormalizedMatchTime;
@@ -74,6 +150,9 @@ export interface NormalizedMatchDetails {
   elapsedMinute?: number | null;
   extraMinute?: number | null;
   commentary?: any[];
+  cachedAt?: number;
+  h2hAndPredictions?: NormalizedH2HAndPredictions | null;
+  heatmaps?: NormalizedTeamHeatmap[] | null;
 }
 
 export interface IDataProvider {

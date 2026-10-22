@@ -1,4 +1,5 @@
 using System;
+using FootballTray.Client.Diagnostics;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 
@@ -29,7 +30,7 @@ public sealed class WindowsAppNotificationRenderer : INotificationRenderer
 
             if (manager == null)
             {
-                System.Diagnostics.Debug.WriteLine($"[NOTIFICATION] AppNotificationManager unavailable: [{payload.Title}] {payload.Body}");
+                AppLogger.Warn("Notifications", "ManagerNull", $"AppNotificationManager unavailable: [{payload.Title}] {payload.Body}");
                 return false;
             }
 
@@ -57,7 +58,7 @@ public sealed class WindowsAppNotificationRenderer : INotificationRenderer
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[NOTIFICATION] Failed to dispatch Windows AppNotification: {ex.Message}");
+            AppLogger.Error("Notifications", "ToastShowFailed", $"Failed to dispatch Windows AppNotification: {ex.Message}", ex: ex);
             return false;
         }
     }

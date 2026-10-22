@@ -33,7 +33,7 @@ public sealed partial class MatchCenterWindow : Window
 
         try
         {
-            AppWindow?.Resize(new Windows.Graphics.SizeInt32(960, 720));
+            AppWindow?.Resize(new Windows.Graphics.SizeInt32(1500, 920));
         }
         catch
         {
@@ -48,89 +48,103 @@ public sealed partial class MatchCenterWindow : Window
 
     public void Populate(MatchDetailDto match)
     {
-        if (ViewModel.MatchId != match.Id)
+        try
         {
-            _lastEtag = null;
+            if (ViewModel.MatchId != match.Id)
+            {
+                _lastEtag = null;
+            }
+
+            ViewModel.Load(match);
+
+            Title = ViewModel.Title;
+
+            // Sync header text
+            CompetitionText.Text = ViewModel.CompetitionName;
+            StatusText.Text = ViewModel.StatusText;
+            HomeTeamName.Text = ViewModel.HomeTeamName;
+            AwayTeamName.Text = ViewModel.AwayTeamName;
+            ScoreText.Text = ViewModel.ScoreText;
+            if (VenueText != null)
+            {
+                VenueText.Text = ViewModel.VenueText;
+                VenueText.Visibility = ViewModel.VenueVisibility;
+            }
+
+            // Explicitly refresh incident, key events, and commentary collections on UI if not already bound
+            if (HomeIncidentsList.ItemsSource != ViewModel.HomeIncidents)
+            {
+                HomeIncidentsList.ItemsSource = ViewModel.HomeIncidents;
+            }
+            if (AwayIncidentsList.ItemsSource != ViewModel.AwayIncidents)
+            {
+                AwayIncidentsList.ItemsSource = ViewModel.AwayIncidents;
+            }
+            HomeIncidentsList.Visibility = ViewModel.HeaderIncidentsVisibility;
+            AwayIncidentsList.Visibility = ViewModel.HeaderIncidentsVisibility;
+            if (KeyEventsList.ItemsSource != ViewModel.KeyEvents)
+            {
+                KeyEventsList.ItemsSource = ViewModel.KeyEvents;
+            }
+            if (CommentaryList.ItemsSource != ViewModel.CommentaryItems)
+            {
+                CommentaryList.ItemsSource = ViewModel.CommentaryItems;
+            }
+
+            if (ViewModel.HasHalfTime)
+            {
+                HalfTimeText.Text = ViewModel.HalfTimeText;
+                HalfTimeText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                HalfTimeText.Visibility = Visibility.Collapsed;
+            }
+
+            // Sync aggregate score badge
+            if (ViewModel.HasAggregateScore)
+            {
+                AggregateText.Text = ViewModel.AggregateText;
+                AggregateBadge.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                AggregateBadge.Visibility = Visibility.Collapsed;
+            }
+
+            // Empty states toggles
+            NoKeyEventsText.Visibility = ViewModel.KeyEvents.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            NoCommentaryText.Visibility = ViewModel.CommentaryItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            // Delegate panel state and empty states to extracted UserControls
+            StatisticsControl?.Update(ViewModel);
+            LineupControl?.Update(ViewModel);
+
+            UpdateStarAndPinVisuals();
+            UpdateTabStyles();
+
+            // Immediate clock and score sync to taskbar ticker
+            App.CurrentTickerCoordinator?.UpdateMatchFromDetails(match);
+
+            // Check terminal state upon load and after every refresh to prevent quota drain
+            string stateUpper = (match.State ?? string.Empty).Trim().ToUpperInvariant();
+            bool isTerminalState = stateUpper is "FT" or "FINISHED" or "AET" or "PEN" or "PST" or "CANC" or "POSTMATCH";
+            if (isTerminalState)
+            {
+                StopLiveRefreshTimer();
+            }
+            else
+            {
+                // Start active live refresh timer (~12s) while Match Center window remains open for in-flight matches
+                StartLiveRefreshTimer();
+            }
+
+            // Asynchronously load team crests on background thread without blocking UI
+            _ = LoadLogosAsync(match);
         }
-
-        ViewModel.Load(match);
-
-        Title = ViewModel.Title;
-
-        // Sync header text
-        CompetitionText.Text = ViewModel.CompetitionName;
-        StatusText.Text = ViewModel.StatusText;
-        HomeTeamName.Text = ViewModel.HomeTeamName;
-        AwayTeamName.Text = ViewModel.AwayTeamName;
-        ScoreText.Text = ViewModel.ScoreText;
-
-        // Explicitly refresh incident, key events, and commentary collections on UI if not already bound
-        if (HomeIncidentsList.ItemsSource != ViewModel.HomeIncidents)
+        catch (Exception ex)
         {
-            HomeIncidentsList.ItemsSource = ViewModel.HomeIncidents;
+            FootballTray.Client.Diagnostics.AppDiagnosticsLogger.LogError("MatchCenterWindow", "PopulateFailed", ex.Message, ex);
         }
-        if (AwayIncidentsList.ItemsSource != ViewModel.AwayIncidents)
-        {
-            AwayIncidentsList.ItemsSource = ViewModel.AwayIncidents;
-        }
-        if (KeyEventsList.ItemsSource != ViewModel.KeyEvents)
-        {
-            KeyEventsList.ItemsSource = ViewModel.KeyEvents;
-        }
-        if (CommentaryList.ItemsSource != ViewModel.CommentaryItems)
-        {
-            CommentaryList.ItemsSource = ViewModel.CommentaryItems;
-        }
-
-        if (ViewModel.HasHalfTime)
-        {
-            HalfTimeText.Text = ViewModel.HalfTimeText;
-            HalfTimeText.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            HalfTimeText.Visibility = Visibility.Collapsed;
-        }
-
-        // Sync aggregate score badge
-        if (ViewModel.HasAggregateScore)
-        {
-            AggregateText.Text = ViewModel.AggregateText;
-            AggregateBadge.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            AggregateBadge.Visibility = Visibility.Collapsed;
-        }
-
-        // Empty states toggles
-        NoKeyEventsText.Visibility = ViewModel.KeyEvents.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        NoCommentaryText.Visibility = ViewModel.CommentaryItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        // Delegate panel state and empty states to extracted UserControls
-        StatisticsControl?.Update(ViewModel);
-        LineupControl?.Update(ViewModel);
-
-        UpdateStarAndPinVisuals();
-        UpdateTabStyles();
-
-        // Immediate clock and score sync to taskbar ticker
-        App.CurrentTickerCoordinator?.UpdateMatchFromDetails(match);
-
-        // Check terminal state upon load and after every refresh to prevent quota drain
-        string stateUpper = (match.State ?? string.Empty).Trim().ToUpperInvariant();
-        bool isTerminalState = stateUpper is "FT" or "FINISHED" or "AET" or "PEN" or "PST" or "CANC" or "POSTMATCH";
-        if (isTerminalState)
-        {
-            StopLiveRefreshTimer();
-        }
-        else
-        {
-            // Start active live refresh timer (~12s) while Match Center window remains open for in-flight matches
-            StartLiveRefreshTimer();
-        }
-
-        // Asynchronously load team crests on background thread without blocking UI
-        _ = LoadLogosAsync(match);
     }
 
     public void StartLiveRefreshTimer()
@@ -316,11 +330,13 @@ public sealed partial class MatchCenterWindow : Window
         {
             StatisticsControl.Visibility = Visibility.Visible;
             LineupControl.Visibility = Visibility.Collapsed;
+            StatisticsControl.Update(ViewModel);
         }
         else if (LineupsTabRadio?.IsChecked == true)
         {
             StatisticsControl.Visibility = Visibility.Collapsed;
             LineupControl.Visibility = Visibility.Visible;
+            ViewModel.EnsureLineupPitchPopulated();
             LineupControl.Update(ViewModel);
         }
     }
@@ -439,6 +455,7 @@ public sealed partial class MatchCenterWindow : Window
         TimelineItems.Clear();
         ViewModel.HomeIncidents.Clear();
         ViewModel.AwayIncidents.Clear();
+        ViewModel.NotifyHeaderIncidentsChanged();
         ViewModel.PitchPlayers.Clear();
         ViewModel.HomeLineup.StartingXI.Clear();
         ViewModel.HomeLineup.Substitutes.Clear();

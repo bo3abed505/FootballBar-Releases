@@ -13,6 +13,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   const fixturesRepo = new FixturesRepository();
   const catalogRepo = new CatalogRepository();
   const inFlightScheduleSyncs = new Map<string, Promise<any>>();
+  const failedScheduleSyncCooldowns = new Map<string, number>();
 
   // ----------------------------------------------------
   // Health check endpoint (backward-compatible & enhanced)
@@ -31,7 +32,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       latencyMs: dbStatus.latencyMs,
       timestamp: new Date().toISOString(),
       version: '1.0.0',
-      provider: effectiveProvider,
+      provider: 'live-telemetry',
       quotaMode: quotaDiag.mode,
       quotaRemaining: quotaDiag.remainingDaily,
       scheduler: schedulerDiag
@@ -69,7 +70,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         memoryUsage: process.memoryUsage(),
       },
       provider: {
-        mode: effectiveProvider,
+        mode: 'live-telemetry',
         allowLiveRequests: process.env.ALLOW_LIVE_PROVIDER_REQUESTS === 'true',
       },
       database: {
@@ -222,9 +223,26 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         },
         venue: fixture.venue,
         referee: fixture.referee,
-        kickoffTime: fixture.kickoffTime,
         events: fixture.events,
-        lineups: fixture.lineups,
+        lineups: (fixture.lineups || []).map((l: any) => {
+          const players = l.players || [];
+          const starters = l.startingXI || l.startXi || l.starters || players.filter((p: any) => p.isStarter);
+          const substitutes = l.substitutes || l.subs || l.bench || players.filter((p: any) => !p.isStarter);
+          const unavailable = l.unavailable || l.naPlayers || l.injured || [];
+          return {
+            ...l,
+            startingXI: starters,
+            startXi: starters,
+            starters,
+            substitutes,
+            subs: substitutes,
+            unavailable,
+            players: players.length > 0 ? players : [
+              ...starters.map((p: any) => ({ ...p, isStarter: true })),
+              ...substitutes.map((p: any) => ({ ...p, isStarter: false })),
+            ],
+          };
+        }),
         statistics: fixture.statistics,
       });
 
@@ -264,29 +282,57 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         if (diffDays >= -2 && diffDays <= 6) {
           const hasFixtures = await fixturesRepo.hasFixturesForDate(normalizedDate);
           if (!hasFixtures) {
-            let syncPromise = inFlightScheduleSyncs.get(normalizedDate);
-            if (!syncPromise) {
-              const syncService: SyncService | undefined = (fastify as any).syncService;
-              if (syncService && typeof syncService.syncSchedule === 'function') {
-                syncPromise = syncService
-                  .syncSchedule(normalizedDate)
-                  .catch((err: any) => {
-                    request.log.warn(err, `On-demand schedule sync failed for ${normalizedDate}`);
-                  })
-                  .finally(() => {
-                    inFlightScheduleSyncs.delete(normalizedDate);
-                  });
-                inFlightScheduleSyncs.set(normalizedDate, syncPromise);
-              }
-            }
+            const failedAt = failedScheduleSyncCooldowns.get(normalizedDate);
+            const isCoolingDown = failedAt ? Date.now() - failedAt < 15000 : false;
 
-            if (syncPromise) {
-              const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
-                setTimeout(() => resolve({ timedOut: true }), 3500)
-              );
-              await Promise.race([syncPromise, timeoutPromise]);
-              if (inFlightScheduleSyncs.has(normalizedDate)) {
-                isDateSyncing = true;
+            if (!isCoolingDown) {
+              let syncPromise = inFlightScheduleSyncs.get(normalizedDate);
+              if (!syncPromise) {
+                let syncService: SyncService | undefined =
+                  (request.server as any).syncService || (fastify as any).syncService;
+                if (!syncService) {
+                  const effectiveProvider =
+                    process.env.ACTIVE_PROVIDER || process.env.FOOTBALL_PROVIDER || 'fotmob';
+                  const provider = createProvider({ provider: effectiveProvider as any });
+                  syncService = new SyncService(provider);
+                  (fastify as any).syncService = syncService;
+                }
+
+                if (syncService && typeof syncService.syncSchedule === 'function') {
+                  syncPromise = syncService
+                    .syncSchedule(normalizedDate)
+                    .then((summary) => {
+                      if (
+                        !summary ||
+                        ((summary.fixturesDiscovered ?? 0) === 0 &&
+                          (summary.fixturesInserted ?? 0) === 0 &&
+                          (summary.fixturesUpdated ?? 0) === 0)
+                      ) {
+                        failedScheduleSyncCooldowns.set(normalizedDate, Date.now());
+                      } else {
+                        failedScheduleSyncCooldowns.delete(normalizedDate);
+                      }
+                      return summary;
+                    })
+                    .catch((err: any) => {
+                      request.log.warn(err, `On-demand schedule sync failed for ${normalizedDate}`);
+                      failedScheduleSyncCooldowns.set(normalizedDate, Date.now());
+                    })
+                    .finally(() => {
+                      inFlightScheduleSyncs.delete(normalizedDate);
+                    });
+                  inFlightScheduleSyncs.set(normalizedDate, syncPromise);
+                }
+              }
+
+              if (syncPromise) {
+                const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
+                  setTimeout(() => resolve({ timedOut: true }), 3500)
+                );
+                await Promise.race([syncPromise, timeoutPromise]);
+                if (inFlightScheduleSyncs.has(normalizedDate)) {
+                  isDateSyncing = true;
+                }
               }
             }
           }
@@ -322,7 +368,15 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       const pinnedMatchIds: string[] = [];
       const queryPinnedId = (request.query as any).pinnedMatchId;
       if (queryPinnedId && typeof queryPinnedId === 'string' && queryPinnedId.trim().length > 0) {
-        pinnedMatchIds.push(queryPinnedId.trim());
+        const pid = queryPinnedId.trim();
+        pinnedMatchIds.push(pid);
+        if (prefService && typeof prefService.updatePreferences === 'function') {
+          try { prefService.updatePreferences({ pinnedMatchId: pid }); } catch {}
+        }
+        const scheduler: any = (fastify as any).scheduler;
+        if (scheduler && typeof scheduler.setPinnedMatchIds === 'function') {
+          try { scheduler.setPinnedMatchIds([pid]); } catch {}
+        }
       }
       if (prefService) {
         const prefPinned = prefService.getPreferences()?.pinnedMatchIds;
@@ -331,14 +385,25 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         }
       }
 
+      const LIVE_STATES = ['LIVE', '1H', '2H', 'HT', 'ET', 'P', 'BT', 'FIRST_HALF', 'SECOND_HALF', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES', 'IN_PLAY'];
       for (const pinnedId of pinnedMatchIds) {
-        const alreadyInMatches = matches.some(
+        let pinnedRow: any = matches.find(
           (m: any) => m.id === pinnedId || m.canonicalId === pinnedId
         );
-        if (!alreadyInMatches) {
-          const pinnedRow = await fixturesRepo.getByCanonicalOrLegacyId(pinnedId);
+        if (!pinnedRow) {
+          pinnedRow = await fixturesRepo.getByCanonicalOrLegacyId(pinnedId);
           if (pinnedRow) {
             matches.push(pinnedRow);
+          }
+        }
+        if (pinnedRow) {
+          const isLive = LIVE_STATES.includes(String(pinnedRow.state || '').toUpperCase());
+          const lastUpdatedMs = pinnedRow.updatedAt ? new Date(pinnedRow.updatedAt).getTime() : 0;
+          if (isLive && (Date.now() - lastUpdatedMs > 45000)) {
+            const syncService: SyncService | undefined = (request.server as any).syncService || (fastify as any).syncService;
+            if (syncService) {
+              syncService.syncFixtureDetails(pinnedRow.id).catch(() => {});
+            }
           }
         }
       }
@@ -380,10 +445,10 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
 
       if (!isInterimSyncingEmpty) {
         // Compute deterministic ETag based on v2 match data, query parameters, quotaExhausted state, and followed counts
-        // Exclude volatile runtime clock fields (trust.dataAgeSeconds) so ETag remains stable between polls when match data is unchanged
+        // Exclude volatile runtime clock / polling timestamps (trust.sourceObservedAt, trust.dataAgeSeconds) so ETag remains stable between polls
         const stableMatches = formattedMatches.map(({ trust, ...rest }) => ({
           ...rest,
-          trust: trust ? { freshnessState: trust.freshnessState, sourceObservedAt: trust.sourceObservedAt, provider: trust.provider } : undefined,
+          trust: trust ? { freshnessState: trust.freshnessState, provider: trust.provider } : undefined,
         }));
         const cacheKey = `${dateParam || ''}_${teamsParam || ''}_${competitionsParam || ''}_${JSON.stringify(stableMatches)}_${quotaExhausted}_${JSON.stringify(followedCountsByDate)}`;
         const dataHash = createHash('md5').update(cacheKey).digest('hex');
@@ -565,19 +630,31 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         const lastUpdatedMs = fixture.updatedAt ? new Date(fixture.updatedAt).getTime() : 0;
         const isStale = (Date.now() - lastUpdatedMs) > 15000;
 
+        const homeScore = fixture.homeScore ?? 0;
+        const awayScore = fixture.awayScore ?? 0;
+        const totalScore = homeScore + awayScore;
+        const existingEvents = fixture.events ?? [];
+        const goalEventCount = existingEvents.filter((e: any) => e.type === 'Goal').length;
+        const missingGoals = totalScore > 0 && goalEventCount < totalScore;
+        const missingEventsOrStats = isStarted && ((!fixture.events || fixture.events.length === 0) || (!fixture.statistics || fixture.statistics.length === 0));
+
         let cached = typeof syncService.getCachedMatchDetails === 'function'
           ? (syncService.getCachedMatchDetails(fixture.id) || syncService.getCachedMatchDetails(id.trim()))
           : null;
 
+        const cachedAtMs = (cached as any)?.cachedAt || 0;
+        const isLiveCacheStale = isLive && (Date.now() - cachedAtMs > 30000);
+        const hasSparseCommentary = isStarted && (!cached?.commentary || !Array.isArray(cached.commentary) || cached.commentary.length <= 5);
+
         const hasRichCommentary = cached?.commentary &&
           Array.isArray(cached.commentary) &&
-          cached.commentary.length > 0 &&
-          cached.commentary.some((c: any) => c.type === 'whistle' || c.type === 'shot' || c.type === 'save' || c.type === 'block' || c.type === 'woodwork');
+          cached.commentary.length > 5 &&
+          cached.commentary.some((c: any) => c.type === 'whistle' || c.type === 'shot' || c.type === 'save' || c.type === 'block' || c.type === 'woodwork' || c.type === 'stat');
 
-        if (!hasDetails || (isLive && isStale) || (isStarted && !hasRichCommentary)) {
+        if (missingGoals || missingEventsOrStats || !hasDetails || (isLive && (isStale || isLiveCacheStale)) || (isStarted && (!hasRichCommentary || hasSparseCommentary))) {
           try {
             const timeoutPromise = new Promise<false>((resolve) =>
-              setTimeout(() => resolve(false), 2500)
+              setTimeout(() => resolve(false), 3500)
             );
             const syncPromise = syncService.syncFixtureDetails(fixture.id);
             const synced = await Promise.race([syncPromise, timeoutPromise]);
@@ -591,8 +668,55 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           }
         }
 
+        if (cached?.events && Array.isArray(cached.events) && cached.events.length > 0) {
+          fixture.events = cached.events.map((e: any) => ({
+            ...e,
+            fixtureId: fixture.id,
+            teamId: (e.teamId === cached.homeTeam?.providerId ? fixture.homeTeamId : (e.teamId === cached.awayTeam?.providerId ? fixture.awayTeamId : (e.teamId || fixture.homeTeamId))),
+          }));
+        }
+        if (cached?.stats && Array.isArray(cached.stats) && cached.stats.length > 0) {
+          fixture.statistics = cached.stats.map((s: any) => ({
+            ...s,
+            fixtureId: fixture.id,
+            teamId: (s.teamId === cached.homeTeam?.providerId ? fixture.homeTeamId : (s.teamId === cached.awayTeam?.providerId ? fixture.awayTeamId : (s.teamId || fixture.homeTeamId))),
+          }));
+        }
+
         if (cached?.commentary && Array.isArray(cached.commentary)) {
           fixture.commentary = cached.commentary;
+        }
+        if (cached?.h2hAndPredictions) {
+          fixture.h2hAndPredictions = cached.h2hAndPredictions;
+        }
+        if (cached?.heatmaps) {
+          fixture.heatmaps = cached.heatmaps;
+        }
+        if (cached?.lineups) {
+          fixture.lineups = cached.lineups.map((l: any) => {
+            const starters = l.startXi || l.starters || l.startingXI || [];
+            const substitutes = l.substitutes || l.subs || l.bench || [];
+            const unavailable = l.unavailable || l.naPlayers || l.injured || [];
+            return {
+              ...l,
+              startingXI: starters,
+              startXi: starters,
+              starters,
+              substitutes,
+              subs: substitutes,
+              unavailable,
+              players: l.players || [
+                ...starters.map((p: any) => ({ ...p, isStarter: true })),
+                ...substitutes.map((p: any) => ({ ...p, isStarter: false })),
+              ],
+            };
+          });
+        }
+        if (cached?.venue && !fixture.venue) {
+          fixture.venue = cached.venue;
+        }
+        if (cached?.referee && !fixture.referee) {
+          fixture.referee = cached.referee;
         }
       }
 

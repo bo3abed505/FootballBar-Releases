@@ -56,6 +56,11 @@ public sealed record NotificationPreferences
         {
             return EnabledTypes.Contains(NotificationType.MatchStarted) || EnabledTypes.Contains(NotificationType.HalfTime);
         }
+        // Resilient fallback for existing stored configurations: if Kickoff reminder is not explicitly in JSON list, inherit from MatchStarted
+        if (type == NotificationType.Kickoff)
+        {
+            return EnabledTypes.Contains(NotificationType.Kickoff) || EnabledTypes.Contains(NotificationType.MatchStarted);
+        }
         return false;
     }
 

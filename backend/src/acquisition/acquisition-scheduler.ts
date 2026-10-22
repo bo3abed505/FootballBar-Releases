@@ -506,7 +506,12 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
           }
         }
 
-        if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+        const hasDiscoveredFixtures =
+          (daySummary?.fixturesDiscovered ?? 0) > 0 ||
+          (daySummary?.fixturesInserted ?? 0) > 0 ||
+          (daySummary?.fixturesUpdated ?? 0) > 0;
+
+        if (hasDiscoveredFixtures && typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
           await this.fixturesRepo.markScheduleDiscovered(targetDateStr, currentDate, cycleId);
         }
 
@@ -518,32 +523,43 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
         }
       } catch (err: any) {
         this.logger.warn(`Failed schedule sync for day ${offsetLabel} (${targetDateStr}): ${err?.message || err}`);
-        // Fault-tolerant: log warning but do not throw, allowing the routine to proceed and commit slot
+        // Fault-tolerant: log warning but do not throw, allowing the routine to proceed
       }
     }
 
-    // Unconditional slot commitment
-    const slotKey = `${todayDateStr}-${currentDate.getUTCHours() < 12 ? '00' : '12'}`;
-    this.lastScheduleSyncSlot = slotKey;
-    this.lastScheduleSyncAt = currentDate;
+    const totalDiscovered =
+      combinedSummary.fixturesDiscovered +
+      combinedSummary.fixturesInserted +
+      combinedSummary.fixturesUpdated;
 
-    // Persist durable slot record to database
-    try {
-      await db.insert(schema.apiRequestLedger).values({
-        id: `slot_${slotKey}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        cycleId: cycleId ?? null,
-        provider: 'system',
-        endpoint: `/schedule?slot=${slotKey}`,
-        operation: 'DISCOVER_SCHEDULE_SLOT',
-        priority: 'NORMAL',
-        success: true,
-        httpStatus: 200,
-        responseTimeMs: 0,
-        costUnits: 0,
-        requestedAt: currentDate,
-      }).onConflictDoNothing();
-    } catch (err: any) {
-      this.logger.warn(`Failed persisting schedule slot record: ${err?.message}`);
+    // Only commit slot if fixtures were discovered; otherwise allow retry on next cycle
+    if (totalDiscovered > 0) {
+      const slotKey = `${todayDateStr}-${currentDate.getUTCHours() < 12 ? '00' : '12'}`;
+      this.lastScheduleSyncSlot = slotKey;
+      this.lastScheduleSyncAt = currentDate;
+
+      // Persist durable slot record to database
+      try {
+        await db.insert(schema.apiRequestLedger).values({
+          id: `slot_${slotKey}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          cycleId: cycleId ?? null,
+          provider: 'system',
+          endpoint: `/schedule?slot=${slotKey}`,
+          operation: 'DISCOVER_SCHEDULE_SLOT',
+          priority: 'NORMAL',
+          success: true,
+          httpStatus: 200,
+          responseTimeMs: 0,
+          costUnits: 0,
+          requestedAt: currentDate,
+        }).onConflictDoNothing();
+      } catch (err: any) {
+        this.logger.warn(`Failed persisting schedule slot record: ${err?.message}`);
+      }
+    } else {
+      this.logger.warn(
+        `Core schedule sync returned 0 fixtures. Slot not marked as completed to allow retry on next cycle.`
+      );
     }
 
     return combinedSummary;
@@ -600,7 +616,12 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
           }
         }
 
-        if (typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
+        const hasDiscoveredFixtures =
+          (daySummary?.fixturesDiscovered ?? 0) > 0 ||
+          (daySummary?.fixturesInserted ?? 0) > 0 ||
+          (daySummary?.fixturesUpdated ?? 0) > 0;
+
+        if (hasDiscoveredFixtures && typeof this.fixturesRepo.markScheduleDiscovered === 'function') {
           await this.fixturesRepo.markScheduleDiscovered(targetDateStr, currentDate, cycleId);
         }
 
@@ -690,13 +711,8 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
             const targetDateStr = targetD.toISOString().slice(0, 10);
             let hasDayFixtures = false;
 
-            const isDiscovered = typeof (this.fixturesRepo as any).isScheduleDiscovered === 'function'
-              ? (this.fixturesRepo as any).isScheduleDiscovered(targetDateStr)
-              : false;
-
-            if (isDiscovered) {
-              hasDayFixtures = true;
-            } else if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
+            // Physical check in SQLite takes strict precedence over in-memory discovery cache
+            if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
               hasDayFixtures = await (this.fixturesRepo as any).hasFixturesForDate(targetDateStr);
             } else if (this.fixturesRepo instanceof FixturesRepository) {
               const startOfDay = new Date(`${targetDateStr}T00:00:00.000Z`);
@@ -713,7 +729,10 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
                 .limit(1);
               hasDayFixtures = fixturesDay.length > 0;
             } else {
-              hasDayFixtures = summary.scheduleKnownForToday;
+              const isDiscovered = typeof (this.fixturesRepo as any).isScheduleDiscovered === 'function'
+                ? (this.fixturesRepo as any).isScheduleDiscovered(targetDateStr)
+                : false;
+              hasDayFixtures = isDiscovered || summary.scheduleKnownForToday;
             }
 
             if (!hasDayFixtures) {

@@ -917,6 +917,7 @@ export class SyncService {
     });
     if (!details) return false;
 
+    (details as any).cachedAt = Date.now();
     this.matchDetailsCache.set(providerMatchId, details);
     this.matchDetailsCache.set(dbFixture.id, details);
     if (dbFixture.canonicalId) {

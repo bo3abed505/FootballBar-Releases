@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -1409,48 +1410,551 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public readonly record struct CompetitionSortScore(
+        int Tier,
+        int SubRank,
+        string CountrySort,
+        string NameSort
+    );
+
+    private static (string Iso2, string Iso3, string EnglishName) GetUserRegion()
+    {
+        try
+        {
+            var reg = RegionInfo.CurrentRegion;
+            return (
+                reg.TwoLetterISORegionName?.ToUpperInvariant() ?? "US",
+                reg.ThreeLetterISORegionName?.ToUpperInvariant() ?? "USA",
+                reg.EnglishName ?? "United States"
+            );
+        }
+        catch
+        {
+            return ("US", "USA", "United States");
+        }
+    }
+
+    private static CompetitionSortScore GetCompetitionSortScore(
+        bool isFollowed,
+        string? compId,
+        string? compName,
+        string? country,
+        string? compCode)
+    {
+        string cName = compName?.Trim() ?? string.Empty;
+        string cCountry = country?.Trim() ?? string.Empty;
+        string cCode = compCode?.Trim().ToUpperInvariant() ?? string.Empty;
+        string cId = compId?.Trim() ?? string.Empty;
+
+        var userRegion = GetUserRegion();
+
+        // Tier 0 — User Followed
+        if (isFollowed)
+        {
+            int subRank = GetPopularitySubRank(cId, cName, cCountry, cCode, userRegion);
+            return new CompetitionSortScore(0, subRank, cCountry, cName);
+        }
+
+        // Tier 1 — User's Local Region & Continental Competitions
+        if (TryGetTier1Rank(cId, cName, cCountry, cCode, userRegion, out int tier1SubRank))
+        {
+            return new CompetitionSortScore(1, tier1SubRank, cCountry, cName);
+        }
+
+        // Tier 2 — Global Elite Popularity Ranking
+        if (TryGetTier2Rank(cId, cName, cCountry, cCode, out int tier2SubRank))
+        {
+            return new CompetitionSortScore(2, tier2SubRank, cCountry, cName);
+        }
+
+        // Tier 3 — Remaining Competitions (sorted alphabetically by Country Code/Name and Competition Name)
+        string countrySortKey = !string.IsNullOrWhiteSpace(cCountry) ? cCountry : (!string.IsNullOrWhiteSpace(cCode) ? cCode : "ZZ");
+        return new CompetitionSortScore(3, 0, countrySortKey, cName);
+    }
+
+    private static bool TryGetTier1Rank(
+        string compId,
+        string compName,
+        string country,
+        string compCode,
+        (string Iso2, string Iso3, string EnglishName) userRegion,
+        out int subRank)
+    {
+        subRank = 100;
+        string u2 = userRegion.Iso2;
+        string u3 = userRegion.Iso3;
+        string uName = userRegion.EnglishName;
+
+        // 1. Domestic League & Cup Match
+        if (IsUserDomestic(compId, compName, country, compCode, u2, u3, uName))
+        {
+            if (IsCup(compName, compCode))
+            {
+                subRank = 2;
+            }
+            else if (IsSecondDivision(compName, compCode))
+            {
+                subRank = 3;
+            }
+            else
+            {
+                subRank = 1;
+            }
+            return true;
+        }
+
+        // 2. Continental Competitions for User's Continent/Confederation
+        if (TryGetContinentalRankForRegion(compId, compName, country, compCode, u2, out subRank))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsUserDomestic(
+        string compId,
+        string compName,
+        string country,
+        string compCode,
+        string u2,
+        string u3,
+        string uName)
+    {
+        // Egypt / EGY
+        if (u2 == "EG" || u3 == "EGY")
+        {
+            if (country.Contains("Egypt", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Egypt", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Egyptian", StringComparison.OrdinalIgnoreCase) ||
+                compCode == "EG" ||
+                compId is "233" or "234" or "546" or "comp_233" ||
+                (CanonicalEntityIds.TryTranslateLegacyId(compId, out var canon) && canon == CanonicalEntityIds.EgyptianPremierLeague))
+            {
+                return true;
+            }
+        }
+        // Great Britain / England / Scotland
+        else if (u2 == "GB" || u3 == "GBR" || u2 == "UK")
+        {
+            if (country.Contains("England", StringComparison.OrdinalIgnoreCase) ||
+                country.Contains("Scotland", StringComparison.OrdinalIgnoreCase) ||
+                country.Contains("Wales", StringComparison.OrdinalIgnoreCase) ||
+                country.Contains("Northern Ireland", StringComparison.OrdinalIgnoreCase) ||
+                country.Contains("United Kingdom", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "ENG" or "SCO" or "WAL" or "NIR" or "PL" or "CHA" or "FAC" or "EFL" ||
+                (CanonicalEntityIds.TryTranslateLegacyId(compId, out var canon) && canon == CanonicalEntityIds.PremierLeague) ||
+                compId is "39" or "40" or "45" or "48" or "528" or "179" or "181")
+            {
+                return true;
+            }
+            if ((compName.Contains("Premier League", StringComparison.OrdinalIgnoreCase) ||
+                 compName.Contains("FA Cup", StringComparison.OrdinalIgnoreCase) ||
+                 compName.Contains("EFL Cup", StringComparison.OrdinalIgnoreCase) ||
+                 compName.Contains("Championship", StringComparison.OrdinalIgnoreCase)) &&
+                !compName.Contains("Egyptian", StringComparison.OrdinalIgnoreCase) &&
+                !compName.Contains("Russian", StringComparison.OrdinalIgnoreCase) &&
+                !compName.Contains("Ukrainian", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        // Spain / ESP
+        else if (u2 == "ES" || u3 == "ESP")
+        {
+            if (country.Contains("Spain", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "ESP" or "ES" or "PD" or "SD" or "CDR" ||
+                compName.Contains("La Liga", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("LaLiga", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Copa del Rey", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Supercopa de España", StringComparison.OrdinalIgnoreCase) ||
+                compId is "140" or "141" or "143" or "556" ||
+                (CanonicalEntityIds.TryTranslateLegacyId(compId, out var canon) && canon == CanonicalEntityIds.LaLiga))
+            {
+                return true;
+            }
+        }
+        // Germany / DEU / GER
+        else if (u2 == "DE" || u3 == "DEU" || u3 == "GER")
+        {
+            if (country.Contains("Germany", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "GER" or "DEU" or "DE" or "BL1" or "BL2" or "DFB" ||
+                compName.Contains("Bundesliga", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("DFB-Pokal", StringComparison.OrdinalIgnoreCase) ||
+                compId is "78" or "79" or "81" or "529")
+            {
+                return true;
+            }
+        }
+        // Italy / ITA
+        else if (u2 == "IT" || u3 == "ITA")
+        {
+            if (country.Contains("Italy", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "ITA" or "IT" or "SA" or "SB" or "CIT" ||
+                compName.Contains("Serie A", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Serie B", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Coppa Italia", StringComparison.OrdinalIgnoreCase) ||
+                compId is "135" or "136" or "137" or "547")
+            {
+                return true;
+            }
+        }
+        // France / FRA
+        else if (u2 == "FR" || u3 == "FRA")
+        {
+            if (country.Contains("France", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "FRA" or "FR" or "FL1" or "FL2" or "CDF" ||
+                compName.Contains("Ligue 1", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Ligue 2", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("Coupe de France", StringComparison.OrdinalIgnoreCase) ||
+                compId is "61" or "62" or "66" or "526")
+            {
+                return true;
+            }
+        }
+        // Saudi Arabia / SAU / KSA
+        else if (u2 == "SA" || u3 == "SAU" || u3 == "KSA")
+        {
+            if (country.Contains("Saudi", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "KSA" or "SAU" or "SA" or "SPL" ||
+                compName.Contains("Saudi", StringComparison.OrdinalIgnoreCase) ||
+                compId is "307" or "308" or "541")
+            {
+                return true;
+            }
+        }
+        // United States / USA
+        else if (u2 == "US" || u3 == "USA")
+        {
+            if (country.Contains("USA", StringComparison.OrdinalIgnoreCase) ||
+                country.Contains("United States", StringComparison.OrdinalIgnoreCase) ||
+                compCode is "USA" or "US" or "MLS" ||
+                compName.Contains("Major League Soccer", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("MLS", StringComparison.OrdinalIgnoreCase) ||
+                compName.Contains("US Open Cup", StringComparison.OrdinalIgnoreCase) ||
+                compId is "253" or "257")
+            {
+                return true;
+            }
+        }
+        else
+        {
+            // Generic domestic match for any country
+            if (!string.IsNullOrWhiteSpace(country) &&
+                (country.Equals(uName, StringComparison.OrdinalIgnoreCase) ||
+                 country.Equals(u2, StringComparison.OrdinalIgnoreCase) ||
+                 country.Equals(u3, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+            if (!string.IsNullOrWhiteSpace(compCode) &&
+                (compCode.Equals(u2, StringComparison.OrdinalIgnoreCase) ||
+                 compCode.Equals(u3, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetContinentalRankForRegion(
+        string compId,
+        string compName,
+        string country,
+        string compCode,
+        string u2,
+        out int subRank)
+    {
+        subRank = 100;
+
+        // Africa / MENA
+        if (IsAfricaOrMena(u2))
+        {
+            if (compName.Contains("CAF Champions League", StringComparison.OrdinalIgnoreCase) || compCode == "CAFCL" || compId == "12")
+            {
+                subRank = 10; return true;
+            }
+            if (compName.Contains("CAF Confederation", StringComparison.OrdinalIgnoreCase) || compCode == "CAFCC" || compId == "20" ||
+                compName.Contains("CAF Super Cup", StringComparison.OrdinalIgnoreCase) || compId == "412")
+            {
+                subRank = 11; return true;
+            }
+            if (compName.Contains("Africa Cup of Nations", StringComparison.OrdinalIgnoreCase) || compName.Contains("AFCON", StringComparison.OrdinalIgnoreCase) ||
+                compCode == "AFCON" || compId == "6" || (CanonicalEntityIds.TryTranslateLegacyId(compId, out var c6) && c6 == CanonicalEntityIds.AfricaCupOfNations))
+            {
+                subRank = 12; return true;
+            }
+            if (compName.Contains("Arab Cup", StringComparison.OrdinalIgnoreCase) || compName.Contains("World Cup", StringComparison.OrdinalIgnoreCase) ||
+                compId == "1" || (CanonicalEntityIds.TryTranslateLegacyId(compId, out var c1) && c1 == CanonicalEntityIds.WorldCup))
+            {
+                subRank = 13; return true;
+            }
+            if (u2 is "SA" or "AE" or "QA" or "KW" or "OM" or "BH" or "IQ" or "JO" or "LB")
+            {
+                if (compName.Contains("AFC Champions League", StringComparison.OrdinalIgnoreCase) || compCode == "AFCCL" || compId is "17" or "849")
+                {
+                    subRank = 10; return true;
+                }
+                if (compName.Contains("Asian Cup", StringComparison.OrdinalIgnoreCase) || compCode == "AC" || compId == "7")
+                {
+                    subRank = 12; return true;
+                }
+            }
+        }
+        // Europe (UEFA)
+        else if (IsEurope(u2))
+        {
+            if (compName.Contains("Champions League", StringComparison.OrdinalIgnoreCase) || compCode == "UCL" || compId == "2" ||
+                (CanonicalEntityIds.TryTranslateLegacyId(compId, out var c2) && c2 == CanonicalEntityIds.ChampionsLeague))
+            {
+                subRank = 10; return true;
+            }
+            if (compName.Contains("Europa League", StringComparison.OrdinalIgnoreCase) || compCode == "UEL" || compId == "3")
+            {
+                subRank = 11; return true;
+            }
+            if (compName.Contains("Conference League", StringComparison.OrdinalIgnoreCase) || compCode == "UECL" || compId == "848")
+            {
+                subRank = 12; return true;
+            }
+            if (compName.Contains("UEFA Super Cup", StringComparison.OrdinalIgnoreCase) || compCode == "USC" || compId == "531")
+            {
+                subRank = 13; return true;
+            }
+            if (compName.Contains("European Championship", StringComparison.OrdinalIgnoreCase) || compName.Contains("Euro", StringComparison.OrdinalIgnoreCase) ||
+                compCode == "EURO" || compId == "4" || (CanonicalEntityIds.TryTranslateLegacyId(compId, out var c4) && c4 == CanonicalEntityIds.EuroChampionship))
+            {
+                subRank = 14; return true;
+            }
+            if (compName.Contains("Nations League", StringComparison.OrdinalIgnoreCase) || compCode == "UNL" || compId == "5" ||
+                (CanonicalEntityIds.TryTranslateLegacyId(compId, out var c5) && c5 == CanonicalEntityIds.NationsLeague))
+            {
+                subRank = 15; return true;
+            }
+        }
+        // South America (CONMEBOL)
+        else if (IsSouthAmerica(u2))
+        {
+            if (compName.Contains("Libertadores", StringComparison.OrdinalIgnoreCase) || compCode == "LIB" || compId == "13")
+            {
+                subRank = 10; return true;
+            }
+            if (compName.Contains("Sudamericana", StringComparison.OrdinalIgnoreCase) || compCode == "SUD" || compId == "11")
+            {
+                subRank = 11; return true;
+            }
+            if (compName.Contains("Copa America", StringComparison.OrdinalIgnoreCase) || compName.Contains("Copa América", StringComparison.OrdinalIgnoreCase) ||
+                compCode == "CA" || compId == "9" || (CanonicalEntityIds.TryTranslateLegacyId(compId, out var c9) && c9 == CanonicalEntityIds.CopaAmerica))
+            {
+                subRank = 12; return true;
+            }
+        }
+        // North / Central America (CONCACAF)
+        else if (IsNorthAmerica(u2))
+        {
+            if (compName.Contains("CONCACAF Champions", StringComparison.OrdinalIgnoreCase) || compCode == "CCC" || compId == "16")
+            {
+                subRank = 10; return true;
+            }
+            if (compName.Contains("Leagues Cup", StringComparison.OrdinalIgnoreCase) || compCode == "LC" || compId == "846")
+            {
+                subRank = 11; return true;
+            }
+            if (compName.Contains("Gold Cup", StringComparison.OrdinalIgnoreCase) || compCode == "CGC" || compId == "22")
+            {
+                subRank = 12; return true;
+            }
+        }
+        // Asia (AFC)
+        else if (IsAsia(u2))
+        {
+            if (compName.Contains("AFC Champions League", StringComparison.OrdinalIgnoreCase) || compCode == "AFCCL" || compId is "17" or "849")
+            {
+                subRank = 10; return true;
+            }
+            if (compName.Contains("Asian Cup", StringComparison.OrdinalIgnoreCase) || compCode == "AC" || compId == "7")
+            {
+                subRank = 12; return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetTier2Rank(
+        string compId,
+        string compName,
+        string country,
+        string compCode,
+        out int subRank)
+    {
+        subRank = 100;
+
+        if (CanonicalEntityIds.TryTranslateLegacyId(compId, out var canon))
+        {
+            if (canon == CanonicalEntityIds.WorldCup) { subRank = 1; return true; }
+            if (canon == CanonicalEntityIds.EuroChampionship) { subRank = 2; return true; }
+            if (canon == CanonicalEntityIds.CopaAmerica) { subRank = 3; return true; }
+            if (canon == CanonicalEntityIds.AfricaCupOfNations) { subRank = 4; return true; }
+            if (canon == CanonicalEntityIds.ChampionsLeague) { subRank = 10; return true; }
+            if (canon == CanonicalEntityIds.PremierLeague) { subRank = 20; return true; }
+            if (canon == CanonicalEntityIds.LaLiga) { subRank = 30; return true; }
+        }
+
+        // 1. FIFA World Cup / UEFA Euro / Copa América / AFCON / FIFA Club World Cup
+        if ((compName.Contains("World Cup", StringComparison.OrdinalIgnoreCase) && !compName.Contains("Club", StringComparison.OrdinalIgnoreCase)) || compId == "1" || compCode == "WC")
+        {
+            subRank = 1; return true;
+        }
+        if (compName.Contains("European Championship", StringComparison.OrdinalIgnoreCase) || compName.Contains("UEFA Euro", StringComparison.OrdinalIgnoreCase) || compId == "4" || compCode == "EURO")
+        {
+            subRank = 2; return true;
+        }
+        if (compName.Contains("Copa America", StringComparison.OrdinalIgnoreCase) || compName.Contains("Copa América", StringComparison.OrdinalIgnoreCase) || compId == "9" || compCode == "CA")
+        {
+            subRank = 3; return true;
+        }
+        if (compName.Contains("Africa Cup of Nations", StringComparison.OrdinalIgnoreCase) || compName.Contains("AFCON", StringComparison.OrdinalIgnoreCase) || compId == "6" || compCode == "AFCON")
+        {
+            subRank = 4; return true;
+        }
+        if (compName.Contains("Club World Cup", StringComparison.OrdinalIgnoreCase) || compId == "15" || compCode == "CWC")
+        {
+            subRank = 5; return true;
+        }
+
+        // 2. UEFA Champions League (INT / EUR)
+        if (compName.Contains("Champions League", StringComparison.OrdinalIgnoreCase) || compId == "2" || compId.Equals("comp_ucl", StringComparison.OrdinalIgnoreCase) || compCode == "UCL")
+        {
+            subRank = 10; return true;
+        }
+
+        // 3. English Premier League (ENG)
+        if ((compName.Contains("Premier League", StringComparison.OrdinalIgnoreCase) && (country.Contains("England", StringComparison.OrdinalIgnoreCase) || compCode == "ENG" || compCode == "PL" || string.IsNullOrWhiteSpace(country))) ||
+            compId == "39" || compId.Equals("comp_pl", StringComparison.OrdinalIgnoreCase))
+        {
+            subRank = 20; return true;
+        }
+
+        // 4. Spanish LaLiga (ESP)
+        if (compName.Contains("La Liga", StringComparison.OrdinalIgnoreCase) || compName.Contains("LaLiga", StringComparison.OrdinalIgnoreCase) || compName.Contains("Primera División", StringComparison.OrdinalIgnoreCase) ||
+            compId == "140" || compId.Equals("comp_laliga", StringComparison.OrdinalIgnoreCase) || compCode == "PD")
+        {
+            subRank = 30; return true;
+        }
+
+        // 5. Italian Serie A (ITA)
+        if ((compName.Contains("Serie A", StringComparison.OrdinalIgnoreCase) && (country.Contains("Italy", StringComparison.OrdinalIgnoreCase) || compCode == "ITA" || compCode == "SA" || string.IsNullOrWhiteSpace(country))) ||
+            compId == "135" || compId.Equals("comp_sa", StringComparison.OrdinalIgnoreCase))
+        {
+            subRank = 40; return true;
+        }
+
+        // 6. German Bundesliga (GER)
+        if ((compName.Contains("Bundesliga", StringComparison.OrdinalIgnoreCase) && !compName.Contains("2. Bundesliga", StringComparison.OrdinalIgnoreCase) && !compName.Contains("Austrian", StringComparison.OrdinalIgnoreCase)) ||
+            compId == "78" || compId.Equals("comp_bl1", StringComparison.OrdinalIgnoreCase) || compCode == "BL1")
+        {
+            subRank = 50; return true;
+        }
+
+        // 7. French Ligue 1 (FRA)
+        if ((compName.Contains("Ligue 1", StringComparison.OrdinalIgnoreCase) && (country.Contains("France", StringComparison.OrdinalIgnoreCase) || compCode == "FRA" || compCode == "FL1" || string.IsNullOrWhiteSpace(country))) ||
+            compId == "61" || compId.Equals("comp_fl1", StringComparison.OrdinalIgnoreCase))
+        {
+            subRank = 60; return true;
+        }
+
+        // 8. UEFA Europa League & Conference League (INT)
+        if (compName.Contains("Europa League", StringComparison.OrdinalIgnoreCase) || compId == "3" || compId.Equals("comp_uel", StringComparison.OrdinalIgnoreCase) || compCode == "UEL")
+        {
+            subRank = 70; return true;
+        }
+        if (compName.Contains("Conference League", StringComparison.OrdinalIgnoreCase) || compId == "848" || compId.Equals("comp_uecl", StringComparison.OrdinalIgnoreCase) || compCode == "UECL")
+        {
+            subRank = 75; return true;
+        }
+        if (compName.Contains("UEFA Super Cup", StringComparison.OrdinalIgnoreCase) || compId == "531" || compCode == "USC")
+        {
+            subRank = 78; return true;
+        }
+
+        // 9. Major domestic cups & top regional leagues
+        if (compName.Contains("FA Cup", StringComparison.OrdinalIgnoreCase) || compId == "45") { subRank = 80; return true; }
+        if (compName.Contains("EFL Cup", StringComparison.OrdinalIgnoreCase) || compId == "48") { subRank = 81; return true; }
+        if (compName.Contains("Copa del Rey", StringComparison.OrdinalIgnoreCase) || compId == "143") { subRank = 82; return true; }
+        if (compName.Contains("DFB-Pokal", StringComparison.OrdinalIgnoreCase) || compId == "81") { subRank = 83; return true; }
+        if (compName.Contains("Coppa Italia", StringComparison.OrdinalIgnoreCase) || compId == "137") { subRank = 84; return true; }
+        if (compName.Contains("Coupe de France", StringComparison.OrdinalIgnoreCase) || compId == "66") { subRank = 85; return true; }
+
+        if (compName.Contains("Saudi Pro League", StringComparison.OrdinalIgnoreCase) || compId == "307" || compCode == "SPL") { subRank = 90; return true; }
+        if (compName.Contains("Major League Soccer", StringComparison.OrdinalIgnoreCase) || compName.Contains("MLS", StringComparison.OrdinalIgnoreCase) || compId == "253") { subRank = 91; return true; }
+        if (compName.Contains("Brasileir", StringComparison.OrdinalIgnoreCase) || (compName.Contains("Serie A", StringComparison.OrdinalIgnoreCase) && country.Contains("Brazil", StringComparison.OrdinalIgnoreCase)) || compId == "71") { subRank = 92; return true; }
+        if (compName.Contains("Liga Profesional", StringComparison.OrdinalIgnoreCase) || (compName.Contains("Primera", StringComparison.OrdinalIgnoreCase) && country.Contains("Argentina", StringComparison.OrdinalIgnoreCase)) || compId == "128") { subRank = 93; return true; }
+        if (compName.Contains("Eredivisie", StringComparison.OrdinalIgnoreCase) || compId == "88") { subRank = 94; return true; }
+        if (compName.Contains("Primeira Liga", StringComparison.OrdinalIgnoreCase) || compName.Contains("Liga Portugal", StringComparison.OrdinalIgnoreCase) || compId == "94") { subRank = 95; return true; }
+        if (compName.Contains("Süper Lig", StringComparison.OrdinalIgnoreCase) || compId == "203") { subRank = 96; return true; }
+        if (compName.Contains("Qualification", StringComparison.OrdinalIgnoreCase) || compName.Contains("Play-offs", StringComparison.OrdinalIgnoreCase)) { subRank = 97; return true; }
+        if (compName.Contains("Championship", StringComparison.OrdinalIgnoreCase) || compId == "40") { subRank = 98; return true; }
+
+        return false;
+    }
+
+    private static bool IsCup(string name, string code) =>
+        name.Contains("Cup", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Copa", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Pokal", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Coppa", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Coupe", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Beker", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Taça", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Super Cup", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Supercup", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Shield", StringComparison.OrdinalIgnoreCase) ||
+        code is "FAC" or "EFL" or "CDR" or "DFB" or "CIT" or "CDF" or "KNVB" or "TDP" or "CS";
+
+    private static bool IsSecondDivision(string name, string code) =>
+        name.Contains("Championship", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Segunda", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Serie B", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("2. Bundesliga", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Ligue 2", StringComparison.OrdinalIgnoreCase) ||
+        code is "CHA" or "SD" or "SB" or "BL2" or "FL2";
+
+    private static bool IsAfricaOrMena(string iso2) =>
+        iso2 is "EG" or "MA" or "DZ" or "TN" or "ZA" or "LY" or "SD" or "NG" or "GH" or "SN" or "CM" or "CI" or "KE" or "UG" or "TZ"
+             or "SA" or "AE" or "QA" or "KW" or "OM" or "BH" or "IQ" or "JO" or "LB" or "YE" or "SY" or "PS";
+
+    private static bool IsEurope(string iso2) =>
+        iso2 is "GB" or "ES" or "DE" or "IT" or "FR" or "NL" or "PT" or "BE" or "TR" or "AT" or "CH" or "SE" or "NO" or "DK" or "PL"
+             or "GR" or "HR" or "RS" or "CZ" or "UA" or "RO" or "IE" or "HU" or "FI" or "SK" or "BG" or "IL" or "CY" or "IS" or "AL"
+             or "BA" or "SI" or "LT" or "LV" or "EE" or "GE" or "AM" or "AZ" or "KZ" or "MD" or "LU" or "MT" or "ME" or "MK";
+
+    private static bool IsSouthAmerica(string iso2) =>
+        iso2 is "BR" or "AR" or "CO" or "CL" or "UY" or "PE" or "EC" or "PY" or "BO" or "VE";
+
+    private static bool IsNorthAmerica(string iso2) =>
+        iso2 is "US" or "MX" or "CA" or "CR" or "PA" or "JM" or "HN" or "SV" or "GT" or "TT";
+
+    private static bool IsAsia(string iso2) =>
+        iso2 is "JP" or "KR" or "AU" or "CN" or "IN" or "ID" or "TH" or "VN" or "MY" or "SG" or "PH" or "UZ" or "IR";
+
+    private static int GetPopularitySubRank(
+        string compId,
+        string compName,
+        string country,
+        string compCode,
+        (string Iso2, string Iso3, string EnglishName) userRegion)
+    {
+        if (TryGetTier1Rank(compId, compName, country, compCode, userRegion, out int t1)) return t1;
+        if (TryGetTier2Rank(compId, compName, country, compCode, out int t2)) return t2;
+        return 100;
+    }
+
     private static int GetCompetitionPopularityRank(string? compId, string? compName)
     {
-        if (!string.IsNullOrWhiteSpace(compId))
-        {
-            if (CanonicalEntityIds.TryTranslateLegacyId(compId, out var canon))
-            {
-                if (canon == CanonicalEntityIds.ChampionsLeague) return 1;
-                if (canon == CanonicalEntityIds.WorldCup) return 2;
-                if (canon == CanonicalEntityIds.PremierLeague) return 3;
-                if (canon == CanonicalEntityIds.LaLiga) return 4;
-                if (canon == CanonicalEntityIds.AfricaCupOfNations) return 10;
-                if (canon == CanonicalEntityIds.EgyptianPremierLeague) return 12;
-            }
-
-            if (compId.Contains("135") || compId.Equals("comp_sa", StringComparison.OrdinalIgnoreCase)) return 5;
-            if (compId.Contains("78") || compId.Equals("comp_bl1", StringComparison.OrdinalIgnoreCase)) return 6;
-            if (compId.Contains("61") || compId.Equals("comp_fl1", StringComparison.OrdinalIgnoreCase)) return 7;
-            if (compId.Contains("3") || compId.Equals("comp_uel", StringComparison.OrdinalIgnoreCase)) return 8;
-            if (compId.Contains("848") || compId.Equals("comp_uecl", StringComparison.OrdinalIgnoreCase)) return 9;
-            if (compId.Contains("9") || compId.Equals("comp_ca", StringComparison.OrdinalIgnoreCase)) return 11;
-            if (compId.Contains("307") || compId.Equals("comp_spl", StringComparison.OrdinalIgnoreCase)) return 13;
-        }
-
-        if (!string.IsNullOrWhiteSpace(compName))
-        {
-            if (compName.Contains("Champions League", StringComparison.OrdinalIgnoreCase) || compName.Contains("UCL", StringComparison.OrdinalIgnoreCase)) return 1;
-            if (compName.Contains("World Cup", StringComparison.OrdinalIgnoreCase)) return 2;
-            if (compName.Contains("Premier League", StringComparison.OrdinalIgnoreCase)) return 3;
-            if (compName.Contains("La Liga", StringComparison.OrdinalIgnoreCase) || compName.Contains("Primera División", StringComparison.OrdinalIgnoreCase)) return 4;
-            if (compName.Contains("Serie A", StringComparison.OrdinalIgnoreCase)) return 5;
-            if (compName.Contains("Bundesliga", StringComparison.OrdinalIgnoreCase)) return 6;
-            if (compName.Contains("Ligue 1", StringComparison.OrdinalIgnoreCase)) return 7;
-            if (compName.Contains("Europa League", StringComparison.OrdinalIgnoreCase)) return 8;
-            if (compName.Contains("Conference League", StringComparison.OrdinalIgnoreCase)) return 9;
-            if (compName.Contains("Africa Cup", StringComparison.OrdinalIgnoreCase) || compName.Contains("AFCON", StringComparison.OrdinalIgnoreCase)) return 10;
-            if (compName.Contains("Copa America", StringComparison.OrdinalIgnoreCase)) return 11;
-            if (compName.Contains("Egyptian", StringComparison.OrdinalIgnoreCase)) return 12;
-            if (compName.Contains("Saudi", StringComparison.OrdinalIgnoreCase)) return 13;
-            if (compName.Contains("Cup", StringComparison.OrdinalIgnoreCase) || compName.Contains("Copa", StringComparison.OrdinalIgnoreCase)) return 14;
-        }
-
-        return 100;
+        var score = GetCompetitionSortScore(false, compId, compName, null, null);
+        return score.Tier * 100 + score.SubRank;
     }
 
     private void ApplyCurrentFilter()
@@ -1663,12 +2167,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var filteredByTab = FilterByTab(viewModels).ToList();
 
-        // Sort rules: Followed matches at the top (or IsRelevant == true), grouped by CompetitionName, then sorted by KickoffTime ascending.
+        // Sort rules: Followed matches at the top (or IsRelevant == true), grouped by CompetitionName, then sorted by KickoffTime (StartTimeUtc) ascending with HomeTeamName tie-breaker.
         var sortedFollowed = filteredByTab
             .Where(m => m.IsRelevant || m.FollowedByTeam || m.FollowedByCompetition)
             .OrderByDescending(m => m.FollowedByTeam)
+            .ThenBy(m => GetCompetitionSortScore(true, m.CompetitionId, m.CompetitionName, m.CompetitionCountry, m.CompetitionCode).SubRank)
             .ThenBy(m => m.CompetitionName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(m => m.KickoffTime)
+            .ThenBy(m => m.StartTimeUtc)
+            .ThenBy(m => m.HomeTeamName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Id, StringComparer.Ordinal)
             .ToList();
 
@@ -1676,9 +2182,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ? new List<MatchItemViewModel>()
             : filteredByTab
                 .Where(m => !m.IsRelevant && !m.FollowedByTeam && !m.FollowedByCompetition)
-                .OrderBy(m => GetCompetitionPopularityRank(m.CompetitionId, m.CompetitionName))
+                .OrderBy(m => GetCompetitionSortScore(false, m.CompetitionId, m.CompetitionName, m.CompetitionCountry, m.CompetitionCode).Tier)
+                .ThenBy(m => GetCompetitionSortScore(false, m.CompetitionId, m.CompetitionName, m.CompetitionCountry, m.CompetitionCode).SubRank)
+                .ThenBy(m => m.CompetitionCountry ?? m.CompetitionCode ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(m => m.CompetitionName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(m => m.KickoffTime)
+                .ThenBy(m => m.StartTimeUtc)
+                .ThenBy(m => m.HomeTeamName, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(m => m.Id, StringComparer.Ordinal)
                 .ToList();
 
@@ -1696,6 +2205,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 var first = g.First();
                 string compId = first.CompetitionId;
                 string compName = first.CompetitionName;
+                string compCode = first.CompetitionCode;
                 string? country = !string.IsNullOrWhiteSpace(first.CompetitionCountry)
                     ? first.CompetitionCountry
                     : first.CompetitionCode;
@@ -1706,8 +2216,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
                 bool hasFollowedTeams = g.Any(m => m.FollowedByTeam);
                 bool isFollowedCompetition = g.Any(m => m.FollowedByCompetition);
+                bool isFollowed = hasFollowedTeams || isFollowedCompetition;
                 string key = !string.IsNullOrWhiteSpace(compId) ? compId : compName;
-                var matchesList = g.ToList();
+
+                // Deterministically sort matches by kickoff time (StartTimeUtc ascending), with tie-breakers on HomeTeamName
+                var matchesList = g
+                    .OrderBy(m => m.StartTimeUtc)
+                    .ThenBy(m => m.HomeTeamName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(m => m.Id, StringComparer.Ordinal)
+                    .ToList();
+
+                var sortScore = GetCompetitionSortScore(isFollowed, compId, compName, country, compCode);
 
                 return new
                 {
@@ -1715,16 +2234,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     CompId = compId,
                     CompName = compName,
                     Country = country,
+                    CompCode = compCode,
                     LogoUrl = logoUrl,
                     HasFollowedTeams = hasFollowedTeams,
                     IsFollowedCompetition = isFollowedCompetition,
-                    IsFollowed = hasFollowedTeams || isFollowedCompetition,
-                    Matches = matchesList
+                    IsFollowed = isFollowed,
+                    Matches = matchesList,
+                    SortScore = sortScore
                 };
             })
-            .OrderByDescending(g => g.IsFollowed)
-            .ThenBy(g => GetCompetitionPopularityRank(g.CompId, g.CompName))
-            .ThenBy(g => g.CompName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.SortScore.Tier)
+            .ThenBy(g => g.SortScore.SubRank)
+            .ThenBy(g => g.SortScore.CountrySort, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(g => g.SortScore.NameSort, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var incomingKeys = new HashSet<string>(groupedData.Select(g => g.Key), StringComparer.OrdinalIgnoreCase);

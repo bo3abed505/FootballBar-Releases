@@ -61,18 +61,34 @@ public partial class App : Application
         // Register global crash and unhandled exception hooks
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
-            AppLogger.Critical("App", "UnhandledAppDomainException", $"Unhandled AppDomain exception: {e.ExceptionObject}");
+            string msg = $"Unhandled AppDomain exception: {e.ExceptionObject}";
+            AppLogger.Critical("App", "UnhandledAppDomainException", msg);
+            AppDiagnosticsLogger.LogError("App", "UnhandledAppDomainException", msg);
         };
 
         TaskScheduler.UnobservedTaskException += (s, e) =>
         {
-            AppLogger.Error("App", "UnobservedTaskException", $"Unobserved task exception: {e.Exception?.Message}", ex: e.Exception);
+            string msg = $"Unobserved task exception: {e.Exception?.Message}";
+            AppLogger.Error("App", "UnobservedTaskException", msg, ex: e.Exception);
+            AppDiagnosticsLogger.LogError("App", "UnobservedTaskException", msg, ex: e.Exception);
             e.SetObserved();
         };
 
         UnhandledException += (s, e) =>
         {
-            AppLogger.Critical("App", "XamlUnhandledException", $"Unhandled XAML exception: {e.Message}", ex: e.Exception);
+            string errorDetails = $"Unhandled XAML exception: {e.Message} (Type: {e.Exception?.GetType().FullName})\n{e.Exception?.StackTrace}";
+            AppDiagnosticsLogger.LogError("App", "XamlUnhandledException", errorDetails, ex: e.Exception);
+            AppLogger.Critical("App", "XamlUnhandledException", errorDetails, ex: e.Exception);
+
+            // Mark handled for UI layout/binding errors to prevent abrupt process termination
+            try
+            {
+                e.Handled = true;
+            }
+            catch
+            {
+                // Cannot mark handled on fatal CLR exceptions
+            }
         };
     }
 

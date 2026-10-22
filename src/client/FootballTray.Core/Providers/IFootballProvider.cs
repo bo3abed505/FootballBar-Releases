@@ -6,7 +6,7 @@ using FootballTray.Core.Models;
 namespace FootballTray.Core.Providers;
 
 /// <summary>
-/// Provider-independent contract for football data sources (e.g. Mock, API-Football, Backend API).
+/// Provider-independent contract for football data sources (e.g. Mock, Ingestion Engine, Backend API).
 /// </summary>
 public interface IFootballProvider
 {

@@ -9,7 +9,7 @@
 - **Native WinUI 3 Desktop Client**: Built with modern Windows App SDK and WinUI 3 controls for a fluent, high-performance UI experience matching Windows 11 aesthetics.
 - **Native Taskbar Integration (No TaskbarWidgets)**: Taskbar integration is implemented using a native HWND/Win32 window positioning and embedding approach (inspired by the proven methodology in **Awqat-Salaat**). **TaskbarWidgets is NOT a dependency.**
 - **Dedicated Backend Service**: A TypeScript/Node.js backend coordinates polling schedules, data normalization, embedded SQLite persistence (`better-sqlite3` WAL mode), and caching so the desktop client remains lightweight and decoupled.
-- **Authoritative Primary Data Provider**: **FotMob** serves as the primary provider for unmetered live matches, schedules, lineups, timeline events, and broadcast commentary, featuring automated circuit-breaker fallback to **API-Football**.
+- **Ingestion & Normalization Engine**: **FootballTray Live Telemetry Ingestion Engine** coordinates live matches, schedules, lineups, timeline events, and broadcast commentary with automated resilience.
 - **Clean Architecture**: Strong boundary separation between presentation, provider-agnostic domain logic (`FootballTray.Core`), and backend ingestion.
 
 ---
@@ -57,8 +57,8 @@ FootballTray/
 - **Backend**:
   - Node.js (LTS) & TypeScript
   - Embedded SQLite (`better-sqlite3` WAL mode)
-- **Data Provider**:
-  - FotMob (Authoritative Primary) + API-Football (Automated Circuit-Breaker Fallback)
+- **Data Ingestion**:
+  - FootballTray Live Telemetry Ingestion Engine (Automated Circuit-Breaker Resilience)
 
 ---
 

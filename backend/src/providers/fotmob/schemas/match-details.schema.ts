@@ -130,19 +130,13 @@ export const FotmobMatchDetailsResponseSchema: z.ZodType<FotmobMatchDetailsRespo
     shotmap: z.object({
       shots: z.array(FotmobShotSchema).nullish(),
     }).passthrough().nullish(),
-    stats: z.object({
-      Periods: z.object({
-        All: z.object({
-          stats: z.array(
-            z.object({
-              title: z.string().nullish(),
-              key: z.string().nullish(),
-              stats: z.array(FotmobStatItemSchema).nullish(),
-            }).passthrough()
-          ).nullish(),
-        }).passthrough().nullish(),
-      }).passthrough().nullish(),
-    }).passthrough().nullish(),
+    stats: z.any().nullish(),
+    h2h: z.any().nullish(),
+    overview: z.any().nullish(),
+    insights: z.any().nullish(),
+    poll: z.any().nullish(),
+    superlive: z.any().nullish(),
+    commentary: z.any().nullish(),
   }).passthrough().nullish(),
 }).passthrough();
 

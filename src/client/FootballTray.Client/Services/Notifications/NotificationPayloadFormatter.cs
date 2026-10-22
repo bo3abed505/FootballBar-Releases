@@ -38,7 +38,8 @@ public static class NotificationPayloadFormatter
                 }
                 else
                 {
-                    body = $"{minuteDisplay} Goal!";
+                    // Do not stamp fallback goal with match clock minute when scorer and incident minute are unknown
+                    body = "Goal!";
                 }
 
                 if (!string.IsNullOrWhiteSpace(candidate.EventUid))

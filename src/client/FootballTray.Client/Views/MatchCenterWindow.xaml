@@ -52,10 +52,10 @@
                 </StackPanel>
                 <TextBlock
                     x:Name="VenueText"
-                    Text="{Binding Venue}"
+                    Text="{x:Bind ViewModel.VenueText, Mode=OneWay}"
                     FontSize="11"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Visibility="{Binding Venue, ConverterParameter=NotEmpty, Mode=OneWay}" />
+                    Visibility="{x:Bind ViewModel.VenueVisibility, Mode=OneWay}" />
             </StackPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -99,14 +99,19 @@
             Padding="16"
             Margin="0,0,0,16">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <!-- Home Team -->
-                <StackPanel Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
+                <!-- ROW 0: Team Headers & Score Row (Fixed Baseline) -->
+                <!-- Home Team Header -->
+                <StackPanel Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
                     <Image
                         x:Name="HomeTeamLogo"
                         Width="56"
@@ -139,25 +144,13 @@
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                         </Button>
                     </StackPanel>
-                    <!-- Home Goal Scorers & Red Cards -->
-                    <ItemsControl
-                        x:Name="HomeIncidentsList"
-                        ItemsSource="{x:Bind ViewModel.HomeIncidents, Mode=OneWay}"
-                        HorizontalAlignment="Center"
-                        Margin="0,4,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:MatchHeaderIncidentViewModel">
-                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,1,0,1">
-                                    <TextBlock Text="{x:Bind Icon}" FontSize="11" VerticalAlignment="Center" />
-                                    <TextBlock Text="{x:Bind Text}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <Border Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="4" Padding="6,1" HorizontalAlignment="Center" Margin="0,2,0,0">
+                        <TextBlock Text="HOME" FontSize="9" FontWeight="Bold" Foreground="#38BDF8" CharacterSpacing="60" />
+                    </Border>
                 </StackPanel>
 
-                <!-- Score and Halftime -->
-                <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,0,24,0">
+                <!-- Center Scoreboard -->
+                <StackPanel Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,0,24,0">
                     <TextBlock
                         x:Name="ScoreText"
                         Text="{x:Bind ViewModel.ScoreText, Mode=OneWay}"
@@ -190,8 +183,8 @@
                     </Border>
                 </StackPanel>
 
-                <!-- Away Team -->
-                <StackPanel Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
+                <!-- Away Team Header -->
+                <StackPanel Grid.Row="0" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
                     <Image
                         x:Name="AwayTeamLogo"
                         Width="56"
@@ -224,22 +217,51 @@
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                         </Button>
                     </StackPanel>
-                    <!-- Away Goal Scorers & Red Cards -->
-                    <ItemsControl
-                        x:Name="AwayIncidentsList"
-                        ItemsSource="{x:Bind ViewModel.AwayIncidents, Mode=OneWay}"
-                        HorizontalAlignment="Center"
-                        Margin="0,4,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:MatchHeaderIncidentViewModel">
-                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,1,0,1">
-                                    <TextBlock Text="{x:Bind Icon}" FontSize="11" VerticalAlignment="Center" />
-                                    <TextBlock Text="{x:Bind Text}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <Border Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="4" Padding="6,1" HorizontalAlignment="Center" Margin="0,2,0,0">
+                        <TextBlock Text="AWAY" FontSize="9" FontWeight="Bold" Foreground="#F87171" CharacterSpacing="60" />
+                    </Border>
                 </StackPanel>
+
+                <!-- ROW 1: Goalscorers / Header Events Row -->
+                <!-- Home Goal Scorers & Red Cards -->
+                <ItemsControl
+                    x:Name="HomeIncidentsList"
+                    Grid.Row="1"
+                    Grid.Column="0"
+                    ItemsSource="{x:Bind ViewModel.HomeIncidents, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.HeaderIncidentsVisibility, Mode=OneWay}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,8,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MatchHeaderIncidentViewModel">
+                            <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,1,0,1">
+                                <TextBlock Text="{x:Bind Icon}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Text="{x:Bind Text}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Away Goal Scorers & Red Cards -->
+                <ItemsControl
+                    x:Name="AwayIncidentsList"
+                    Grid.Row="1"
+                    Grid.Column="2"
+                    ItemsSource="{x:Bind ViewModel.AwayIncidents, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.HeaderIncidentsVisibility, Mode=OneWay}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,8,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MatchHeaderIncidentViewModel">
+                            <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,1,0,1">
+                                <TextBlock Text="{x:Bind Icon}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Text="{x:Bind Text}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </Grid>
         </Border>
 
@@ -505,92 +527,135 @@
                                 SelectionMode="None">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="vm:MatchCommentaryItemViewModel">
-                                        <Border
-                                            Margin="0,2,0,2"
-                                            Padding="4,5,6,5"
-                                            CornerRadius="6"
-                                            Background="#1E293B"
-                                            BorderBrush="#334155"
-                                            BorderThickness="1">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <!-- Team Crest / Whistle Badge (Column 0) -->
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <!-- Timestamp Minute badge (Column 1) -->
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <!-- Commentary Text (Column 2) -->
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
+                                        <Grid Margin="0,2,0,2">
+                                            <!-- 1. WHISTLE ROW (Centered, borderless, transparent background with full-width text wrapping) -->
+                                            <Border
+                                                Visibility="{x:Bind WhistleVisibility, Mode=OneWay}"
+                                                Background="Transparent"
+                                                BorderBrush="Transparent"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Padding="12,6"
+                                                HorizontalAlignment="Stretch">
+                                                <Grid HorizontalAlignment="Stretch">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
 
-                                                <!-- Whistle icon badge (shown when IsWhistle is true) -->
-                                                <Border
-                                                    Grid.Column="0"
-                                                    Width="20"
-                                                    Height="20"
-                                                    Margin="0,1,8,0"
-                                                    VerticalAlignment="Top"
-                                                    Background="#0F172A"
-                                                    BorderBrush="#334155"
-                                                    BorderThickness="1"
-                                                    CornerRadius="10"
-                                                    Visibility="{x:Bind WhistleVisibility, Mode=OneWay}">
-                                                    <TextBlock Text="⏱️" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
+                                                    <!-- Header Badge Row: ⏱️ Icon + Minute Badge -->
+                                                    <StackPanel
+                                                        Grid.Row="0"
+                                                        Orientation="Horizontal"
+                                                        Spacing="6"
+                                                        HorizontalAlignment="Center"
+                                                        Margin="0,0,0,4">
+                                                        <TextBlock
+                                                            Text="⏱️"
+                                                            FontSize="12"
+                                                            VerticalAlignment="Center" />
+                                                        <Border
+                                                            Background="#0F172A"
+                                                            BorderBrush="#334155"
+                                                            BorderThickness="1"
+                                                            CornerRadius="4"
+                                                            Padding="6,1,6,1"
+                                                            VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind MinuteDisplay, Mode=OneTime}"
+                                                                FontWeight="Bold"
+                                                                FontSize="11"
+                                                                Foreground="#38BDF8"
+                                                                HorizontalAlignment="Center" />
+                                                        </Border>
+                                                    </StackPanel>
 
-                                                <!-- Team Crest/Logo (shown when NOT whistle and logo present) -->
-                                                <Border
-                                                    Grid.Column="0"
-                                                    Width="18"
-                                                    Height="18"
-                                                    Margin="0,2,8,0"
-                                                    VerticalAlignment="Top"
-                                                    Visibility="{x:Bind TeamLogoVisibility, Mode=OneWay}">
-                                                    <Image Width="18" Height="18" Stretch="Uniform">
-                                                        <Image.Source>
-                                                            <BitmapImage UriSource="{x:Bind LogoUri, Mode=OneTime}" DecodePixelWidth="18" DecodePixelHeight="18" />
-                                                        </Image.Source>
-                                                    </Image>
-                                                </Border>
-
-                                                <!-- Fallback placeholder if no team logo and not whistle -->
-                                                <Border
-                                                    Grid.Column="0"
-                                                    Width="18"
-                                                    Height="18"
-                                                    Margin="0,2,8,0"
-                                                    VerticalAlignment="Top"
-                                                    Visibility="{x:Bind NoLogoVisibility, Mode=OneWay}">
-                                                    <TextBlock Text="⚽" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
-
-                                                <!-- Timestamp Minute badge -->
-                                                <Border
-                                                    Grid.Column="1"
-                                                    Background="#0F172A"
-                                                    BorderBrush="#334155"
-                                                    BorderThickness="1"
-                                                    CornerRadius="4"
-                                                    Padding="5,1,5,1"
-                                                    Margin="0,1,8,0"
-                                                    VerticalAlignment="Top">
+                                                    <!-- Whistle Description Text (Full width wrapping into 2+ centered lines) -->
                                                     <TextBlock
-                                                        Text="{x:Bind MinuteDisplay, Mode=OneTime}"
-                                                        FontWeight="Bold"
-                                                        FontSize="11"
-                                                        Foreground="#38BDF8"
+                                                        Grid.Row="1"
+                                                        Text="{x:Bind Text, Mode=OneWay}"
+                                                        FontSize="12"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="#94A3B8"
+                                                        TextWrapping="Wrap"
+                                                        TextAlignment="Center"
                                                         HorizontalAlignment="Center" />
-                                                </Border>
+                                                </Grid>
+                                            </Border>
 
-                                                <!-- Commentary text -->
-                                                <TextBlock
-                                                    Grid.Column="2"
-                                                    Text="{x:Bind Text, Mode=OneWay}"
-                                                    FontSize="12"
-                                                    TextWrapping="Wrap"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="#F8FAFC" />
-                                            </Grid>
-                                        </Border>
+                                            <!-- 2. REGULAR TEAM COMMENTARY ROW (Card style with #1E293B background, left-aligned) -->
+                                            <Border
+                                                Visibility="{x:Bind RegularRowVisibility, Mode=OneWay}"
+                                                Padding="6,6,8,6"
+                                                CornerRadius="6"
+                                                Background="#1E293B"
+                                                BorderBrush="#334155"
+                                                BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <!-- Team Crest / Placeholder (Column 0) -->
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <!-- Timestamp Minute badge (Column 1) -->
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <!-- Commentary Text (Column 2) -->
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <!-- Team Crest/Logo (shown when logo present) -->
+                                                    <Border
+                                                        Grid.Column="0"
+                                                        Width="18"
+                                                        Height="18"
+                                                        Margin="0,2,8,0"
+                                                        VerticalAlignment="Top"
+                                                        Visibility="{x:Bind TeamLogoVisibility, Mode=OneWay}">
+                                                        <Image Width="18" Height="18" Stretch="Uniform">
+                                                            <Image.Source>
+                                                                <BitmapImage UriSource="{x:Bind LogoUri, Mode=OneTime}" DecodePixelWidth="18" DecodePixelHeight="18" />
+                                                            </Image.Source>
+                                                        </Image>
+                                                    </Border>
+
+                                                    <!-- Fallback placeholder if no team logo -->
+                                                    <Border
+                                                        Grid.Column="0"
+                                                        Width="18"
+                                                        Height="18"
+                                                        Margin="0,2,8,0"
+                                                        VerticalAlignment="Top"
+                                                        Visibility="{x:Bind NoLogoVisibility, Mode=OneWay}">
+                                                        <TextBlock Text="⚽" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+
+                                                    <!-- Timestamp Minute badge -->
+                                                    <Border
+                                                        Grid.Column="1"
+                                                        Background="#0F172A"
+                                                        BorderBrush="#334155"
+                                                        BorderThickness="1"
+                                                        CornerRadius="4"
+                                                        Padding="5,1,5,1"
+                                                        Margin="0,1,8,0"
+                                                        VerticalAlignment="Top">
+                                                        <TextBlock
+                                                            Text="{x:Bind MinuteDisplay, Mode=OneTime}"
+                                                            FontWeight="Bold"
+                                                            FontSize="11"
+                                                            Foreground="#38BDF8"
+                                                            HorizontalAlignment="Center" />
+                                                    </Border>
+
+                                                    <!-- Commentary text -->
+                                                    <TextBlock
+                                                        Grid.Column="2"
+                                                        Text="{x:Bind Text, Mode=OneWay}"
+                                                        FontSize="12"
+                                                        TextWrapping="Wrap"
+                                                        VerticalAlignment="Center"
+                                                        Foreground="#F8FAFC" />
+                                                </Grid>
+                                            </Border>
+                                        </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
@@ -675,7 +740,7 @@
                             Checked="OnTabChecked" />
                         <RadioButton
                             x:Name="LineupsTabRadio"
-                            Content="👥 Lineups"
+                            Content="👕 Lineups"
                             GroupName="MatchDetailTabs"
                             FontWeight="SemiBold"
                             Checked="OnTabChecked" />
