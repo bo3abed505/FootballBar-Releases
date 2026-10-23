@@ -235,7 +235,7 @@ describe('Checkpoint 4 — Delivery API v2 Canonical Contract & Per-Fixture Fres
     expect(liveFresh.trust.freshnessState).toBe('FRESH');
     expect(liveFresh.trust.sourceObservedAt).not.toBeNull();
     expect(liveFresh.trust.dataAgeSeconds).toBeLessThanOrEqual(120);
-    expect(liveFresh.trust.provider).toBe('api_football');
+    expect(liveFresh.trust.provider).toBe('live-telemetry');
 
     // B. Live match polled 300s ago -> STALE
     const liveStale = matches.find((m) => m.id === FIXTURES.liveStale.canonicalId);

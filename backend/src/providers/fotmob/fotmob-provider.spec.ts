@@ -107,7 +107,7 @@ describe('FotmobProvider', () => {
       ok: true,
       status: 200,
       headers: new Headers({ 'content-type': 'application/json' }),
-      text: async () => JSON.stringify({ leagues: [{ id: '123', name: 'L', matches: 'not-an-array' }] })
+      text: async () => JSON.stringify({ leagues: 'not-an-array' })
     });
 
     await expect(provider.getDailyMatches('20261009')).rejects.toThrow(ProviderSchemaError);

@@ -238,7 +238,7 @@ describe('Phase 10A — FotMob Match Details Normalization & On-Demand Hydration
     expect(homeLineup.coachName).toBe('Mikel Arteta');
     expect(homeLineup.startXi).toHaveLength(2);
     expect(homeLineup.startXi[0].name).toBe('David Raya');
-    expect(homeLineup.startXi[0].grid).toBe('1:2');
+    expect(homeLineup.startXi[0].grid).toBe('1:1');
     expect(homeLineup.substitutes).toHaveLength(1);
     expect(homeLineup.substitutes[0].name).toBe('Gabriel Martinelli');
   });

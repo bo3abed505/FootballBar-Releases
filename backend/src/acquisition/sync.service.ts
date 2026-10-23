@@ -574,12 +574,16 @@ export class SyncService {
       const batchCandidates = candidates.slice(i, i + BATCH_SIZE);
       const batchIds = batchCandidates.map((c) => c.id);
 
-      let detailsList: NormalizedMatchDetails[] = [];
+      let detailsList: any[] = [];
       try {
-        const fetched = await Promise.all(
-          batchIds.map((id) => this.provider.getMatchDetails(id).catch(() => null))
-        );
-        detailsList = fetched.filter((d): d is NormalizedMatchDetails => d !== null);
+        if (typeof (this.provider as any).getFixtureDetailsBatch === 'function') {
+          detailsList = await (this.provider as any).getFixtureDetailsBatch(batchIds, cycleId);
+        } else {
+          const fetched = await Promise.all(
+            batchIds.map((id) => this.provider.getMatchDetails(id).catch(() => null))
+          );
+          detailsList = fetched.filter((d): d is NormalizedMatchDetails => d !== null);
+        }
       } catch (err) {
         Logger.warn('SyncService', 'BatchAcquisitionError', `Batch fixture details acquisition failed for batch of ${batchIds.length} fixtures: ${err}`, cycleId);
         // Touch lastPolledAt and finalizedAt on all candidates so they don't loop endlessly on persistent errors
@@ -592,9 +596,9 @@ export class SyncService {
         continue;
       }
 
-      const detailsMap = new Map<string, NormalizedMatchDetails>();
+      const detailsMap = new Map<string, any>();
       for (const d of detailsList) {
-        detailsMap.set(d.providerMatchId, d);
+        detailsMap.set(d.id || d.providerMatchId, d);
       }
 
       // Reconcile each candidate with partial failure isolation
@@ -608,8 +612,8 @@ export class SyncService {
                 state: (details?.time?.status || details?.state || fix.state || "UNKNOWN"),
                 elapsedMinute: (details?.time?.minute ?? details?.elapsedMinute ?? fix.elapsedMinute ?? 0),
                 extraMinute: (details?.time?.addedTime ?? details?.extraMinute ?? fix.extraMinute ?? 0),
-                homeScore: (details?.homeTeam?.score ?? details?.homeScore ?? fix.homeScore ?? 0),
-                awayScore: (details?.awayTeam?.score ?? details?.awayScore ?? fix.awayScore ?? 0),
+                homeScore: (details?.homeTeam?.score ?? details?.score?.home ?? fix.homeScore ?? 0),
+                awayScore: (details?.awayTeam?.score ?? details?.score?.away ?? fix.awayScore ?? 0),
                 homeScoreHt: fix.homeScoreHt,
                 awayScoreHt: fix.awayScoreHt,
                 liveSourceProvider: (this.provider as any).activeProviderName || this.provider.name,
@@ -623,16 +627,16 @@ export class SyncService {
             summary.fixturesUpdated++;
             summary.hasChanges = true;
 
-            if (false) { // TODO: Adapt events from NormalizedMatchDetails
-            
-              const incomingUids = (details?.events || []).map((e: any) => e.eventUid);
+            if (details?.events && details.events.length > 0) {
+              const incomingUids = details.events.map((e: any) => e.eventUid);
               const existingEvents = await db
                 .select({ eventUid: schema.events.eventUid })
                 .from(schema.events)
                 .where(inArray(schema.events.eventUid, incomingUids));
 
               const existingUidSet = new Set(existingEvents.map((e) => e.eventUid));
-              const newEvents = (details?.events || []).filter((e: any) => !existingUidSet.has(e.eventUid))
+              const newEvents = details.events
+                .filter((e: any) => !existingUidSet.has(e.eventUid))
                 .map(normalizeEvent);
               if (newEvents.length > 0) {
                 await db.insert(schema.events).values(newEvents).onConflictDoNothing();

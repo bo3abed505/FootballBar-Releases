@@ -566,14 +566,18 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             if (pinnedInTray != null)
             {
                 _pinnedMatch = pinnedInTray;
+                if (!candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal)))
+                {
+                    var combined = new List<TrayMatchDto>(candidates);
+                    combined.Insert(0, pinnedInTray);
+                    candidates = combined;
+                }
             }
-
-            var matchToKeep = _pinnedMatch ?? pinnedInTray;
-            if (matchToKeep != null && !candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal)))
+            else
             {
-                var combined = new List<TrayMatchDto>(candidates);
-                combined.Insert(0, matchToKeep);
-                candidates = combined;
+                // Pinned match removed or concluded from snapshot: clear pinned state gracefully
+                _pinnedMatchId = null;
+                _pinnedMatch = null;
             }
         }
 

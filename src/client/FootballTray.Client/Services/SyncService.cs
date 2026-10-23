@@ -398,13 +398,18 @@ public class SyncService : ISyncService
 
             if (isNotModified)
             {
-                if (response.Envelope?.Data != null && response.Envelope.Data.Matches != null)
+                if (response.Envelope?.Data != null && response.Envelope.Data.Matches != null && response.Envelope.Data.Matches.Count > 0)
                 {
                     _currentTrayData = response.Envelope.Data;
                 }
-                else if (_dataByKey.TryGetValue(requestKey, out var existingData))
+                else if (_dataByKey.TryGetValue(requestKey, out var existingData) && existingData?.Matches != null && existingData.Matches.Count > 0)
                 {
                     _currentTrayData = existingData;
+                }
+
+                if (_targetDate.Date == DateTime.Today && _currentTrayData != null)
+                {
+                    _dataByKey[requestKey] = _currentTrayData;
                 }
 
                 _freshnessState = DataFreshnessState.NotModified;
@@ -438,17 +443,10 @@ public class SyncService : ISyncService
                     }
                 }
 
-                // If user switched calendar days, publish the cached snapshot immediately
-                if (!string.Equals(normalizedDate, _lastPublishedDate, StringComparison.Ordinal))
-                {
-                    _lastPublishedDate = normalizedDate;
-                    PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
-                    _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
-                    return _freshnessState;
-                }
-
-                AppLogger.Debug("Sync", "PollNotModified", "Tray state unchanged (304 Not Modified)");
+                _lastPublishedDate = normalizedDate;
+                PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
                 _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
+                AppLogger.Debug("Sync", "PollNotModified", "Tray state unchanged (304 Not Modified)");
                 return _freshnessState;
             }
 

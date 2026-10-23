@@ -1,4 +1,4 @@
-import { eq, inArray, sql, and, lt } from 'drizzle-orm';
+import { eq, inArray, notInArray, sql, and, lt } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   NormalizedMatch,
@@ -789,18 +789,21 @@ export class MatchRepository {
       // 6. Vanished-Live Fixture Reconciliation (Live only)
       if (liveOnly) {
         const cutoff = new Date(now.getTime() - AcquisitionPolicyEngine.MAX_LIVE_MATCH_AGE_MS);
+        const incomingIds = dedupedFixtures.map((f) => f.id);
+        const conditions: any[] = [
+          inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
+          lt(schema.fixtures.kickoffTime, cutoff),
+        ];
+        if (incomingIds.length > 0) {
+          conditions.push(notInArray(schema.fixtures.id, incomingIds));
+        }
         await tx
           .update(schema.fixtures)
           .set({
             state: 'FINISHED',
             updatedAt: now,
           })
-          .where(
-            and(
-              inArray(schema.fixtures.state, ['LIVE', 'HALFTIME', '1H', '2H', 'ET', 'P', 'BT', 'IN_PLAY']),
-              lt(schema.fixtures.kickoffTime, cutoff)
-            )
-          );
+          .where(and(...conditions));
       }
 
       return {

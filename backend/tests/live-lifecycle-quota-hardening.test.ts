@@ -97,8 +97,8 @@ describe('Milestone 16.5A — Live-State Lifecycle & Quota Hardening', () => {
 
   beforeEach(async () => {
     // Clean up test records
-    await db.delete(schema.events).where(inArray(schema.events.fixtureId, [FIXTURE_RECENT, FIXTURE_OLD, FIXTURE_ANCIENT]));
-    await db.delete(schema.fixtures).where(inArray(schema.fixtures.id, [FIXTURE_RECENT, FIXTURE_OLD, FIXTURE_ANCIENT]));
+    await db.delete(schema.events);
+    await db.delete(schema.fixtures);
     await db.delete(schema.teams).where(inArray(schema.teams.id, [TEST_HOME_ID, TEST_AWAY_ID]));
     await db.delete(schema.competitionSeasons).where(eq(schema.competitionSeasons.id, TEST_SEASON_ID));
     await db.delete(schema.competitions).where(eq(schema.competitions.id, TEST_COMP_ID));

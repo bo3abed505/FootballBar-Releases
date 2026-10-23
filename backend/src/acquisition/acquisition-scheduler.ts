@@ -699,7 +699,10 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
       // 3b. Scheduler Bootstrapping: If policy evaluates to IDLE but database has zero fixtures
       // for the active target date (e.g. freshly seeded catalog or purged fixtures), generate a
       // POLL_SCHEDULE / bootstrap discovery plan to immediately download today's fixtures rather than idling.
-      if (plan.action === 'IDLE' && budget.remainingDaily > 10) {
+      // 3b. Scheduler Bootstrapping: If policy evaluates to IDLE but database has zero fixtures
+      // for the active target date (e.g. freshly seeded catalog or purged fixtures), generate a
+      // POLL_SCHEDULE / bootstrap discovery plan to immediately download today's fixtures rather than idling.
+      if (plan.action === 'IDLE' && !summary.scheduleKnownForToday && budget.remainingDaily > 10) {
         let missingScheduleIn3DayWindow = false;
         try {
           for (let offset = -1; offset <= 1; offset++) {
@@ -711,9 +714,14 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
             const targetDateStr = targetD.toISOString().slice(0, 10);
             let hasDayFixtures = false;
 
-            // Physical check in SQLite takes strict precedence over in-memory discovery cache
+            const isDiscovered = typeof (this.fixturesRepo as any).isScheduleDiscovered === 'function'
+              ? (this.fixturesRepo as any).isScheduleDiscovered(targetDateStr) ||
+                (typeof (this.fixturesRepo as any).resolveScheduleState === 'function' &&
+                 (await (this.fixturesRepo as any).resolveScheduleState(targetDateStr, currentDate)) === 'DISCOVERED')
+              : false;
+
             if (typeof (this.fixturesRepo as any).hasFixturesForDate === 'function') {
-              hasDayFixtures = await (this.fixturesRepo as any).hasFixturesForDate(targetDateStr);
+              hasDayFixtures = (await (this.fixturesRepo as any).hasFixturesForDate(targetDateStr)) || isDiscovered;
             } else if (this.fixturesRepo instanceof FixturesRepository) {
               const startOfDay = new Date(`${targetDateStr}T00:00:00.000Z`);
               const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
@@ -727,11 +735,8 @@ export class AcquisitionScheduler implements IProviderSwapObserver {
                   )
                 )
                 .limit(1);
-              hasDayFixtures = fixturesDay.length > 0;
+              hasDayFixtures = fixturesDay.length > 0 || isDiscovered;
             } else {
-              const isDiscovered = typeof (this.fixturesRepo as any).isScheduleDiscovered === 'function'
-                ? (this.fixturesRepo as any).isScheduleDiscovered(targetDateStr)
-                : false;
               hasDayFixtures = isDiscovered || summary.scheduleKnownForToday;
             }
 

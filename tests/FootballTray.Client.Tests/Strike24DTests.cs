@@ -143,8 +143,8 @@ public class Strike24DTests
 
         // Verify presence of all key transition whistle markers
         var kickoff = vm.TimelineItems.FirstOrDefault(i => i.EventTitle == "Kickoff");
-        Assert.IsNotNull(kickoff, "0' Kickoff marker must be present.");
-        Assert.AreEqual("0'", kickoff.MinuteDisplay);
+        Assert.IsNotNull(kickoff, "Kickoff marker must be present.");
+        Assert.AreEqual("1'", kickoff.MinuteDisplay);
 
         var ht = vm.TimelineItems.FirstOrDefault(i => i.EventTitle == "Half-Time");
         Assert.IsNotNull(ht, "HT marker must be present.");

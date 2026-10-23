@@ -2793,11 +2793,6 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     || detailLower.Contains("period") || detailLower.Contains("halftime") || detailLower.Contains("fulltime") || detailLower.Contains("whistle") || detailLower.Contains("half")
                     || descLower.Contains("half time") || descLower.Contains("full time") || descLower.Contains("kickoff") || descLower.Contains("whistle");
 
-                if (isWhistleOrPeriod)
-                {
-                    continue; // Skip raw/backend period markers here so KeyEvents and Timeline have strictly deduplicated, correctly ordered whistle markers
-                }
-
                 bool isMissedPen = IsMissedPenalty(ev);
                 string icon = isMissedPen ? "❌" : typeLower switch
                 {
@@ -2935,6 +2930,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 allTimelineList.Add(timelineItem);
 
                 bool isKeyEvent = isMissedPen
+                    || isWhistleOrPeriod
                     || typeLower.Contains("goal")
                     || typeLower.Contains("pen")
                     || typeLower.Contains("card")
@@ -2996,7 +2992,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
 
         // Synthesize unified match-state transition whistle markers:
-        // 1' Kickoff, HT (45+x'), 46' Start 2nd Half, ET breaks, PEN, FT / AET / PEN (at very top)
+        // 1' Kickoff, HT (45+x'), 45' Start 2nd Half, ET breaks, PEN, FT / AET / PEN (at very top)
         bool wentToExtraTime = stateNorm is "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "P" or "AET" or "PEN" or "FINISHED_AET" or "FINISHED_PEN"
             || (match.Score?.ExtraTime != null && (match.Score.ExtraTime.Home != null || match.Score.ExtraTime.Away != null))
             || match.ElapsedMinute > 90;
@@ -3014,7 +3010,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
 
         // 1. Kickoff Marker (1') - sorts at the very bottom (key = 0)
-        if (hasStarted && !allTimelineList.Any(i => i.EventId == "marker_kickoff"))
+        if (hasStarted && !allTimelineList.Any(i => i.EventId == "marker_kickoff" || i.EventTitle.Contains("Kickoff", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Kickoff", StringComparison.OrdinalIgnoreCase) || i.EventTitle.Contains("First Half", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("First Half", StringComparison.OrdinalIgnoreCase)))
         {
             AddTimelineMarker(new MatchTimelineItem
             {
@@ -3037,7 +3033,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             || (match.Score?.HalfTime?.Home != null && match.Score?.HalfTime?.Away != null && hasStarted)
             || (match.ElapsedMinute >= 45 && stateNorm != "FIRST_HALF" && stateNorm != "1H" && stateNorm != "PREMATCH");
 
-        if (reachedHalfTime && !allTimelineList.Any(i => i.EventId == "marker_halftime"))
+        if (reachedHalfTime && !allTimelineList.Any(i => i.EventId == "marker_halftime" || i.MinuteDisplay == "HT" || i.EventTitle.Contains("Half-Time", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Half Time", StringComparison.OrdinalIgnoreCase)))
         {
             string htScore = (match.Score?.HalfTime?.Home != null && match.Score?.HalfTime?.Away != null)
                 ? $"({match.Score.HalfTime.Home} - {match.Score.HalfTime.Away})"
@@ -3060,19 +3056,19 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             });
         }
 
-        // 3. Start 2nd Half Marker (46' - added only to allTimelineList, kept out of KeyEvents to avoid clutter)
+        // 3. Start 2nd Half Marker (45')
         bool startedSecondHalf = stateNorm is "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded
             || (match.ElapsedMinute > 45 && stateNorm != "HALFTIME" && stateNorm != "HT" && stateNorm != "EXTRA_TIME_HALFTIME" && stateNorm != "BT" && stateNorm != "FIRST_HALF" && stateNorm != "1H" && stateNorm != "PREMATCH");
 
-        if (startedSecondHalf && !allTimelineList.Any(i => i.EventId == "marker_2h"))
+        if (startedSecondHalf && !allTimelineList.Any(i => i.EventId == "marker_2h" || i.EventTitle.Contains("Start 2nd Half", StringComparison.OrdinalIgnoreCase) || i.Description.Contains("Second Half", StringComparison.OrdinalIgnoreCase)))
         {
-            allTimelineList.Add(new MatchTimelineItem
+            AddTimelineMarker(new MatchTimelineItem
             {
                 EventId = "marker_2h",
                 Minute = 45,
                 ExtraMinute = 91,
                 SortPriority = 8,
-                MinuteDisplay = "46'",
+                MinuteDisplay = "45'",
                 IconGlyph = "⏱️",
                 EventTitle = "Start 2nd Half",
                 EventSubtitle = "Second half begins",
@@ -3082,13 +3078,13 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             });
         }
 
-        // 4. Extra Time Markers (if match went the distance - added only to allTimelineList)
+        // 4. Extra Time Markers (if match went the distance)
         if (wentToExtraTime)
         {
             // End of 90 Min (Regular Time Whistle)
             if (!allTimelineList.Any(i => i.EventId == "marker_end_90"))
             {
-                allTimelineList.Add(new MatchTimelineItem
+                AddTimelineMarker(new MatchTimelineItem
                 {
                     EventId = "marker_end_90",
                     Minute = 90,
@@ -3107,7 +3103,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             // Extra Time 1st Half Kickoff
             if (!allTimelineList.Any(i => i.EventId == "marker_et_start"))
             {
-                allTimelineList.Add(new MatchTimelineItem
+                AddTimelineMarker(new MatchTimelineItem
                 {
                     EventId = "marker_et_start",
                     Minute = 90,
@@ -3130,7 +3126,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
             if (reachedEtBreak && !allTimelineList.Any(i => i.EventId == "marker_et_ht"))
             {
-                allTimelineList.Add(new MatchTimelineItem
+                AddTimelineMarker(new MatchTimelineItem
                 {
                     EventId = "marker_et_ht",
                     Minute = 105,
@@ -3153,7 +3149,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
             if (startedEt2h && !allTimelineList.Any(i => i.EventId == "marker_et_2h"))
             {
-                allTimelineList.Add(new MatchTimelineItem
+                AddTimelineMarker(new MatchTimelineItem
                 {
                     EventId = "marker_et_2h",
                     Minute = 105,
@@ -3197,7 +3193,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
 
         // 6. Full-Time Final Whistle (FT, AET, PEN) - sorts at the very top (key = 99,999,909)
-        if (isConcluded && !allTimelineList.Any(i => i.EventId.StartsWith("marker_fulltime")))
+        if (isConcluded && !allTimelineList.Any(i => i.EventId.StartsWith("marker_fulltime") || i.MinuteDisplay == "FT" || i.EventTitle.StartsWith("Full-Time", StringComparison.OrdinalIgnoreCase) || i.Description.StartsWith("Full-Time", StringComparison.OrdinalIgnoreCase) || i.Description.StartsWith("Full Time", StringComparison.OrdinalIgnoreCase)))
         {
             if (wentToPenalties)
             {

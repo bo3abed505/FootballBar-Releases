@@ -25,12 +25,9 @@ describe('Phase 9 — Real-Time Live Testing & Daemon Hardening (E2E Matchday Si
 
   const cleanupDatabase = async () => {
     try {
-      await db.delete(schema.events).where(inArray(schema.events.fixtureId, allFixtureIds));
+      await db.delete(schema.events);
+      await db.delete(schema.fixtures);
       await db.delete(schema.fixtureProviderAliases).where(inArray(schema.fixtureProviderAliases.providerId, allFixtureIds));
-      await db.delete(schema.fixtures).where(or(
-        inArray(schema.fixtures.id, allFixtureIds),
-        eq(schema.fixtures.competitionId, UCL_COMP_ID)
-      ));
       await db.delete(schema.competitionSeasons).where(eq(schema.competitionSeasons.competitionId, UCL_COMP_ID));
       await db.delete(schema.competitionProviderAliases).where(eq(schema.competitionProviderAliases.canonicalCompetitionId, `ft_${UCL_COMP_ID}`));
       await db.delete(schema.competitionProviderAliases).where(eq(schema.competitionProviderAliases.providerId, UCL_COMP_ID));

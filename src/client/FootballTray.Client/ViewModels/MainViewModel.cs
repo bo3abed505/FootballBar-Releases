@@ -763,7 +763,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (_selectedCalendarDate.Date != target)
             {
                 _selectedCalendarDate = target;
-                bool hasCached = _syncService?.HasCachedDataForDate(target) ?? false;
+                bool hasCached = (_syncService?.HasCachedDataForDate(target) ?? false) ||
+                                 (_latestTrayData?.Matches?.Any(m => m.KickoffTime.ToLocalTime().Date == target || m.KickoffTime.UtcDateTime.Date == target) ?? false);
 
                 if (!hasCached)
                 {
@@ -2210,8 +2211,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             int matchCount = 0;
 
-            // Followed matches in current in-memory payload matching target date
-            int liveFollowedInPayload = allMatches.Count(m =>
+            // Matches in current in-memory payload matching target date
+            int liveMatchesInPayload = allMatches.Count(m =>
             {
                 var localDate = m.KickoffTime.ToLocalTime().Date;
                 var utcDate = m.KickoffTime.UtcDateTime.Date;
@@ -2221,21 +2222,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 {
                     return false;
                 }
-                return IsMatchFollowed(m, prefs);
+                return true;
             });
 
             if (targetDate == _selectedCalendarDate.Date)
             {
                 // Authoritative live calculation for currently selected calendar date
-                matchCount = liveFollowedInPayload;
-                _followedCountsByDate[dateKey] = liveFollowedInPayload;
+                matchCount = liveMatchesInPayload;
+                _followedCountsByDate[dateKey] = liveMatchesInPayload;
             }
             else
             {
-                if (liveFollowedInPayload > 0)
+                if (liveMatchesInPayload > 0)
                 {
-                    matchCount = liveFollowedInPayload;
-                    _followedCountsByDate[dateKey] = liveFollowedInPayload;
+                    matchCount = liveMatchesInPayload;
+                    _followedCountsByDate[dateKey] = liveMatchesInPayload;
                 }
                 else if (_followedCountsByDate.TryGetValue(dateKey, out var cachedFollowedCount))
                 {
@@ -2945,12 +2946,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
-            // No manual pin active: do NOT set ActiveMatchId so unpinned matches are never falsely marked pinned
-            ActiveMatchId = null;
+            var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
+            ActiveMatchId = activeMatch?.Id;
 
             if (prefs?.EnableTickerCarousel == true)
             {
-                var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
                 if (activeMatch != null)
                 {
                     string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";

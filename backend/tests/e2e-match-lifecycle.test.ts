@@ -507,8 +507,9 @@ describe('Milestone 8 Work Package 5 - End-to-End Live Match Lifecycle & Freshne
 
   it('17. Database isolation: all lifecycle records remain strictly confined to test database', async () => {
     const { databaseUrl } = await import('../src/db/index.js');
-    expect(databaseUrl).toContain('footballtray_test');
+    expect(databaseUrl.includes('footballtray_test') || databaseUrl.includes('local_test.db')).toBe(true);
     expect(databaseUrl).not.toBe('postgresql://postgres:postgres@127.0.0.1:5432/footballtray');
+    expect(databaseUrl.endsWith('local.db')).toBe(false);
   });
 
   it('18. Full 8-stage lifecycle execution is deterministic across repeated sequential runs', async () => {

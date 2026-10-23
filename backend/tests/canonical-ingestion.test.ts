@@ -13,7 +13,9 @@ const CANONICAL_COMP_REGEX = /^ft_comp_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 const CANONICAL_TEAM_REGEX = /^ft_team_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 const CANONICAL_FIX_REGEX = /^ft_fix_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 
-describe('Checkpoint 1B: Canonical Identity Maintenance During Ingestion', () => {
+const hasPostgresTestUrl = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_TEST.startsWith('postgres'));
+
+describe.skipIf(!hasPostgresTestUrl)('Checkpoint 1B: Canonical Identity Maintenance During Ingestion', () => {
   const TEST_LEAGUE_ID = 9939;
   const TEST_HOME_TEAM_ID = 9529;
   const TEST_AWAY_TEAM_ID = 9541;
@@ -25,7 +27,7 @@ describe('Checkpoint 1B: Canonical Identity Maintenance During Ingestion', () =>
   const TEST_AWAY_TEAM_ID_STR = `team_${TEST_AWAY_TEAM_ID}`;
   const TEST_FIXTURE_ID_STR = `fix_${TEST_FIXTURE_ID}`;
 
-  const ALL_TEST_FIXTURE_IDS = [TEST_FIXTURE_ID_STR, `${TEST_FIXTURE_ID_STR}_null`, `${TEST_FIXTURE_ID_STR}_conflict`];
+  const ALL_TEST_FIXTURE_IDS = [TEST_FIXTURE_ID_STR, `${TEST_FIXTURE_ID_STR}_null`, `${TEST_FIXTURE_ID_STR}_conflict`, 'fix_conflict_foreign'];
   const ALL_TEST_TEAM_IDS = [TEST_HOME_TEAM_ID_STR, TEST_AWAY_TEAM_ID_STR, `${TEST_HOME_TEAM_ID_STR}_null`, `${TEST_AWAY_TEAM_ID_STR}_null`];
   const ALL_TEST_COMP_IDS = [TEST_COMP_ID, `${TEST_COMP_ID}_null`];
   const ALL_TEST_SEASON_IDS = [TEST_SEASON_ID, `${TEST_SEASON_ID}_null`];

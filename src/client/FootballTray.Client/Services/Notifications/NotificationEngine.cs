@@ -365,8 +365,8 @@ public sealed class NotificationEngine
             }
         }
 
-        // 2. Score increment fallback (detects goals when RecentEvents is empty or not yet populated in tray payload)
-        if (prev != null && curr.Score != null)
+        // 2. Score increment fallback (detects goals only when RecentEvents collection is absent from payload)
+        if (prev != null && curr.Score != null && curr.RecentEvents == null)
         {
             int prevHome = prev.Score?.Home ?? 0;
             int prevAway = prev.Score?.Away ?? 0;

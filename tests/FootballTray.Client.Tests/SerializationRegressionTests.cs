@@ -865,48 +865,56 @@ public class SerializationRegressionTests
         Assert.IsTrue(vm.HasLineups);
         Assert.AreEqual(22, vm.PitchPlayers.Count, "Pitch must contain exactly 22 starting player nodes.");
 
-        // Away team verification (Top Half: 0.06 -> 0.44)
+        // Away team verification (Right Half: X = 0.92 -> 0.55)
         var awayNodes = vm.PitchPlayers.Where(p => !p.IsHomeTeam).ToList();
         Assert.AreEqual(11, awayNodes.Count);
 
         var awayGk = awayNodes.First(p => p.Name == "T. Courtois");
         Assert.IsTrue(awayGk.IsGoalkeeper);
-        Assert.AreEqual(0.06, awayGk.YPercent, 0.001, "Away GK must be placed at Y = 0.06");
-        Assert.AreEqual(0.50, awayGk.XPercent, 0.001, "Solo GK must be centered horizontally at X = 0.50");
-        Assert.AreEqual(10.0, awayGk.CanvasTop, 0.5);
-        Assert.AreEqual(135.0, awayGk.CanvasLeft, 0.5);
+        Assert.AreEqual(0.50, awayGk.YPercent, 0.001, "Away GK must be vertically centered at Y = 0.50");
+        Assert.AreEqual(0.92, awayGk.XPercent, 0.001, "Away GK must be placed on right goal line at X = 0.92");
+        Assert.AreEqual(270.0, awayGk.CanvasTop, 0.5);
+        Assert.AreEqual(865.0, awayGk.CanvasLeft, 0.5);
 
         var awayStriker = awayNodes.First(p => p.Name == "K. Mbappe");
         Assert.IsFalse(awayStriker.IsGoalkeeper);
-        Assert.AreEqual(0.44, awayStriker.YPercent, 0.001, "Away highest row striker must be placed at Y = 0.44");
-        Assert.AreEqual(200.0, awayStriker.CanvasTop, 0.5);
+        Assert.AreEqual(0.50, awayStriker.YPercent, 0.001, "Away highest row striker must be placed at Y = 0.50");
+        Assert.AreEqual(0.55, awayStriker.XPercent, 0.001, "Away striker must be placed at X = 0.55");
+        Assert.AreEqual(270.0, awayStriker.CanvasTop, 0.5);
+        Assert.AreEqual(495.0, awayStriker.CanvasLeft, 0.5);
 
         foreach (var node in awayNodes)
         {
-            Assert.IsTrue(node.YPercent >= 0.06 && node.YPercent <= 0.44,
-                $"Away node {node.Name} Y={node.YPercent} must be in top half [0.06, 0.44]");
+            Assert.IsTrue(node.XPercent >= 0.55 && node.XPercent <= 0.92,
+                $"Away node {node.Name} X={node.XPercent} must be in right half [0.55, 0.92]");
+            Assert.IsTrue(node.YPercent >= 0.12 && node.YPercent <= 0.88,
+                $"Away node {node.Name} Y={node.YPercent} must be within vertical pitch bounds [0.12, 0.88]");
         }
 
-        // Home team verification (Bottom Half: 0.94 -> 0.56)
+        // Home team verification (Left Half: X = 0.08 -> 0.45)
         var homeNodes = vm.PitchPlayers.Where(p => p.IsHomeTeam).ToList();
         Assert.AreEqual(11, homeNodes.Count);
 
         var homeGk = homeNodes.First(p => p.Name == "M. ter Stegen");
         Assert.IsTrue(homeGk.IsGoalkeeper);
-        Assert.AreEqual(0.94, homeGk.YPercent, 0.001, "Home GK must be placed at Y = 0.94");
-        Assert.AreEqual(0.50, homeGk.XPercent, 0.001, "Solo GK must be centered horizontally at X = 0.50");
-        Assert.AreEqual(450.0, homeGk.CanvasTop, 0.5);
-        Assert.AreEqual(135.0, homeGk.CanvasLeft, 0.5);
+        Assert.AreEqual(0.50, homeGk.YPercent, 0.001, "Home GK must be vertically centered at Y = 0.50");
+        Assert.AreEqual(0.08, homeGk.XPercent, 0.001, "Home GK must be placed on left goal line at X = 0.08");
+        Assert.AreEqual(270.0, homeGk.CanvasTop, 0.5);
+        Assert.AreEqual(25.0, homeGk.CanvasLeft, 0.5);
 
         var homeStriker = homeNodes.First(p => p.Name == "R. Lewandowski");
         Assert.IsFalse(homeStriker.IsGoalkeeper);
-        Assert.AreEqual(0.56, homeStriker.YPercent, 0.001, "Home highest row striker must be placed at Y = 0.56");
-        Assert.AreEqual(260.0, homeStriker.CanvasTop, 0.5);
+        Assert.AreEqual(0.50, homeStriker.YPercent, 0.001, "Home highest row striker must be placed at Y = 0.50");
+        Assert.AreEqual(0.45, homeStriker.XPercent, 0.001, "Home striker must be placed at X = 0.45");
+        Assert.AreEqual(270.0, homeStriker.CanvasTop, 0.5);
+        Assert.AreEqual(395.0, homeStriker.CanvasLeft, 0.5);
 
         foreach (var node in homeNodes)
         {
-            Assert.IsTrue(node.YPercent >= 0.56 && node.YPercent <= 0.94,
-                $"Home node {node.Name} Y={node.YPercent} must be in bottom half [0.56, 0.94]");
+            Assert.IsTrue(node.XPercent >= 0.08 && node.XPercent <= 0.45,
+                $"Home node {node.Name} X={node.XPercent} must be in left half [0.08, 0.45]");
+            Assert.IsTrue(node.YPercent >= 0.12 && node.YPercent <= 0.88,
+                $"Home node {node.Name} Y={node.YPercent} must be within vertical pitch bounds [0.12, 0.88]");
         }
 
         // Name short display

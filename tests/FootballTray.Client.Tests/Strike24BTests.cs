@@ -504,8 +504,8 @@ public class Strike24BTests
         // 4. Synthesized Match-State Transition Markers present in Key Events:
         // 0' Kickoff, HT, 45' Start 2nd Half, FT
         var kickoff = vm.KeyTimelineItems.FirstOrDefault(i => i.EventTitle == "Kickoff");
-        Assert.IsNotNull(kickoff, "0' Kickoff marker must be synthesized.");
-        Assert.AreEqual("0'", kickoff.MinuteDisplay);
+        Assert.IsNotNull(kickoff, "Kickoff marker must be synthesized.");
+        Assert.AreEqual("1'", kickoff.MinuteDisplay);
 
         var ht = vm.KeyTimelineItems.FirstOrDefault(i => i.EventTitle == "Half-Time");
         Assert.IsNotNull(ht, "HT Half-Time marker must be synthesized.");

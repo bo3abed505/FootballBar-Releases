@@ -43,10 +43,7 @@ public class TrayApiResponse
             ETag = etag,
             QuotaExhausted = quotaExhausted,
             CachedFallback = cachedFallback,
-            Envelope = new ApiResponseEnvelope<TrayDataDto>
-            {
-                Data = new TrayDataDto { IsNotModified = true, QuotaExhausted = quotaExhausted, CachedFallback = cachedFallback }
-            }
+            Envelope = null
         };
 
     public static TrayApiResponse Error(string message) =>

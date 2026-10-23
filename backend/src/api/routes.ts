@@ -640,8 +640,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         const totalScore = homeScore + awayScore;
         const existingEvents = fixture.events ?? [];
         const goalEventCount = existingEvents.filter((e: any) => e.type === 'Goal').length;
-        const missingGoals = totalScore > 0 && goalEventCount < totalScore;
-        const missingEventsOrStats = isStarted && ((!fixture.events || fixture.events.length === 0) || (!fixture.statistics || fixture.statistics.length === 0));
+        const missingGoals = isStale && totalScore > 0 && goalEventCount < totalScore;
+        const missingEventsOrStats = (!hasDetails || isStale) && isStarted && ((!fixture.events || fixture.events.length === 0) || (!fixture.statistics || fixture.statistics.length === 0));
 
         let cached = typeof syncService.getCachedMatchDetails === 'function'
           ? (syncService.getCachedMatchDetails(fixture.id) || syncService.getCachedMatchDetails(id.trim()))
@@ -656,7 +656,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           cached.commentary.length > 5 &&
           cached.commentary.some((c: any) => c.type === 'whistle' || c.type === 'shot' || c.type === 'save' || c.type === 'block' || c.type === 'woodwork' || c.type === 'stat');
 
-        if (missingGoals || missingEventsOrStats || !hasDetails || (isLive && (isStale || isLiveCacheStale)) || (isStarted && (!hasRichCommentary || hasSparseCommentary))) {
+        if (missingGoals || missingEventsOrStats || !hasDetails || (isLive && (isStale || isLiveCacheStale)) || (isStarted && isStale && (!hasRichCommentary || hasSparseCommentary))) {
           try {
             const timeoutPromise = new Promise<false>((resolve) =>
               setTimeout(() => resolve(false), 3500)
@@ -673,14 +673,14 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           }
         }
 
-        if (cached?.events && Array.isArray(cached.events) && cached.events.length > 0) {
+        if ((!fixture.events || fixture.events.length === 0) && cached?.events && Array.isArray(cached.events) && cached.events.length > 0) {
           fixture.events = cached.events.map((e: any) => ({
             ...e,
             fixtureId: fixture.id,
             teamId: (e.teamId === cached.homeTeam?.providerId ? fixture.homeTeamId : (e.teamId === cached.awayTeam?.providerId ? fixture.awayTeamId : (e.teamId || fixture.homeTeamId))),
           }));
         }
-        if (cached?.stats && Array.isArray(cached.stats) && cached.stats.length > 0) {
+        if ((!fixture.statistics || fixture.statistics.length === 0) && cached?.stats && Array.isArray(cached.stats) && cached.stats.length > 0) {
           fixture.statistics = cached.stats.map((s: any) => ({
             ...s,
             fixtureId: fixture.id,
@@ -697,13 +697,15 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         if (cached?.heatmaps) {
           fixture.heatmaps = cached.heatmaps;
         }
-        if (cached?.lineups) {
+        if ((!fixture.lineups || fixture.lineups.length === 0) && cached?.lineups) {
           fixture.lineups = cached.lineups.map((l: any) => {
             const starters = l.startXi || l.starters || l.startingXI || [];
             const substitutes = l.substitutes || l.subs || l.bench || [];
             const unavailable = l.unavailable || l.naPlayers || l.injured || [];
+            const mappedTeamId = (l.teamId === cached.homeTeam?.providerId ? fixture.homeTeamId : (l.teamId === cached.awayTeam?.providerId ? fixture.awayTeamId : (l.teamId || fixture.homeTeamId)));
             return {
               ...l,
+              teamId: mappedTeamId,
               startingXI: starters,
               startXi: starters,
               starters,

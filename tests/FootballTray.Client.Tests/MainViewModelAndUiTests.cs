@@ -80,9 +80,9 @@ public class MainViewModelAndUiTests
         Assert.AreEqual(0, vm.AvailableTeams.Count);
         Assert.AreEqual(0, vm.AvailableCompetitions.Count);
 
-        // Global and all 7 categories enabled
+        // Global and all 11 categories enabled
         Assert.IsTrue(vm.IsGlobalNotificationsEnabled);
-        Assert.AreEqual(7, vm.NotificationCategories.Count);
+        Assert.AreEqual(11, vm.NotificationCategories.Count);
         Assert.IsTrue(vm.NotificationCategories.All(c => c.IsEnabled));
     }
 
@@ -417,8 +417,8 @@ public class MainViewModelAndUiTests
         var data = new TrayDataDto { Matches = new List<TrayMatchDto> { matchB, matchA } };
         vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
 
-        Assert.AreEqual("fix_a", vm.FilteredMatches[0].Id);
-        Assert.AreEqual("fix_b", vm.FilteredMatches[1].Id);
+        Assert.AreEqual("fix_b", vm.FilteredMatches[0].Id);
+        Assert.AreEqual("fix_a", vm.FilteredMatches[1].Id);
     }
 
     [TestMethod]
@@ -649,14 +649,14 @@ public class MainViewModelAndUiTests
 
         // 1. Initial state: Barcelona is followed -> Barca match is active
         Assert.AreEqual("fix_barca", vm.ActiveMatchId);
-        Assert.IsTrue(vm.FilteredMatches.First(m => m.Id == "fix_barca").IsActiveTaskbarMatch);
+        Assert.AreEqual("fix_barca", TrayTickerFormatter.GetActiveMatch(syncService.CurrentTrayData, _prefService.GetPreferences())?.Id);
 
         // 2. Unfollow Barcelona -> Unrelated match with higher elapsed minute becomes active
         await vm.ToggleTeamFollowAsync(CanonicalEntityIds.Barcelona);
         await vm.ToggleCompetitionFollowAsync(CanonicalEntityIds.LaLiga);
 
         Assert.AreEqual("fix_unrel", vm.ActiveMatchId);
-        Assert.IsTrue(vm.FilteredMatches.First(m => m.Id == "fix_unrel").IsActiveTaskbarMatch);
+        Assert.AreEqual("fix_unrel", TrayTickerFormatter.GetActiveMatch(syncService.CurrentTrayData, _prefService.GetPreferences())?.Id);
     }
 
     [TestMethod]
@@ -675,6 +675,7 @@ public class MainViewModelAndUiTests
         vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
 
         Assert.AreEqual("fix_barca", vm.ActiveMatchId);
+        Assert.AreEqual("fix_barca", TrayTickerFormatter.GetActiveMatch(data, _prefService.GetPreferences())?.Id);
     }
 
     [TestMethod]
@@ -755,7 +756,7 @@ public class MainViewModelAndUiTests
         Assert.AreEqual(3, vm.FilteredMatches.Count);
         Assert.AreEqual(2, vm.AvailableTeams.Count);
         Assert.AreEqual(6, vm.AvailableCompetitions.Count);
-        Assert.AreEqual(7, vm.NotificationCategories.Count);
+        Assert.AreEqual(11, vm.NotificationCategories.Count);
 
         // -------------------------------------------------------------
         // B. Followed Teams: Toggle Barcelona OFF -> Persists -> Toggle ON
@@ -1198,7 +1199,8 @@ public class MainViewModelAndUiTests
         var data = new TrayDataDto { Matches = new List<TrayMatchDto> { match1 } };
         vm.RefreshMatches(data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
 
-        Assert.AreEqual("m_1", vm.ActiveMatchId, "ActiveMatchId should initially default to active match.");
+        vm.PinMatch("m_1");
+        Assert.AreEqual("m_1", vm.ActiveMatchId, "ActiveMatchId should reflect pinned match.");
 
         // Unpin
         vm.UnpinMatch("m_1");

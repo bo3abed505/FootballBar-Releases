@@ -1,4 +1,4 @@
-import { like, or } from 'drizzle-orm';
+import { like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
 import {
   V2CatalogTeam,
@@ -67,13 +67,13 @@ export class CatalogRepository {
       .from(schema.teams)
       .where(
         or(
-          like(schema.teams.name, searchPattern),
-          like(schema.teams.shortName, searchPattern),
-          like(schema.teams.code, searchPattern),
-          like(schema.teams.country, searchPattern)
+          sql`${schema.teams.name} LIKE ${searchPattern} ESCAPE '\\'`,
+          sql`${schema.teams.shortName} LIKE ${searchPattern} ESCAPE '\\'`,
+          sql`${schema.teams.code} LIKE ${searchPattern} ESCAPE '\\'`,
+          sql`${schema.teams.country} LIKE ${searchPattern} ESCAPE '\\'`
         )
       )
-      .limit(clampedLimit * 2);
+      .limit(Math.max(clampedLimit * 10, 50));
 
     // Deduplicate by normalized name (lowercased trimmed name)
     // Prioritize provider teams (id starting with team_\d+) and merge missing country/logo metadata
@@ -146,12 +146,12 @@ export class CatalogRepository {
       .from(schema.competitions)
       .where(
         or(
-          like(schema.competitions.name, searchPattern),
-          like(schema.competitions.code, searchPattern),
-          like(schema.competitions.country, searchPattern)
+          sql`${schema.competitions.name} LIKE ${searchPattern} ESCAPE '\\'`,
+          sql`${schema.competitions.code} LIKE ${searchPattern} ESCAPE '\\'`,
+          sql`${schema.competitions.country} LIKE ${searchPattern} ESCAPE '\\'`
         )
       )
-      .limit(clampedLimit * 2);
+      .limit(Math.max(clampedLimit * 10, 50));
 
     const deduplicatedMap = new Map<string, typeof rows[0]>();
 

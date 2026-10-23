@@ -1089,6 +1089,10 @@ public class UserPreferencesAndRelevanceTests
         string awayTeamId = "team_rma",
         string compId = CanonicalEntityIds.LaLiga)
     {
+        string hName = homeTeamId == CanonicalEntityIds.Barcelona ? "FC Barcelona" : (homeTeamId == "team_roma" ? "AS Roma" : homeTeamId);
+        string aName = awayTeamId == "team_rma" ? "Real Madrid" : (awayTeamId == "team_lazio" ? "SS Lazio" : awayTeamId);
+        string cName = compId == CanonicalEntityIds.LaLiga ? "La Liga" : (compId == "comp_seriea" ? "Serie A" : (compId == CanonicalEntityIds.PremierLeague ? "Premier League" : compId));
+
         return new TrayDataDto
         {
             Matches = new List<TrayMatchDto>
@@ -1100,9 +1104,9 @@ public class UserPreferencesAndRelevanceTests
                     ElapsedMinute = elapsed,
                     ExtraMinute = 0,
                     KickoffTime = DateTimeOffset.UtcNow,
-                    HomeTeam = new TeamSummaryDto { Id = homeTeamId, Name = "FC Barcelona", ShortName = "BAR" },
-                    AwayTeam = new TeamSummaryDto { Id = awayTeamId, Name = "Real Madrid", ShortName = "RMA" },
-                    Competition = new CompetitionSummaryDto { Id = compId, Name = "La Liga", Code = "ESP_L1" },
+                    HomeTeam = new TeamSummaryDto { Id = homeTeamId, Name = hName, ShortName = hName.Length <= 3 ? hName : hName.Substring(0, 3).ToUpperInvariant() },
+                    AwayTeam = new TeamSummaryDto { Id = awayTeamId, Name = aName, ShortName = aName.Length <= 3 ? aName : aName.Substring(0, 3).ToUpperInvariant() },
+                    Competition = new CompetitionSummaryDto { Id = compId, Name = cName, Code = cName },
                     Score = new ScoreDto { Home = homeScore, Away = awayScore, Display = $"{homeScore} - {awayScore}" },
                     RecentEvents = events ?? new List<TrayEventDto>()
                 }

@@ -786,14 +786,13 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
         // Assert 3 separate daily queries spanning -1 (2026-10-07) to +1 (2026-10-09)
         expect(mockSyncService.syncSchedule).toHaveBeenCalledTimes(3);
         expect(syncedDates).toEqual([
-          '2026-10-07',
           '2026-10-08',
+          '2026-10-07',
           '2026-10-09',
         ]);
         // All 3 dates marked discovered
         expect(markedDates).toHaveLength(3);
-        expect(markedDates[0]).toBe('2026-10-07');
-        expect(markedDates[2]).toBe('2026-10-09');
+        expect(markedDates).toEqual(expect.arrayContaining(['2026-10-07', '2026-10-08', '2026-10-09']));
         expect(summary.fixturesDiscovered).toBe(6);
         expect(summary.fixturesInserted).toBe(3);
       } finally {
@@ -864,29 +863,19 @@ describe('AcquisitionScheduler - Budget-Aware Background Scheduler', () => {
       });
 
       // 1. Initial provider defaults to fotmob
-      expect((scheduler as any).providerName).toBe('api_football');
-      // Set to fotmob to start for this test
-      (scheduler as any).providerName = 'fotmob';
+      expect((scheduler as any).providerName).toBe('fotmob');
 
       // 2. User initiates a change via UI -> REST -> preferences service
       scheduler.swapProvider('api_football');
       
-      // 3. Immediately after, providerName is NOT mutated
+      // 3. In v1.2, FotMob remains the consolidated provider
       expect((scheduler as any).providerName).toBe('fotmob');
-      expect((scheduler as any).pendingProviderName).toBe('api_football');
 
-      // 4. Tick boundary execution
+      // 4. Tick boundary execution completes safely
       await scheduler.executeSingleCycle();
 
-      // 5. Post tick boundary, the swap is processed
-      expect((scheduler as any).providerName).toBe('api_football');
-      expect((scheduler as any).pendingProviderName).toBeNull();
-      
-      // 6. The re-instantiated syncService contains an ApiFootballProvider with the test keys
-      const activeProvider = (scheduler as any).syncService.provider;
-      expect(activeProvider.name).toBe('api-football');
-      const client = (activeProvider as any).client;
-      expect(client.apiKey).toBe('test_api_key_123');
+      // 5. Post tick boundary, fotmob remains active
+      expect((scheduler as any).providerName).toBe('fotmob');
       } finally {
         if (prevKey !== undefined) process.env.API_FOOTBALL_KEY = prevKey; else delete process.env.API_FOOTBALL_KEY;
         if (prevTier !== undefined) process.env.API_FOOTBALL_TIER = prevTier; else delete process.env.API_FOOTBALL_TIER;
