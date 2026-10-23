@@ -243,57 +243,69 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <!-- Left: Competition Logo + Followed Star Indicator + Competition Name + Country -->
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <Border
-                                Width="20"
-                                Height="20"
-                                CornerRadius="4"
-                                Background="Transparent"
-                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
-                                VerticalAlignment="Center">
-                                <Image
-                                    Source="{x:Bind LogoUrl, Mode=OneWay}"
+                        <!-- Left: Competition Logo + Followed Star Indicator + Competition Name + Country (Click opens Standings & Leaders) -->
+                        <Button
+                            x:Name="CompetitionHeaderButton"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Padding="2,2"
+                            CornerRadius="4"
+                            Tag="{x:Bind}"
+                            Click="OnCompetitionTitleClicked"
+                            ToolTipService.ToolTip="Open Standings &amp; Leaders"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Border
                                     Width="20"
                                     Height="20"
-                                    Stretch="Uniform" />
-                            </Border>
-                            <FontIcon
-                                Glyph="&#xE734;"
-                                FontSize="14"
-                                Foreground="{ThemeResource SystemFillColorAttentionBrush}"
-                                Visibility="{x:Bind FollowedStarVisibility, Mode=OneWay}"
-                                VerticalAlignment="Center" />
-                            <TextBlock
-                                Text="{x:Bind CompetitionName}"
-                                FontSize="14"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                VerticalAlignment="Center"
-                                TextTrimming="CharacterEllipsis" />
-                            <TextBlock
-                                Text="{x:Bind CountryDisplay, Mode=OneWay}"
-                                FontSize="12"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                VerticalAlignment="Center" />
-                        </StackPanel>
+                                    CornerRadius="4"
+                                    Background="Transparent"
+                                    Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                    VerticalAlignment="Center">
+                                    <Image
+                                        Source="{x:Bind LogoSource, Mode=OneWay}"
+                                        Width="20"
+                                        Height="20"
+                                        Stretch="Uniform" />
+                                </Border>
+                                <FontIcon
+                                    Glyph="&#xE734;"
+                                    FontSize="14"
+                                    Foreground="{ThemeResource SystemFillColorAttentionBrush}"
+                                    Visibility="{x:Bind FollowedStarVisibility, Mode=OneWay}"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    Text="{x:Bind CompetitionName, Mode=OneWay}"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    VerticalAlignment="Center"
+                                    TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Text="{x:Bind CountryDisplay, Mode=OneWay}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
 
                         <!-- Right: Match Count Badge -->
-                        <Border
-                            Grid.Column="1"
-                            Background="{ThemeResource LayerFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="12"
-                            Padding="8,2"
-                            Margin="0,0,8,0"
-                            VerticalAlignment="Center">
-                            <TextBlock
-                                Text="{x:Bind MatchCountText, Mode=OneWay}"
-                                FontSize="11"
-                                FontWeight="Bold"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        </Border>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <Border
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="8,2"
+                                VerticalAlignment="Center">
+                                <TextBlock
+                                    Text="{x:Bind MatchCountText, Mode=OneWay}"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Border>
+                        </StackPanel>
                     </Grid>
                 </Expander.Header>
 
@@ -322,14 +334,46 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- App Title & Ticker Summary -->
-            <StackPanel Grid.Column="0" Spacing="4">
-                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <!-- App Title, Mode Switcher & Ticker Summary -->
+            <StackPanel Grid.Column="0" Spacing="6">
+                <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                     <TextBlock
                         Text="FootballTray"
                         Style="{ThemeResource TitleTextBlockStyle}"
                         FontSize="22"
-                        FontWeight="Bold" />
+                        FontWeight="Bold"
+                        VerticalAlignment="Center" />
+
+                    <!-- Mode Switcher: ⚽ Matches | 🏆 Standings & Leaders -->
+                    <Border
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="3"
+                        VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Button
+                                x:Name="ModeMatchesButton"
+                                Content="⚽ Matches"
+                                Click="OnMatchesModeClicked"
+                                Padding="12,4"
+                                CornerRadius="6"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Style="{ThemeResource AccentButtonStyle}" />
+                            <Button
+                                x:Name="ModeStandingsButton"
+                                Content="🏆 Standings &amp; Leaders"
+                                Click="OnStandingsModeClicked"
+                                Padding="12,4"
+                                CornerRadius="6"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Style="{ThemeResource DefaultButtonStyle}" />
+                        </StackPanel>
+                    </Border>
+
                     <!-- Connection / Freshness Badge -->
                     <Border
                         x:Name="ConnectionBadge"
@@ -403,8 +447,12 @@
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="16">
-                <Grid RowSpacing="12">
-                    <Grid.RowDefinitions>
+                <Grid>
+                    <!-- ======================================================== -->
+                    <!-- VIEW 1: MATCH DISCOVERY                                  -->
+                    <!-- ======================================================== -->
+                    <Grid x:Name="MatchDiscoveryPanel" RowSpacing="12" Visibility="Visible">
+                        <Grid.RowDefinitions>
                         <!-- Row 0: Filter Bar -->
                         <RowDefinition Height="Auto" />
                         <!-- Row 1: 7-Day Calendar Navigation Bar -->
@@ -565,6 +613,543 @@
                         </StackPanel>
                     </Border>
                 </Grid>
+
+                    <!-- ======================================================== -->
+                    <!-- VIEW 2: STANDINGS & LEADERS HUB                          -->
+                    <!-- ======================================================== -->
+                    <Grid
+                        x:Name="StandingsAndLeadersPanel"
+                        RowSpacing="12"
+                        Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <!-- Row 0: Competition Selector Header & Horizontal Chips -->
+                            <RowDefinition Height="Auto" />
+                            <!-- Row 1: Sub-Tabs Switcher (📊 League Table | 🥅 Top Scorers | 🎯 Top Assists) -->
+                            <RowDefinition Height="Auto" />
+                            <!-- Row 2: Content Area (Standings / Leaders / Loading / Error) -->
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Row 0: Competition Header & Horizontal Selector Chips -->
+                        <Grid Grid.Row="0" RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Competition Title & Season Info -->
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Border
+                                        Width="24"
+                                        Height="24"
+                                        CornerRadius="4"
+                                        Background="Transparent"
+                                        VerticalAlignment="Center">
+                                        <Grid>
+                                            <Image
+                                                Source="{x:Bind ViewModel.CurrentCompetitionLogoSource, Mode=OneWay}"
+                                                Width="24"
+                                                Height="24"
+                                                Stretch="Uniform"
+                                                Visibility="{x:Bind ViewModel.CurrentCompetitionLogoVisibility, Mode=OneWay}" />
+                                            <TextBlock
+                                                Text="🏆"
+                                                FontSize="16"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Visibility="{x:Bind ViewModel.CurrentCompetitionFallbackVisibility, Mode=OneWay}" />
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock
+                                        Text="{x:Bind ViewModel.CurrentCompetitionName, Mode=OneWay}"
+                                        Style="{ThemeResource SubtitleTextBlockStyle}"
+                                        FontWeight="Bold"
+                                        VerticalAlignment="Center"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        Text="{x:Bind ViewModel.CurrentSeasonDisplay, Mode=OneWay}"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Horizontal Scrollable Competition Selector Chips -->
+                            <ScrollViewer
+                                Grid.Row="1"
+                                Height="Auto"
+                                HorizontalScrollBarVisibility="Auto"
+                                VerticalScrollBarVisibility="Disabled"
+                                HorizontalScrollMode="Enabled"
+                                VerticalScrollMode="Disabled">
+                                <ItemsControl
+                                    x:Name="HubCompetitionsList"
+                                    ItemsSource="{x:Bind ViewModel.HubCompetitions, Mode=OneWay}"
+                                    Padding="0,2,0,24">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:HubCompetitionItemViewModel">
+                                            <Button
+                                                Click="OnHubCompetitionChipClicked"
+                                                Tag="{x:Bind}"
+                                                Padding="10,4"
+                                                CornerRadius="14"
+                                                BorderThickness="1"
+                                                Background="{x:Bind BackgroundBrush, Mode=OneWay}"
+                                                BorderBrush="{x:Bind BorderBrush, Mode=OneWay}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <Border
+                                                        Width="16"
+                                                        Height="16"
+                                                        VerticalAlignment="Center">
+                                                        <Grid>
+                                                            <Image
+                                                                Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                                Width="16"
+                                                                Height="16"
+                                                                Stretch="Uniform"
+                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}" />
+                                                            <TextBlock
+                                                                Text="🏆"
+                                                                FontSize="11"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center"
+                                                                Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                        </Grid>
+                                                    </Border>
+                                                    <TextBlock
+                                                        Text="{x:Bind Name, Mode=OneWay}"
+                                                        FontSize="12"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="{x:Bind ForegroundBrush, Mode=OneWay}"
+                                                        VerticalAlignment="Center" />
+                                                    <TextBlock
+                                                        Text="⭐"
+                                                        FontSize="10"
+                                                        Visibility="{x:Bind IsFollowed, Mode=OneWay}"
+                                                        VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- Row 1: Sub-Tabs Switcher (📊 League Table | 🥅 Top Scorers | 🎯 Top Assists) -->
+                        <Border
+                            Grid.Row="1"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="3">
+                            <Grid ColumnSpacing="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Button
+                                    x:Name="LeagueTableTabButton"
+                                    Grid.Column="0"
+                                    Content="📊 League Table"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnLeagueTableTabClicked"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Style="{ThemeResource AccentButtonStyle}" />
+
+                                <Button
+                                    x:Name="TopScorersTabButton"
+                                    Grid.Column="1"
+                                    Content="🥅 Top Scorers"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnTopScorersTabClicked"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Style="{ThemeResource DefaultButtonStyle}" />
+
+                                <Button
+                                    x:Name="TopAssistsTabButton"
+                                    Grid.Column="2"
+                                    Content="🎯 Top Assists"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnTopAssistsTabClicked"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Style="{ThemeResource DefaultButtonStyle}" />
+                            </Grid>
+                        </Border>
+
+                        <!-- Row 2: Content Area (Standings / Top Scorers / Top Assists / Loading / Error) -->
+                        <Grid Grid.Row="2">
+                            <!-- Loading State -->
+                            <StackPanel
+                                x:Name="HubLoadingContainer"
+                                Spacing="10"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="{x:Bind ViewModel.HubLoadingVisibility, Mode=OneWay}">
+                                <ProgressRing IsActive="True" Width="36" Height="36" HorizontalAlignment="Center" />
+                                <TextBlock
+                                    Text="Loading standings &amp; leaders..."
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    HorizontalAlignment="Center" />
+                            </StackPanel>
+
+                            <!-- Error InfoBar -->
+                            <InfoBar
+                                IsOpen="{x:Bind ViewModel.HasHubError, Mode=OneWay}"
+                                Severity="Error"
+                                Message="{x:Bind ViewModel.HubErrorMessage, Mode=OneWay}"
+                                Visibility="{x:Bind ViewModel.HubErrorVisibility, Mode=OneWay}"
+                                IsClosable="False"
+                                VerticalAlignment="Top"
+                                Margin="0,8,0,0" />
+
+                            <!-- SUB-TAB 0: LEAGUE TABLE -->
+                            <Grid
+                                x:Name="LeagueTableContainer"
+                                Visibility="{x:Bind ViewModel.HubTableSubTabVisibility, Mode=OneWay}">
+                                <Grid.RowDefinitions>
+                                    <!-- Table Header Row -->
+                                    <RowDefinition Height="Auto" />
+                                    <!-- Scrollable Rows -->
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <!-- Table Header -->
+                                <Border
+                                    Grid.Row="0"
+                                    Background="#0F172A"
+                                    BorderBrush="#334155"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="8,6"
+                                    Margin="0,0,0,4">
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="28" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="32" />
+                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="38" />
+                                            <ColumnDefinition Width="38" />
+                                            <ColumnDefinition Width="105" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="#" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="TEAM" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" />
+                                        <TextBlock Grid.Column="2" Text="P" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="3" Text="W" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="4" Text="D" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="5" Text="L" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="6" Text="GD" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="7" Text="PTS" FontSize="10" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="8" Text="FORM" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+
+                                <!-- Standings Rows List -->
+                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentStandings, Mode=OneWay}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:StandingRowItemViewModel">
+                                                <Border
+                                                    Background="{x:Bind RowBackgroundBrush, Mode=OneTime}"
+                                                    BorderBrush="{x:Bind RowBorderBrush, Mode=OneTime}"
+                                                    BorderThickness="{x:Bind RowBorderThickness, Mode=OneTime}"
+                                                    CornerRadius="6"
+                                                    Padding="8,5"
+                                                    Margin="0,1">
+                                                    <Grid ColumnSpacing="6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="28" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="32" />
+                                                            <ColumnDefinition Width="30" />
+                                                            <ColumnDefinition Width="30" />
+                                                            <ColumnDefinition Width="30" />
+                                                            <ColumnDefinition Width="38" />
+                                                            <ColumnDefinition Width="38" />
+                                                            <ColumnDefinition Width="105" />
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <!-- Rank -->
+                                                        <TextBlock
+                                                            Grid.Column="0"
+                                                            Text="{x:Bind Rank}"
+                                                            FontSize="11"
+                                                            FontWeight="SemiBold"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center" />
+
+                                                        <!-- Team Logo + Name + Badges -->
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                            <Border
+                                                                Width="18"
+                                                                Height="18"
+                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                                VerticalAlignment="Center">
+                                                                <Image Source="{x:Bind TeamLogoSource, Mode=OneWay}" Width="18" Height="18" Stretch="Uniform" />
+                                                            </Border>
+                                                            <TextBlock
+                                                                Text="{x:Bind DisplayName}"
+                                                                FontSize="12"
+                                                                FontWeight="SemiBold"
+                                                                TextTrimming="CharacterEllipsis"
+                                                                VerticalAlignment="Center" />
+                                                            <!-- Followed Team Star -->
+                                                            <TextBlock
+                                                                Text="⭐"
+                                                                FontSize="10"
+                                                                Visibility="{x:Bind FollowedStarVisibility, Mode=OneWay}"
+                                                                VerticalAlignment="Center" />
+                                                        </StackPanel>
+
+                                                        <!-- P, W, D, L -->
+                                                        <TextBlock Grid.Column="2" Text="{x:Bind Played}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="3" Text="{x:Bind Wins}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="4" Text="{x:Bind Draws}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="5" Text="{x:Bind Losses}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                                        <!-- GD -->
+                                                        <TextBlock Grid.Column="6" Text="{x:Bind GoalDiffDisplay}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                                        <!-- PTS -->
+                                                        <TextBlock Grid.Column="7" Text="{x:Bind Points}" FontSize="12" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                                        <!-- Form Badges -->
+                                                        <ItemsControl Grid.Column="8" ItemsSource="{x:Bind FormBadges}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="3" />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="vm:FormBadgeItemViewModel">
+                                                                    <Border
+                                                                        Width="16"
+                                                                        Height="16"
+                                                                        CornerRadius="3"
+                                                                        Background="{x:Bind BackgroundBrush}"
+                                                                        ToolTipService.ToolTip="{x:Bind TooltipText}">
+                                                                        <TextBlock
+                                                                            Text="{x:Bind Text}"
+                                                                            FontSize="9"
+                                                                            FontWeight="Bold"
+                                                                            Foreground="{x:Bind ForegroundBrush}"
+                                                                            HorizontalAlignment="Center"
+                                                                            VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+
+                            <!-- SUB-TAB 1: TOP SCORERS -->
+                            <Grid
+                                x:Name="TopScorersContainer"
+                                Visibility="{x:Bind ViewModel.HubTopScorersSubTabVisibility, Mode=OneWay}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentTopScorers, Mode=OneWay}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:PlayerStatLeaderItemViewModel">
+                                                <Border
+                                                    Background="#1E293B"
+                                                    BorderBrush="#334155"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="12,8"
+                                                    Margin="0,0,0,6">
+                                                    <Grid ColumnSpacing="12">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="32" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <!-- Rank -->
+                                                        <Border
+                                                            Grid.Column="0"
+                                                            Background="#0F172A"
+                                                            CornerRadius="4"
+                                                            Padding="4,2"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind RankDisplay}"
+                                                                FontSize="11"
+                                                                FontWeight="Bold"
+                                                                Foreground="#38BDF8"
+                                                                HorizontalAlignment="Center" />
+                                                        </Border>
+
+                                                        <!-- Player & Team Info -->
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                            <TextBlock
+                                                                Text="{x:Bind PlayerName}"
+                                                                FontSize="13"
+                                                                FontWeight="Bold"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                                <Border Width="14" Height="14" Visibility="{x:Bind LogoVisibility, Mode=OneWay}" VerticalAlignment="Center">
+                                                                    <Image Source="{x:Bind TeamLogoSource, Mode=OneWay}" Width="14" Height="14" Stretch="Uniform" />
+                                                                </Border>
+                                                                <TextBlock
+                                                                    Text="{x:Bind TeamName}"
+                                                                    FontSize="11"
+                                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                    VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+
+                                                        <!-- Goals Stat -->
+                                                        <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="1">
+                                                            <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                                                                <TextBlock
+                                                                    Text="{x:Bind MainStatValue}"
+                                                                    FontSize="16"
+                                                                    FontWeight="Bold"
+                                                                    Foreground="{x:Bind StatBrush}" />
+                                                                <TextBlock
+                                                                    Text="{x:Bind MainStatLabel}"
+                                                                    FontSize="11"
+                                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                    VerticalAlignment="Bottom"
+                                                                    Margin="0,0,0,2" />
+                                                            </StackPanel>
+                                                            <TextBlock
+                                                                Text="{x:Bind SubStatDisplay}"
+                                                                FontSize="10"
+                                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                HorizontalAlignment="Right"
+                                                                Visibility="{x:Bind SubStatVisibility, Mode=OneWay}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+
+                            <!-- SUB-TAB 2: TOP ASSISTS -->
+                            <Grid
+                                x:Name="TopAssistsContainer"
+                                Visibility="{x:Bind ViewModel.HubTopAssistsSubTabVisibility, Mode=OneWay}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentTopAssists, Mode=OneWay}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:PlayerStatLeaderItemViewModel">
+                                                <Border
+                                                    Background="#1E293B"
+                                                    BorderBrush="#334155"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="12,8"
+                                                    Margin="0,0,0,6">
+                                                    <Grid ColumnSpacing="12">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="32" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <!-- Rank -->
+                                                        <Border
+                                                            Grid.Column="0"
+                                                            Background="#0F172A"
+                                                            CornerRadius="4"
+                                                            Padding="4,2"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind RankDisplay}"
+                                                                FontSize="11"
+                                                                FontWeight="Bold"
+                                                                Foreground="#10B981"
+                                                                HorizontalAlignment="Center" />
+                                                        </Border>
+
+                                                        <!-- Player & Team Info -->
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                            <TextBlock
+                                                                Text="{x:Bind PlayerName}"
+                                                                FontSize="13"
+                                                                FontWeight="Bold"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                                <Border Width="14" Height="14" Visibility="{x:Bind LogoVisibility, Mode=OneWay}" VerticalAlignment="Center">
+                                                                    <Image Source="{x:Bind TeamLogoSource, Mode=OneWay}" Width="14" Height="14" Stretch="Uniform" />
+                                                                </Border>
+                                                                <TextBlock
+                                                                    Text="{x:Bind TeamName}"
+                                                                    FontSize="11"
+                                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                    VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+
+                                                        <!-- Assists Stat -->
+                                                        <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="1">
+                                                            <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                                                                <TextBlock
+                                                                    Text="{x:Bind MainStatValue}"
+                                                                    FontSize="16"
+                                                                    FontWeight="Bold"
+                                                                    Foreground="{x:Bind StatBrush}" />
+                                                                <TextBlock
+                                                                    Text="{x:Bind MainStatLabel}"
+                                                                    FontSize="11"
+                                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                    VerticalAlignment="Bottom"
+                                                                    Margin="0,0,0,2" />
+                                                            </StackPanel>
+                                                            <TextBlock
+                                                                Text="{x:Bind SubStatDisplay}"
+                                                                FontSize="10"
+                                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                HorizontalAlignment="Right"
+                                                                Visibility="{x:Bind SubStatVisibility, Mode=OneWay}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Grid>
+                    </Grid>
+                </Grid>
             </Border>
 
             <!-- ======================================================== -->
@@ -652,15 +1237,20 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Image
-                                                    Grid.Column="0"
-                                                    Width="24"
-                                                    Height="24"
-                                                    VerticalAlignment="Center">
-                                                    <Image.Source>
-                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
-                                                    </Image.Source>
-                                                </Image>
+                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                    <Image
+                                                        Width="24"
+                                                        Height="24"
+                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                        Stretch="Uniform" />
+                                                    <TextBlock
+                                                        Text="🛡️"
+                                                        FontSize="14"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                </Grid>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock
                                                         Text="{x:Bind Name}"
@@ -700,15 +1290,20 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Image
-                                                    Grid.Column="0"
-                                                    Width="24"
-                                                    Height="24"
-                                                    VerticalAlignment="Center">
-                                                    <Image.Source>
-                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
-                                                    </Image.Source>
-                                                </Image>
+                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                    <Image
+                                                        Width="24"
+                                                        Height="24"
+                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                        Stretch="Uniform" />
+                                                    <TextBlock
+                                                        Text="🏆"
+                                                        FontSize="14"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                </Grid>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock
                                                         Text="{x:Bind Name}"
@@ -773,15 +1368,20 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Image
-                                                    Grid.Column="0"
-                                                    Width="24"
-                                                    Height="24"
-                                                    VerticalAlignment="Center">
-                                                    <Image.Source>
-                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
-                                                    </Image.Source>
-                                                </Image>
+                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                    <Image
+                                                        Width="24"
+                                                        Height="24"
+                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                        Stretch="Uniform" />
+                                                    <TextBlock
+                                                        Text="🛡️"
+                                                        FontSize="14"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                </Grid>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock
                                                         Text="{x:Bind Name}"
@@ -845,15 +1445,20 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Image
-                                                    Grid.Column="0"
-                                                    Width="24"
-                                                    Height="24"
-                                                    VerticalAlignment="Center">
-                                                    <Image.Source>
-                                                        <BitmapImage UriSource="{x:Bind CachedLogoUri, Mode=OneWay}" />
-                                                    </Image.Source>
-                                                </Image>
+                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                    <Image
+                                                        Width="24"
+                                                        Height="24"
+                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                        Stretch="Uniform" />
+                                                    <TextBlock
+                                                        Text="🏆"
+                                                        FontSize="14"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                </Grid>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock
                                                         Text="{x:Bind Name}"

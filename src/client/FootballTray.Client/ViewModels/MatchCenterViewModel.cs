@@ -2298,6 +2298,19 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         set => SetProperty(ref _hasAggregateScore, value);
     }
 
+    public ObservableCollection<StandingRowItemViewModel> Standings { get; } = new();
+    public ObservableCollection<PlayerStatLeaderItemViewModel> TopScorers { get; } = new();
+    public ObservableCollection<PlayerStatLeaderItemViewModel> TopAssists { get; } = new();
+
+    public bool HasStandings => Standings.Count > 0;
+    public bool HasTopScorers => TopScorers.Count > 0;
+    public bool HasTopAssists => TopAssists.Count > 0;
+    public bool HasLeaders => HasTopScorers || HasTopAssists;
+
+    public Visibility StandingsVisibility => HasStandings ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility LeadersVisibility => HasLeaders ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NoStandingsVisibility => (!HasStandings && !HasLeaders) ? Visibility.Visible : Visibility.Collapsed;
+
     public void Load(MatchDetailDto match)
     {
         if (match == null) return;
@@ -3569,6 +3582,47 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         HasLineups = HomePitchPlayers.Count > 0 || AwayPitchPlayers.Count > 0 || PitchPlayers.Count > 0 || HomeLineup.HasLineup || AwayLineup.HasLineup;
         OnPropertyChanged(nameof(CurrentLineup));
+
+        // Standings & Leaders
+        Standings.Clear();
+        if (match.Standings != null)
+        {
+            var mainVm = App.CurrentMainViewModel;
+            var prefs = mainVm?.PreferencesService?.GetPreferences();
+            var followedTeams = prefs?.GetFollowedTeamIdSet() ?? new HashSet<string>();
+            var followedNames = prefs?.FollowedTeams?.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var s in match.Standings)
+            {
+                bool isFollowed = followedTeams.Contains(s.TeamId) || followedNames.Contains(s.TeamName) || (!string.IsNullOrEmpty(s.TeamShortName) && followedNames.Contains(s.TeamShortName));
+                Standings.Add(new StandingRowItemViewModel(s, isFollowed));
+            }
+        }
+        OnPropertyChanged(nameof(HasStandings));
+        OnPropertyChanged(nameof(StandingsVisibility));
+
+        TopScorers.Clear();
+        if (match.TopScorers != null)
+        {
+            foreach (var sc in match.TopScorers)
+            {
+                TopScorers.Add(new PlayerStatLeaderItemViewModel(sc, isAssistLeader: false));
+            }
+        }
+        OnPropertyChanged(nameof(HasTopScorers));
+
+        TopAssists.Clear();
+        if (match.TopAssists != null)
+        {
+            foreach (var asst in match.TopAssists)
+            {
+                TopAssists.Add(new PlayerStatLeaderItemViewModel(asst, isAssistLeader: true));
+            }
+        }
+        OnPropertyChanged(nameof(HasTopAssists));
+        OnPropertyChanged(nameof(HasLeaders));
+        OnPropertyChanged(nameof(LeadersVisibility));
+        OnPropertyChanged(nameof(NoStandingsVisibility));
     }
 
     private void BuildPitchPlayers(LineupDto? homeDto, LineupDto? awayDto, IReadOnlyList<TrayEventDto>? events = null)

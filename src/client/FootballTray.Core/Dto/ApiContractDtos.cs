@@ -71,6 +71,9 @@ public class TrayDataDto
 
     [JsonPropertyName("followedCountsByDate")]
     public Dictionary<string, int>? FollowedCountsByDate { get; set; }
+
+    [JsonPropertyName("followedTeamCompetitions")]
+    public List<CompetitionSummaryDto>? FollowedTeamCompetitions { get; set; }
 }
 
 public class TrayMatchDto
@@ -417,6 +420,15 @@ public class MatchDetailDto
 
     [JsonPropertyName("h2hAndPredictions")]
     public H2HAndPredictionsDto? H2HAndPredictions { get; set; }
+
+    [JsonPropertyName("standings")]
+    public List<StandingRowDto>? Standings { get; set; }
+
+    [JsonPropertyName("topScorers")]
+    public List<PlayerStatLeaderDto>? TopScorers { get; set; }
+
+    [JsonPropertyName("topAssists")]
+    public List<PlayerStatLeaderDto>? TopAssists { get; set; }
 
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }
@@ -877,4 +889,165 @@ public class SyncPreferencesRequestDto
     [JsonPropertyName("activeProvider")]
     public string? ActiveProvider { get; set; }
 }
+
+public class FormBadgeItem
+{
+    public char Result { get; set; }
+    public string BackgroundHex => Result == 'W' ? "#107C41" : (Result == 'D' ? "#5A5A5A" : "#C42B1C");
+    public string ForegroundHex => "#FFFFFF";
+}
+
+public class StandingRowDto
+{
+    [JsonPropertyName("rank")]
+    public int Rank { get; set; }
+
+    [JsonPropertyName("teamId")]
+    public string TeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamName")]
+    public string TeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamShortName")]
+    public string? TeamShortName { get; set; }
+
+    [JsonPropertyName("teamLogoUrl")]
+    public string? TeamLogoUrl { get; set; }
+
+    [JsonPropertyName("played")]
+    public int Played { get; set; }
+
+    [JsonPropertyName("wins")]
+    public int Wins { get; set; }
+
+    [JsonPropertyName("draws")]
+    public int Draws { get; set; }
+
+    [JsonPropertyName("losses")]
+    public int Losses { get; set; }
+
+    [JsonPropertyName("goalsFor")]
+    public int GoalsFor { get; set; }
+
+    [JsonPropertyName("goalsAgainst")]
+    public int GoalsAgainst { get; set; }
+
+    [JsonPropertyName("goalDiff")]
+    public int GoalDiff { get; set; }
+
+    [JsonPropertyName("points")]
+    public int Points { get; set; }
+
+    [JsonPropertyName("form")]
+    public string? Form { get; set; }
+
+    [JsonPropertyName("qualificationColor")]
+    public string? QualificationColor { get; set; }
+
+    [JsonPropertyName("isHomeTeam")]
+    public bool IsHomeTeam { get; set; }
+
+    [JsonPropertyName("isAwayTeam")]
+    public bool IsAwayTeam { get; set; }
+
+    [JsonIgnore]
+    public bool IsFollowedTeam { get; set; }
+
+    [JsonIgnore]
+    public string GoalDiffDisplay => GoalDiff > 0 ? $"+{GoalDiff}" : GoalDiff.ToString();
+
+    [JsonIgnore]
+    public string RowBackground => IsHomeTeam ? "#250078D4" : (IsAwayTeam ? "#25107C41" : (IsFollowedTeam ? "#2538BDF8" : "Transparent"));
+
+    [JsonIgnore]
+    public string RowBorderBrush => IsHomeTeam ? "#800078D4" : (IsAwayTeam ? "#80107C41" : (IsFollowedTeam ? "#8038BDF8" : "#1AFFFFFF"));
+
+    [JsonIgnore]
+    public double RowBorderThickness => (IsHomeTeam || IsAwayTeam || IsFollowedTeam) ? 1.5 : 0.5;
+
+    [JsonIgnore]
+    public List<FormBadgeItem> FormBadges => (Form ?? "")
+        .Where(char.IsLetter)
+        .Select(c => new FormBadgeItem { Result = char.ToUpperInvariant(c) })
+        .TakeLast(5)
+        .ToList();
+}
+
+public class PlayerStatLeaderDto
+{
+    [JsonPropertyName("rank")]
+    public int Rank { get; set; }
+
+    [JsonPropertyName("playerId")]
+    public string PlayerId { get; set; } = string.Empty;
+
+    [JsonPropertyName("playerName")]
+    public string PlayerName { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamId")]
+    public string TeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamName")]
+    public string TeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamLogoUrl")]
+    public string? TeamLogoUrl { get; set; }
+
+    [JsonPropertyName("goals")]
+    public int? Goals { get; set; }
+
+    [JsonPropertyName("assists")]
+    public int? Assists { get; set; }
+
+    [JsonPropertyName("penalties")]
+    public int? Penalties { get; set; }
+
+    [JsonPropertyName("matchesPlayed")]
+    public int? MatchesPlayed { get; set; }
+
+    [JsonIgnore]
+    public string RankDisplay => $"#{Rank}";
+
+    [JsonIgnore]
+    public string MatchesDisplay => MatchesPlayed.HasValue ? $"{MatchesPlayed.Value} matches" : "";
+
+    [JsonIgnore]
+    public string StatDisplay => Goals.HasValue
+        ? (Penalties.HasValue && Penalties.Value > 0 ? $"{Goals.Value} goals ({Penalties.Value} pen)" : $"{Goals.Value} goals")
+        : (Assists.HasValue ? $"{Assists.Value} assists" : "");
+}
+
+public class CompetitionHubDto
+{
+    [JsonPropertyName("competitionId")]
+    public string CompetitionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("competitionName")]
+    public string CompetitionName { get; set; } = string.Empty;
+
+    [JsonPropertyName("competitionCode")]
+    public string? CompetitionCode { get; set; }
+
+    [JsonPropertyName("competitionLogoUrl")]
+    public string? CompetitionLogoUrl { get; set; }
+
+    [JsonPropertyName("countryCode")]
+    public string? CountryCode { get; set; }
+
+    [JsonPropertyName("countryName")]
+    public string? CountryName { get; set; }
+
+    [JsonPropertyName("season")]
+    public string? Season { get; set; }
+
+    [JsonPropertyName("standings")]
+    public List<StandingRowDto> Standings { get; set; } = new();
+
+    [JsonPropertyName("topScorers")]
+    public List<PlayerStatLeaderDto> TopScorers { get; set; } = new();
+
+    [JsonPropertyName("topAssists")]
+    public List<PlayerStatLeaderDto> TopAssists { get; set; } = new();
+}
+
 

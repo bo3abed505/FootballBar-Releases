@@ -167,6 +167,92 @@ export class FixturesRepository {
     return counts;
   }
 
+  async getFollowedTeamCompetitions(targetTeams?: string[] | null): Promise<Array<{
+    id: string;
+    canonicalId?: string;
+    name: string;
+    country?: string | null;
+    logoUrl?: string | null;
+  }>> {
+    if (!targetTeams || targetTeams.length === 0) {
+      return [];
+    }
+
+    const expandedTeamIds = new Set<string>();
+    for (const t of targetTeams) {
+      if (!t) continue;
+      const trimmed = t.trim();
+      if (!trimmed) continue;
+      expandedTeamIds.add(trimmed);
+      if (trimmed.startsWith('team_')) {
+        expandedTeamIds.add(trimmed.substring(5));
+      } else if (!trimmed.startsWith('ft_team_')) {
+        expandedTeamIds.add(`team_${trimmed}`);
+      }
+    }
+
+    const canonicalCandidates = Array.from(expandedTeamIds).filter((id) => id.startsWith('ft_team_'));
+    if (canonicalCandidates.length > 0) {
+      try {
+        const matchedTeams = await db.query.teams.findMany({
+          where: inArray(schema.teams.canonicalId, canonicalCandidates),
+          columns: { id: true, canonicalId: true },
+        });
+        for (const mt of matchedTeams) {
+          if (mt.id) expandedTeamIds.add(mt.id);
+        }
+      } catch {
+        // Non-critical fallback
+      }
+    }
+
+    if (expandedTeamIds.size === 0) {
+      return [];
+    }
+
+    const teamArr = Array.from(expandedTeamIds);
+
+    const rows = await db
+      .select({
+        id: schema.competitions.id,
+        canonicalId: schema.competitions.canonicalId,
+        name: schema.competitions.name,
+        country: schema.competitions.country,
+        logoUrl: schema.competitions.logoUrl,
+      })
+      .from(schema.fixtures)
+      .innerJoin(schema.competitions, eq(schema.fixtures.competitionId, schema.competitions.id))
+      .where(
+        or(
+          inArray(schema.fixtures.homeTeamId, teamArr),
+          inArray(schema.fixtures.awayTeamId, teamArr)
+        )
+      );
+
+    const distinctMap = new Map<string, { id: string; canonicalId?: string; name: string; country?: string | null; logoUrl?: string | null }>();
+    for (const row of rows) {
+      if (!row.id || distinctMap.has(row.id)) continue;
+
+      let logo = row.logoUrl;
+      if (!logo || logo.includes('placeholder') || logo.endsWith('/comp.png')) {
+        const digits = row.id.match(/\d+/)?.[0];
+        if (digits) {
+          logo = `https://images.fotmob.com/image_resources/logo/leaguelogo/dark/${digits}.png`;
+        }
+      }
+
+      distinctMap.set(row.id, {
+        id: row.id,
+        canonicalId: row.canonicalId,
+        name: row.name,
+        country: row.country,
+        logoUrl: logo,
+      });
+    }
+
+    return Array.from(distinctMap.values());
+  }
+
   async getAll(limit = 50) {
     return await db.query.fixtures.findMany({
       columns: {

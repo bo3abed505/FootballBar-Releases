@@ -35,6 +35,7 @@ public sealed partial class MainPage : Page
             {
                 _viewModel.PropertyChanged += OnViewModelPropertyChanged;
                 BindViewModel();
+                Bindings.Update();
             }
         }
     }
@@ -88,6 +89,10 @@ public sealed partial class MainPage : Page
         DispatcherQueue.TryEnqueue(() =>
         {
             UpdateUiFromViewModel();
+            if (_viewModel != null)
+            {
+                Bindings.Update();
+            }
         });
     }
 
@@ -170,7 +175,121 @@ public sealed partial class MainPage : Page
 
         // Update active filter button styling
         UpdateFilterButtons();
+        UpdateModeAndStandingsUi();
         UpdateSearchCatalogUi();
+    }
+
+    private void UpdateModeAndStandingsUi()
+    {
+        if (_viewModel == null) return;
+
+        var accentStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
+        var defaultStyle = (Style)Application.Current.Resources["DefaultButtonStyle"];
+
+        if (ModeMatchesButton != null && ModeStandingsButton != null)
+        {
+            ModeMatchesButton.Style = _viewModel.IsMatchesMode ? accentStyle : defaultStyle;
+            ModeStandingsButton.Style = _viewModel.IsStandingsMode ? accentStyle : defaultStyle;
+        }
+
+        if (MatchDiscoveryPanel != null && StandingsAndLeadersPanel != null)
+        {
+            MatchDiscoveryPanel.Visibility = _viewModel.IsMatchesMode ? Visibility.Visible : Visibility.Collapsed;
+            StandingsAndLeadersPanel.Visibility = _viewModel.IsStandingsMode ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (LeagueTableTabButton != null && TopScorersTabButton != null && TopAssistsTabButton != null)
+        {
+            LeagueTableTabButton.Style = _viewModel.IsLeagueTableSelected ? accentStyle : defaultStyle;
+            TopScorersTabButton.Style = _viewModel.IsTopScorersSelected ? accentStyle : defaultStyle;
+            TopAssistsTabButton.Style = _viewModel.IsTopAssistsSelected ? accentStyle : defaultStyle;
+        }
+
+        if (HubLoadingContainer != null)
+        {
+            HubLoadingContainer.Visibility = _viewModel.HubLoadingVisibility;
+        }
+        if (LeagueTableContainer != null)
+        {
+            LeagueTableContainer.Visibility = _viewModel.HubTableSubTabVisibility;
+        }
+        if (TopScorersContainer != null)
+        {
+            TopScorersContainer.Visibility = _viewModel.HubTopScorersSubTabVisibility;
+        }
+        if (TopAssistsContainer != null)
+        {
+            TopAssistsContainer.Visibility = _viewModel.HubTopAssistsSubTabVisibility;
+        }
+    }
+
+    private void OnMatchesModeClicked(object sender, RoutedEventArgs e)
+    {
+        _viewModel?.SwitchToMatchesMode();
+        UpdateModeAndStandingsUi();
+    }
+
+    private void OnStandingsModeClicked(object sender, RoutedEventArgs e)
+    {
+        _viewModel?.SwitchToStandingsMode();
+        UpdateModeAndStandingsUi();
+    }
+
+    private void OnCompetitionTitleClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CompetitionGroupViewModel group && _viewModel != null)
+        {
+            _viewModel.NavigateToCompetitionStandings(group);
+            UpdateModeAndStandingsUi();
+            Bindings.Update();
+        }
+    }
+
+    private void OnCompetitionTableClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CompetitionGroupViewModel group && _viewModel != null)
+        {
+            _viewModel.NavigateToCompetitionStandings(group);
+            UpdateModeAndStandingsUi();
+            Bindings.Update();
+        }
+    }
+
+    private void OnHubCompetitionChipClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is HubCompetitionItemViewModel comp && _viewModel != null)
+        {
+            _viewModel.SelectHubCompetition(comp);
+            UpdateModeAndStandingsUi();
+            Bindings.Update();
+        }
+    }
+
+    private void OnLeagueTableTabClicked(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            _viewModel.StandingsSubTabIndex = 0;
+            UpdateModeAndStandingsUi();
+        }
+    }
+
+    private void OnTopScorersTabClicked(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            _viewModel.StandingsSubTabIndex = 1;
+            UpdateModeAndStandingsUi();
+        }
+    }
+
+    private void OnTopAssistsTabClicked(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            _viewModel.StandingsSubTabIndex = 2;
+            UpdateModeAndStandingsUi();
+        }
     }
 
     private void UpdateSearchCatalogUi()
@@ -344,7 +463,12 @@ public sealed partial class MainPage : Page
     {
         if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem && _viewModel != null)
         {
-            await _viewModel.ToggleCompetitionFollowAsync(matchItem.CompetitionId, matchItem.CompetitionName, matchItem.CompetitionCode);
+            await _viewModel.ToggleCompetitionFollowAsync(
+                matchItem.CompetitionId,
+                matchItem.CompetitionName,
+                matchItem.CompetitionCode,
+                matchItem.CompetitionLogoUrl,
+                matchItem.CompetitionCountry);
         }
     }
 

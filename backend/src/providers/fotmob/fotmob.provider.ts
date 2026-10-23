@@ -13,11 +13,15 @@ import {
   NormalizedUnavailablePlayer,
   NormalizedLineupPlayer,
   NormalizedTeamLineup,
+  NormalizedStandingRow,
+  NormalizedPlayerStatLeader,
+  NormalizedCompetitionHub,
 } from '../types.js';
 import { ProviderChallengeError, ProviderNetworkError, ProviderSchemaError, ProviderResourceNotFoundError } from '../errors.js';
 import { FotmobMatchesResponseSchema, FotmobMatchesResponse } from './schemas/matches.schema.js';
 import { FotmobMatchDetailsResponseSchema, FotmobMatchDetailsResponse } from './schemas/match-details.schema.js';
 import { CircuitBreaker } from '../../resilience/circuit-breaker.js';
+import { CANONICAL_COMPETITION_MAP, FOTMOB_COMPETITION_MAP, COMPETITION_SLUG_TO_FOTMOB_ID } from '../../acquisition/priority-competitions.js';
 
 /** Well-known clubs whose conventional TLA cannot be derived algorithmically. */
 const TLA_OVERRIDES: Record<string, string> = {
@@ -78,6 +82,7 @@ export class FotmobProvider implements IDataProvider {
     'Accept': 'application/json',
     'Referer': 'https://www.fotmob.com/',
   };
+  private readonly hubCache = new Map<string, { timestamp: number; data: NormalizedCompetitionHub }>();
 
   constructor(options?: { circuitBreaker?: CircuitBreaker; baseUrl?: string }) {
     this.baseUrl = options?.baseUrl ?? 'https://www.fotmob.com/api/data';
@@ -199,7 +204,345 @@ export class FotmobProvider implements IDataProvider {
     if (!parsed.success) {
       throw new ProviderSchemaError(`Fotmob match-details schema validation failed: ${parsed.error.message}`);
     }
-    return this.normalizeMatchDetails(parsed.data);
+    const details = this.normalizeMatchDetails(parsed.data);
+
+    // Enrich with standings and season leaders from competition hub
+    const compId = parsed.data.general.parentLeagueId || parsed.data.general.leagueId;
+    if (compId) {
+      try {
+        const hub = await this.getCompetitionHub(compId);
+        if (hub) {
+          const homeId = String(details.homeTeam.providerId);
+          const awayId = String(details.awayTeam.providerId);
+          details.standings = (hub.standings || []).map((s) => ({
+            ...s,
+            isHomeTeam: String(s.teamId) === homeId,
+            isAwayTeam: String(s.teamId) === awayId,
+          }));
+          details.topScorers = hub.topScorers || [];
+          details.topAssists = hub.topAssists || [];
+        }
+      } catch {
+        // Non-blocking fallback
+      }
+    }
+
+    return details;
+  }
+
+  public static resolveFotmobLeagueId(
+    competitionId: string | number,
+    competitionName?: string | null,
+    logoUrl?: string | null
+  ): number | null {
+    // 0. Extract numeric ID from logoUrl if present (e.g. ".../leaguelogo/(dark|light)/73.png" or ".../73.png")
+    if (logoUrl) {
+      const logoMatch = String(logoUrl).match(/\/leaguelogo\/(?:dark|light)\/(\d+)\.png/i) ||
+                        String(logoUrl).match(/\/(\d+)\.png/i);
+      if (logoMatch) {
+        const num = parseInt(logoMatch[1], 10);
+        if (!isNaN(num) && num > 0) return num;
+      }
+    }
+
+    const rawId = String(competitionId ?? '').trim();
+    if (!rawId && !competitionName) return null;
+
+    const lower = rawId.toLowerCase();
+
+    // 1. Direct match in COMPETITION_SLUG_TO_FOTMOB_ID
+    if (COMPETITION_SLUG_TO_FOTMOB_ID[lower]) {
+      return COMPETITION_SLUG_TO_FOTMOB_ID[lower];
+    }
+    const strippedPrefix = lower.replace(/^(?:ft_comp_|comp_|fotmob_)/, '');
+    if (COMPETITION_SLUG_TO_FOTMOB_ID[strippedPrefix]) {
+      return COMPETITION_SLUG_TO_FOTMOB_ID[strippedPrefix];
+    }
+
+    // 2. Direct numeric ID check (e.g. "47", "ft_comp_47", "fotmob_47", "comp_47")
+    const directMatch = lower.match(/^(?:fotmob_|ft_comp_|comp_)?(\d+)$/);
+    if (directMatch) {
+      const num = parseInt(directMatch[1], 10);
+      if (!isNaN(num) && num > 0) {
+        return FOTMOB_COMPETITION_MAP[num] ?? num;
+      }
+    }
+
+    // 2b. Check if rawId has URL format containing digits
+    const urlMatch = rawId.match(/\/leaguelogo\/(?:dark|light)\/(\d+)\.png/i) || rawId.match(/\/(\d+)\.png/i);
+    if (urlMatch) {
+      const num = parseInt(urlMatch[1], 10);
+      if (!isNaN(num) && num > 0) return num;
+    }
+
+    // 3. Check CANONICAL_COMPETITION_MAP (ULIDs)
+    for (const [apiId, canId] of Object.entries(CANONICAL_COMPETITION_MAP)) {
+      if (canId.toLowerCase() === lower) {
+        const mapped = FOTMOB_COMPETITION_MAP[Number(apiId)];
+        if (mapped) return mapped;
+      }
+    }
+
+    // 4. Check name if passed or embedded in ID
+    const nameLower = (competitionName ?? '').toLowerCase().trim();
+    if (nameLower) {
+      if (COMPETITION_SLUG_TO_FOTMOB_ID[nameLower]) {
+        return COMPETITION_SLUG_TO_FOTMOB_ID[nameLower];
+      }
+      const nameSlug = nameLower.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      if (COMPETITION_SLUG_TO_FOTMOB_ID[nameSlug]) {
+        return COMPETITION_SLUG_TO_FOTMOB_ID[nameSlug];
+      }
+    }
+
+    const combined = `${lower} ${nameLower}`;
+    if (combined.includes('conference') || combined.includes('uecl')) return 10216;
+    if (combined.includes('europa') || combined.includes('uel')) return 73;
+    if (combined.includes('champions') || combined.includes('ucl')) return 42;
+    if (combined.includes('premier') && combined.includes('league') && !combined.includes('egy')) return 47;
+    if (combined.includes('egypt')) return 525;
+    if (combined.includes('laliga') || combined.includes('la_liga') || combined.includes('la liga')) return 87;
+    if (combined.includes('serie_a') || combined.includes('serie a')) return 55;
+    if (combined.includes('bundesliga')) return 54;
+    if (combined.includes('ligue_1') || combined.includes('ligue 1')) return 53;
+    if (combined.includes('saudi') || combined.includes('spl')) return 536;
+    if (combined.includes('mls') || combined.includes('major_league') || combined.includes('major league')) return 130;
+    if (combined.includes('eredivisie')) return 57;
+    if (combined.includes('portugal') || combined.includes('primeira')) return 61;
+    if (combined.includes('brasileir') || combined.includes('brazil')) return 268;
+    if (combined.includes('championship')) return 48;
+    if (combined.includes('fa_cup') || combined.includes('fa cup')) return 138;
+    if (combined.includes('copa_del_rey') || combined.includes('copa del rey')) return 137;
+    if (combined.includes('coppa_italia') || combined.includes('coppa italia')) return 141;
+    if (combined.includes('dfb_pokal') || combined.includes('dfb pokal')) return 209;
+    if (combined.includes('coupe_de_france') || combined.includes('coupe de france')) return 142;
+
+    // 5. Fallback extracting trailing digits
+    const trailingDigits = rawId.replace(/\D/g, '');
+    if (trailingDigits.length > 0) {
+      const num = parseInt(trailingDigits, 10);
+      if (!isNaN(num) && num > 0) return num;
+    }
+
+    return null;
+  }
+
+  public async getCompetitionHub(
+    competitionId: string | number,
+    competitionName?: string | null,
+    logoUrl?: string | null
+  ): Promise<NormalizedCompetitionHub | null> {
+    const rawId = String(competitionId ?? '').trim();
+    if (!rawId && !competitionName && !logoUrl) return null;
+
+    const fotmobLeagueId = FotmobProvider.resolveFotmobLeagueId(rawId, competitionName, logoUrl);
+    if (!fotmobLeagueId) return null;
+
+    // Check 15-minute in-memory cache
+    const cached = this.hubCache.get(String(fotmobLeagueId)) || (rawId ? this.hubCache.get(rawId) : undefined);
+    if (cached && Date.now() - cached.timestamp < 15 * 60 * 1000) {
+      return cached.data;
+    }
+
+    try {
+      const leagueData: any = await this.fetchJson(`/leagues?id=${fotmobLeagueId}`);
+      if (!leagueData) return null;
+
+      // Extract standings table
+      const tableData: any[] =
+        leagueData.table?.[0]?.data?.table?.all ||
+        (Array.isArray(leagueData.table?.[0]?.data?.tables)
+          ? leagueData.table[0].data.tables.flatMap((t: any) => t.table?.all || t.all || [])
+          : []);
+
+      const teamFormMap: Record<string, string> = {};
+      const rawTeamForm = leagueData.table?.[0]?.teamForm || {};
+      for (const [tId, matches] of Object.entries(rawTeamForm)) {
+        if (Array.isArray(matches)) {
+          teamFormMap[tId] = matches
+            .map((m: any) => m.resultString || (m.result === 1 ? 'W' : m.result === -1 ? 'L' : 'D'))
+            .join('');
+        }
+      }
+
+      const standings: NormalizedStandingRow[] = tableData.map((row: any, idx: number) => {
+        let gf = 0;
+        let ga = 0;
+        if (row.scoresStr) {
+          const parts = String(row.scoresStr).split(/[-–:]/);
+          if (parts.length >= 2) {
+            gf = parseInt(parts[0], 10) || 0;
+            ga = parseInt(parts[1], 10) || 0;
+          }
+        } else {
+          gf = Number(row.goalsFor ?? row.gf ?? 0);
+          ga = Number(row.goalsAgainst ?? row.ga ?? 0);
+        }
+
+        const teamId = String(row.id || '');
+        return {
+          rank: Number(row.idx ?? idx + 1),
+          teamId,
+          teamName: row.name || 'Unknown Team',
+          teamShortName: row.shortName || FotmobProvider.deriveTla(row.name || ''),
+          teamLogoUrl: `https://images.fotmob.com/image_resources/logo/teamlogo/${teamId}.png`,
+          played: Number(row.played ?? 0),
+          wins: Number(row.wins ?? 0),
+          draws: Number(row.draws ?? 0),
+          losses: Number(row.losses ?? 0),
+          goalsFor: gf,
+          goalsAgainst: ga,
+          goalDiff: Number(row.goalConDiff ?? (gf - ga)),
+          points: Number(row.pts ?? 0),
+          form: teamFormMap[teamId] || null,
+          qualificationColor: row.qualColor ?? null,
+        };
+      });
+
+      // Extract Top Scorers & Top Assists
+      const playerStats: any[] = leagueData.stats?.players || [];
+      const goalsStat = playerStats.find(
+        (p) => p.name === 'goals' || (p.header && p.header.toLowerCase().includes('scorer'))
+      );
+      const assistsStat = playerStats.find(
+        (p) => p.name === 'goal_assist' || (p.header && p.header.toLowerCase().includes('assist'))
+      );
+
+      let topScorers: NormalizedPlayerStatLeader[] = [];
+      if (goalsStat?.fetchAllUrl) {
+        try {
+          const statData: any = await this.circuitBreaker.execute(async () => {
+            const ctrl = new AbortController();
+            const tm = setTimeout(() => ctrl.abort(), 3500);
+            try {
+              const r = await fetch(goalsStat.fetchAllUrl, { headers: this.headers, signal: ctrl.signal });
+              return r.ok ? await r.json() : null;
+            } finally {
+              clearTimeout(tm);
+            }
+          });
+          const list = statData?.TopLists?.[0]?.StatList;
+          if (Array.isArray(list) && list.length > 0) {
+            topScorers = list.slice(0, 15).map((item: any, idx: number) => ({
+              rank: Number(item.Rank ?? idx + 1),
+              playerId: String(item.ParticiantId || item.ParticipantId || item.id || idx),
+              playerName: item.ParticipantName || item.name || 'Unknown Player',
+              teamId: String(item.TeamId || item.teamId || ''),
+              teamName: item.TeamName || item.teamName || '',
+              teamLogoUrl: item.TeamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${item.TeamId}.png` : null,
+              goals: Number(item.StatValue ?? 0),
+              penalties: item.SubStatValue != null ? Number(item.SubStatValue) : undefined,
+              matchesPlayed: item.MatchesPlayed != null ? Number(item.MatchesPlayed) : undefined,
+            }));
+          }
+        } catch {
+          // ignore, fall back to overview/topThree
+        }
+      }
+
+      // Fallback 1: leagueData.overview?.topPlayers?.byGoals?.players
+      if (topScorers.length === 0 && Array.isArray(leagueData.overview?.topPlayers?.byGoals?.players)) {
+        topScorers = leagueData.overview.topPlayers.byGoals.players.slice(0, 15).map((item: any, idx: number) => ({
+          rank: Number(item.rank ?? idx + 1),
+          playerId: String(item.id || idx),
+          playerName: item.name || 'Unknown Player',
+          teamId: String(item.teamId || ''),
+          teamName: item.teamName || '',
+          teamLogoUrl: item.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${item.teamId}.png` : null,
+          goals: Number(item.goals ?? item.value ?? item.stat?.value ?? 0),
+        }));
+      }
+
+      // Fallback 2: goalsStat.topThree
+      if (topScorers.length === 0 && Array.isArray(goalsStat?.topThree)) {
+        topScorers = goalsStat.topThree.map((item: any, idx: number) => ({
+          rank: Number(item.rank ?? idx + 1),
+          playerId: String(item.id || idx),
+          playerName: item.name || 'Unknown Player',
+          teamId: String(item.teamId || ''),
+          teamName: item.teamName || '',
+          teamLogoUrl: item.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${item.teamId}.png` : null,
+          goals: Number(item.value ?? item.stat?.value ?? 0),
+        }));
+      }
+
+      let topAssists: NormalizedPlayerStatLeader[] = [];
+      if (assistsStat?.fetchAllUrl) {
+        try {
+          const statData: any = await this.circuitBreaker.execute(async () => {
+            const ctrl = new AbortController();
+            const tm = setTimeout(() => ctrl.abort(), 3500);
+            try {
+              const r = await fetch(assistsStat.fetchAllUrl, { headers: this.headers, signal: ctrl.signal });
+              return r.ok ? await r.json() : null;
+            } finally {
+              clearTimeout(tm);
+            }
+          });
+          const list = statData?.TopLists?.[0]?.StatList;
+          if (Array.isArray(list) && list.length > 0) {
+            topAssists = list.slice(0, 15).map((item: any, idx: number) => ({
+              rank: Number(item.Rank ?? idx + 1),
+              playerId: String(item.ParticiantId || item.ParticipantId || item.id || idx),
+              playerName: item.ParticipantName || item.name || 'Unknown Player',
+              teamId: String(item.TeamId || item.teamId || ''),
+              teamName: item.TeamName || item.teamName || '',
+              teamLogoUrl: item.TeamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${item.TeamId}.png` : null,
+              assists: Number(item.StatValue ?? 0),
+              matchesPlayed: item.MatchesPlayed != null ? Number(item.MatchesPlayed) : undefined,
+            }));
+          }
+        } catch {
+          // ignore, fall back to overview/topThree
+        }
+      }
+
+      // Fallback 1: leagueData.overview?.topPlayers?.byAssists?.players
+      if (topAssists.length === 0 && Array.isArray(leagueData.overview?.topPlayers?.byAssists?.players)) {
+        topAssists = leagueData.overview.topPlayers.byAssists.players.slice(0, 15).map((item: any, idx: number) => ({
+          rank: Number(item.rank ?? idx + 1),
+          playerId: String(item.id || idx),
+          playerName: item.name || 'Unknown Player',
+          teamId: String(item.teamId || ''),
+          teamName: item.teamName || '',
+          teamLogoUrl: item.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${item.teamId}.png` : null,
+          assists: Number(item.assists ?? item.value ?? item.stat?.value ?? 0),
+        }));
+      }
+
+      // Fallback 2: assistsStat.topThree
+      if (topAssists.length === 0 && Array.isArray(assistsStat?.topThree)) {
+        topAssists = assistsStat.topThree.map((item: any, idx: number) => ({
+          rank: Number(item.rank ?? idx + 1),
+          playerId: String(item.id || idx),
+          playerName: item.name || 'Unknown Player',
+          teamId: String(item.teamId || ''),
+          teamName: item.teamName || '',
+          teamLogoUrl: item.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${item.teamId}.png` : null,
+          assists: Number(item.value ?? item.stat?.value ?? 0),
+        }));
+      }
+
+      const compName = leagueData.details?.name || (competitionName && !competitionName.startsWith('fotmob_') && !competitionName.startsWith('comp_') ? competitionName : null) || leagueData.details?.selectedSeason || 'Competition';
+      const hubResult: NormalizedCompetitionHub = {
+        competitionId: rawId,
+        competitionName: compName,
+        competitionLogoUrl: `https://images.fotmob.com/image_resources/logo/leaguelogo/dark/${fotmobLeagueId}.png`,
+        countryCode: leagueData.details?.country || leagueData.table?.[0]?.data?.ccode || null,
+        season: leagueData.details?.selectedSeason || null,
+        standings,
+        topScorers,
+        topAssists,
+      };
+
+      // Store in 15-minute cache under both rawId and String(fotmobLeagueId)
+      this.hubCache.set(rawId, { timestamp: Date.now(), data: hubResult });
+      this.hubCache.set(String(fotmobLeagueId), { timestamp: Date.now(), data: hubResult });
+
+      return hubResult;
+    } catch {
+      return null;
+    }
   }
 
   private async fetchJson(pathOrUrl: string): Promise<unknown> {

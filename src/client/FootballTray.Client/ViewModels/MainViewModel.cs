@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 using FootballTray.Core;
 using FootballTray.Core.Dto;
 using FootballTray.Client.Services;
@@ -30,6 +31,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly Func<TimeSpan, CancellationToken, Task> _delayFunc;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly object _checkLock = new();
+    private readonly FootballApiClient _apiClient;
+    private readonly bool _disposeApiClient;
+
+    private bool _isMatchesMode = true;
+    private int _standingsSubTabIndex;
+    private HubCompetitionItemViewModel? _selectedHubCompetition;
+    private string? _selectedHubCompetitionId;
+    private bool _isTransientJumpActive;
+    private readonly List<CompetitionSummaryDto> _followedTeamCompetitions = new();
+    private bool _isLoadingHub;
+    private string? _hubErrorMessage;
+    private string? _currentCompetitionName;
+    private string? _currentCompetitionLogoUrl;
+    private string? _currentSeasonDisplay;
 
     private MatchFilterType _activeFilter = MatchFilterType.All;
     private string _connectionStatusText = "Connecting...";
@@ -100,6 +115,241 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
+    public ObservableCollection<HubCompetitionItemViewModel> HubCompetitions { get; } = new();
+    public ObservableCollection<StandingRowItemViewModel> CurrentStandings { get; } = new();
+    public ObservableCollection<PlayerStatLeaderItemViewModel> CurrentTopScorers { get; } = new();
+    public ObservableCollection<PlayerStatLeaderItemViewModel> CurrentTopAssists { get; } = new();
+
+    public bool IsMatchesMode
+    {
+        get => _isMatchesMode;
+        set
+        {
+            if (SetProperty(ref _isMatchesMode, value))
+            {
+                OnPropertyChanged(nameof(IsStandingsMode));
+                OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+                OnPropertyChanged(nameof(MatchesTabForegroundHex));
+                OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+                OnPropertyChanged(nameof(StandingsTabForegroundHex));
+                if (!_isMatchesMode && !_isTransientJumpActive && _selectedHubCompetition == null && HubCompetitions.Count > 0)
+                {
+                    var match = !string.IsNullOrEmpty(_selectedHubCompetitionId)
+                        ? HubCompetitions.FirstOrDefault(c =>
+                            c.Id.Equals(_selectedHubCompetitionId, StringComparison.OrdinalIgnoreCase) ||
+                            (int.TryParse(ExtractNumericDigits(_selectedHubCompetitionId), out int sNum) && int.TryParse(ExtractNumericDigits(c.Id), out int cNum) && sNum == cNum))
+                        : null;
+                    SelectedHubCompetition = match ?? HubCompetitions[0];
+                }
+            }
+        }
+    }
+
+    public bool IsStandingsMode => !_isMatchesMode;
+
+    public string MatchesTabBackgroundHex => _isMatchesMode ? "#38BDF8" : "Transparent";
+    public string MatchesTabForegroundHex => _isMatchesMode ? "#0F172A" : "#94A3B8";
+    public string StandingsTabBackgroundHex => !_isMatchesMode ? "#38BDF8" : "Transparent";
+    public string StandingsTabForegroundHex => !_isMatchesMode ? "#0F172A" : "#94A3B8";
+
+    public int StandingsSubTabIndex
+    {
+        get => _standingsSubTabIndex;
+        set
+        {
+            if (SetProperty(ref _standingsSubTabIndex, value))
+            {
+                OnPropertyChanged(nameof(IsLeagueTableSelected));
+                OnPropertyChanged(nameof(IsTopScorersSelected));
+                OnPropertyChanged(nameof(IsTopAssistsSelected));
+                OnPropertyChanged(nameof(HubTableSubTabVisibility));
+                OnPropertyChanged(nameof(HubTopScorersSubTabVisibility));
+                OnPropertyChanged(nameof(HubTopAssistsSubTabVisibility));
+                OnPropertyChanged(nameof(LeagueTableTabBackgroundHex));
+                OnPropertyChanged(nameof(LeagueTableTabForegroundHex));
+                OnPropertyChanged(nameof(TopScorersTabBackgroundHex));
+                OnPropertyChanged(nameof(TopScorersTabForegroundHex));
+                OnPropertyChanged(nameof(TopAssistsTabBackgroundHex));
+                OnPropertyChanged(nameof(TopAssistsTabForegroundHex));
+            }
+        }
+    }
+
+    public bool IsLeagueTableSelected => _standingsSubTabIndex == 0;
+    public bool IsTopScorersSelected => _standingsSubTabIndex == 1;
+    public bool IsTopAssistsSelected => _standingsSubTabIndex == 2;
+
+    public string LeagueTableTabBackgroundHex => _standingsSubTabIndex == 0 ? "#2538BDF8" : "Transparent";
+    public string LeagueTableTabForegroundHex => _standingsSubTabIndex == 0 ? "#38BDF8" : "#94A3B8";
+    public string TopScorersTabBackgroundHex => _standingsSubTabIndex == 1 ? "#2538BDF8" : "Transparent";
+    public string TopScorersTabForegroundHex => _standingsSubTabIndex == 1 ? "#38BDF8" : "#94A3B8";
+    public string TopAssistsTabBackgroundHex => _standingsSubTabIndex == 2 ? "#2538BDF8" : "Transparent";
+    public string TopAssistsTabForegroundHex => _standingsSubTabIndex == 2 ? "#38BDF8" : "#94A3B8";
+
+    public HubCompetitionItemViewModel? SelectedHubCompetition
+    {
+        get => _selectedHubCompetition;
+        set
+        {
+            if (SetProperty(ref _selectedHubCompetition, value))
+            {
+                if (value != null)
+                {
+                    _isTransientJumpActive = false;
+                    _selectedHubCompetitionId = value.Id;
+                }
+                foreach (var comp in HubCompetitions)
+                {
+                    comp.IsSelected = comp == value;
+                }
+                if (value != null)
+                {
+                    _ = LoadCompetitionHubAsync(value.Id, value.Name, value.LogoUrl);
+                }
+            }
+        }
+    }
+
+    public void SelectHubCompetition(HubCompetitionItemViewModel? comp)
+    {
+        _isTransientJumpActive = false;
+        SelectedHubCompetition = comp;
+    }
+
+    public bool IsLoadingHub
+    {
+        get => _isLoadingHub;
+        set
+        {
+            if (_isLoadingHub != value)
+            {
+                _isLoadingHub = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsHubLoading));
+                OnPropertyChanged(nameof(HubLoadingVisibility));
+                OnPropertyChanged(nameof(HubContentVisibility));
+                OnPropertyChanged(nameof(HubErrorVisibility));
+                OnPropertyChanged(nameof(HubTableSubTabVisibility));
+                OnPropertyChanged(nameof(HubTopScorersSubTabVisibility));
+                OnPropertyChanged(nameof(HubTopAssistsSubTabVisibility));
+            }
+        }
+    }
+
+    public bool IsHubLoading
+    {
+        get => _isLoadingHub;
+        set => IsLoadingHub = value;
+    }
+
+    public Visibility HubLoadingVisibility => IsLoadingHub ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubErrorVisibility => (HasHubError && !IsLoadingHub) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubContentVisibility => (!IsLoadingHub && !HasHubError) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubTableSubTabVisibility => (!IsLoadingHub && !HasHubError && IsLeagueTableSelected) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubTopScorersSubTabVisibility => (!IsLoadingHub && !HasHubError && IsTopScorersSelected) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubTopAssistsSubTabVisibility => (!IsLoadingHub && !HasHubError && IsTopAssistsSelected) ? Visibility.Visible : Visibility.Collapsed;
+
+    public string? HubErrorMessage
+    {
+        get => _hubErrorMessage;
+        set
+        {
+            if (SetProperty(ref _hubErrorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasHubError));
+                OnPropertyChanged(nameof(HubErrorVisibility));
+                OnPropertyChanged(nameof(HubContentVisibility));
+                OnPropertyChanged(nameof(HubTableSubTabVisibility));
+                OnPropertyChanged(nameof(HubTopScorersSubTabVisibility));
+                OnPropertyChanged(nameof(HubTopAssistsSubTabVisibility));
+            }
+        }
+    }
+
+    public bool HasHubError => !string.IsNullOrEmpty(_hubErrorMessage);
+
+    public string? CurrentCompetitionName
+    {
+        get => _currentCompetitionName;
+        private set => SetProperty(ref _currentCompetitionName, value);
+    }
+
+    public string? CurrentCompetitionLogoUrl
+    {
+        get => _currentCompetitionLogoUrl;
+        private set
+        {
+            if (SetProperty(ref _currentCompetitionLogoUrl, value))
+            {
+                OnPropertyChanged(nameof(CurrentCompetitionLogoSource));
+                OnPropertyChanged(nameof(CurrentCompetitionHasLogo));
+                OnPropertyChanged(nameof(CurrentCompetitionLogoVisibility));
+                OnPropertyChanged(nameof(CurrentCompetitionFallbackVisibility));
+            }
+        }
+    }
+
+    public Microsoft.UI.Xaml.Media.ImageSource? CurrentCompetitionLogoSource
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_currentCompetitionLogoUrl)) return null;
+            if (Uri.TryCreate(_currentCompetitionLogoUrl, UriKind.Absolute, out var uri))
+            {
+                return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(uri);
+            }
+            return null;
+        }
+    }
+
+    public bool CurrentCompetitionHasLogo => !string.IsNullOrWhiteSpace(_currentCompetitionLogoUrl);
+    public Visibility CurrentCompetitionLogoVisibility => CurrentCompetitionHasLogo ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility CurrentCompetitionFallbackVisibility => CurrentCompetitionHasLogo ? Visibility.Collapsed : Visibility.Visible;
+
+    public string? CurrentSeasonDisplay
+    {
+        get => _currentSeasonDisplay;
+        private set => SetProperty(ref _currentSeasonDisplay, value);
+    }
+
+    public bool HasStandings => CurrentStandings.Count > 0;
+    public bool HasTopScorers => CurrentTopScorers.Count > 0;
+    public bool HasTopAssists => CurrentTopAssists.Count > 0;
+
+    public void SwitchToMatchesMode() => IsMatchesMode = true;
+    public void SwitchToStandingsMode()
+    {
+        _isTransientJumpActive = false;
+        if (_isMatchesMode)
+        {
+            IsMatchesMode = false;
+            if (SelectedHubCompetition == null)
+            {
+                if (HubCompetitions.Count > 0)
+                {
+                    SelectedHubCompetition = HubCompetitions[0];
+                }
+            }
+            else
+            {
+                if (CurrentStandings.Count == 0 && !IsLoadingHub)
+                {
+                    _ = LoadCompetitionHubAsync(SelectedHubCompetition.Id, SelectedHubCompetition.Name, SelectedHubCompetition.LogoUrl);
+                }
+            }
+        }
+        else
+        {
+            if (SelectedHubCompetition == null && HubCompetitions.Count > 0)
+            {
+                SelectedHubCompetition = HubCompetitions[0];
+            }
+            else if (SelectedHubCompetition != null)
+            {
+                _ = LoadCompetitionHubAsync(SelectedHubCompetition.Id, SelectedHubCompetition.Name, SelectedHubCompetition.LogoUrl);
+            }
+        }
+    }
 
     public Diagnostics.IDiagnosticsService DiagnosticsService => _diagnosticsService;
     public IPreferencesService PreferencesService => _preferencesService;
@@ -627,9 +877,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _updateAcquisitionService = updateAcquisitionService;
         _updateInstallationService = updateInstallationService;
         _appShutdownHandler = appShutdownHandler;
+        _apiClient = apiClient ?? new FootballApiClient();
+        _disposeApiClient = apiClient == null;
 
         SearchCatalog = new SearchCatalogViewModel(
-            apiClient ?? new FootballApiClient(),
+            _apiClient,
             _preferencesService,
             ImageCacheService.Instance,
             _dispatcherQueue,
@@ -684,6 +936,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             PopulatePreferenceCollections(prefs);
             Settings.RefreshFollowedLists();
             await SearchCatalog.InitializeAsync();
+            RebuildHubCompetitions(prefs);
 
             if (_syncService != null)
             {
@@ -731,10 +984,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         foreach (var comp in dedupedComps)
         {
+            if (string.IsNullOrWhiteSpace(comp.LogoUrl))
+            {
+                comp.LogoUrl = ResolveCompetitionLogoUrl(comp.Id, comp.Name, null);
+            }
+
             var existing = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(comp.Id, StringComparison.OrdinalIgnoreCase));
             if (existing == null)
             {
                 AvailableCompetitions.Add(FollowedCompetitionItemViewModel.FromDomain(comp, true));
+            }
+            else if (string.IsNullOrWhiteSpace(existing.LogoUrl) || existing.LogoUrl != comp.LogoUrl)
+            {
+                existing.LogoUrl = comp.LogoUrl;
             }
         }
 
@@ -771,6 +1033,586 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 NotificationCategories.Add(NotificationCategoryItemViewModel.Create(type, isEnabled));
             }
+        }
+
+        RebuildHubCompetitions(prefs);
+    }
+
+    public void RebuildHubCompetitions(UserPreferences? prefs = null)
+    {
+        RunOnUiSafe(() =>
+        {
+            prefs ??= _preferencesService.GetPreferences();
+            var list = new List<HubCompetitionItemViewModel>();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // 1. Followed Competitions
+            if (prefs?.FollowedCompetitions != null)
+            {
+                foreach (var fc in prefs.FollowedCompetitions)
+                {
+                    if (!string.IsNullOrWhiteSpace(fc.Id))
+                    {
+                        var resolvedLogo = ResolveCompetitionLogoUrl(fc.Id, fc.Name, fc.LogoUrl);
+                        var resolvedName = ResolveCompetitionFriendlyName(fc.Id, fc.Name);
+
+                        if (seenIds.Add(fc.Id) && seenNames.Add(resolvedName))
+                        {
+                            list.Add(new HubCompetitionItemViewModel
+                            {
+                                Id = fc.Id,
+                                Name = resolvedName,
+                                Country = fc.Country,
+                                LogoUrl = resolvedLogo,
+                                IsFollowed = true,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // 2. Followed-Team Competitions (from backend Tray payload across all dates)
+            foreach (var ftc in _followedTeamCompetitions)
+            {
+                if (!string.IsNullOrWhiteSpace(ftc.Id))
+                {
+                    var resolvedLogo = ResolveCompetitionLogoUrl(ftc.Id, ftc.Name, ftc.LogoUrl);
+                    var resolvedName = ResolveCompetitionFriendlyName(ftc.Id, ftc.Name);
+
+                    if (seenIds.Add(ftc.Id) && seenNames.Add(resolvedName))
+                    {
+                        list.Add(new HubCompetitionItemViewModel
+                        {
+                            Id = ftc.Id,
+                            Name = resolvedName,
+                            Country = ftc.Country,
+                            LogoUrl = resolvedLogo,
+                            IsFollowed = true,
+                        });
+                    }
+                }
+            }
+
+            // 3. The 6 Default Leagues (always ensure top leagues are available with crisp FotMob logos)
+            var defaultTopLeagues = new[]
+            {
+                new { Id = "87", Name = "LaLiga", Country = "Spain", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/87.png" },
+                new { Id = "47", Name = "Premier League", Country = "England", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/47.png" },
+                new { Id = "42", Name = "UEFA Champions League", Country = "Europe", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/42.png" },
+                new { Id = "55", Name = "Serie A", Country = "Italy", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/55.png" },
+                new { Id = "54", Name = "Bundesliga", Country = "Germany", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/54.png" },
+                new { Id = "53", Name = "Ligue 1", Country = "France", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/53.png" },
+            };
+
+            foreach (var dl in defaultTopLeagues)
+            {
+                if (seenIds.Add(dl.Id) && seenNames.Add(dl.Name))
+                {
+                    list.Add(new HubCompetitionItemViewModel
+                    {
+                        Id = dl.Id,
+                        Name = dl.Name,
+                        Country = dl.Country,
+                        LogoUrl = dl.LogoUrl,
+                        IsFollowed = false,
+                    });
+                }
+            }
+
+            var currentSelectedId = _selectedHubCompetitionId ?? _selectedHubCompetition?.Id;
+            HubCompetitions.Clear();
+            foreach (var item in list)
+            {
+                HubCompetitions.Add(item);
+            }
+
+            if (_isTransientJumpActive)
+            {
+                var match = !string.IsNullOrEmpty(_selectedHubCompetitionId)
+                    ? FindMatchingHubCompetition(_selectedHubCompetitionId, _currentCompetitionName, _currentCompetitionLogoUrl)
+                    : null;
+                if (match != null)
+                {
+                    _isTransientJumpActive = false;
+                    _selectedHubCompetitionId = match.Id;
+                    SelectedHubCompetition = match;
+                }
+                else
+                {
+                    _selectedHubCompetition = null;
+                    foreach (var c in HubCompetitions)
+                    {
+                        c.IsSelected = false;
+                    }
+                }
+            }
+            else if (_selectedHubCompetition != null && !string.IsNullOrEmpty(currentSelectedId))
+            {
+                var match = FindMatchingHubCompetition(currentSelectedId, _selectedHubCompetition.Name, _selectedHubCompetition.LogoUrl);
+                if (match != null)
+                {
+                    _selectedHubCompetitionId = match.Id;
+                    SelectedHubCompetition = match;
+                }
+                else
+                {
+                    SelectedHubCompetition = null;
+                    _selectedHubCompetitionId = null;
+                    foreach (var c in HubCompetitions)
+                    {
+                        c.IsSelected = false;
+                    }
+                }
+            }
+            else
+            {
+                foreach (var c in HubCompetitions)
+                {
+                    c.IsSelected = false;
+                }
+            }
+        }, nameof(RebuildHubCompetitions));
+    }
+
+    public static string? ExtractFotmobLeagueIdFromLogoUrl(string? logoUrl)
+    {
+        if (string.IsNullOrWhiteSpace(logoUrl)) return null;
+        var match = System.Text.RegularExpressions.Regex.Match(logoUrl, @"/leaguelogo/(?:dark|light)/(\d+)\.png", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (match.Success) return match.Groups[1].Value;
+        var genericMatch = System.Text.RegularExpressions.Regex.Match(logoUrl, @"/(\d+)\.png", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (genericMatch.Success) return genericMatch.Groups[1].Value;
+        return null;
+    }
+
+    private HubCompetitionItemViewModel? FindMatchingHubCompetition(string? id, string? name, string? logoUrl)
+    {
+        if (HubCompetitions.Count == 0) return null;
+
+        var numericFromLogo = ExtractFotmobLeagueIdFromLogoUrl(logoUrl);
+        var numericFromId = ExtractNumericDigits(id);
+
+        return HubCompetitions.FirstOrDefault(c =>
+        {
+            if (!string.IsNullOrWhiteSpace(id) && c.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var normTarget = NormalizeCompetitionSearchKey(name);
+                var normChip = NormalizeCompetitionSearchKey(c.Name);
+                if (normTarget.Equals(normChip, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            var chipNumericLogo = ExtractFotmobLeagueIdFromLogoUrl(c.LogoUrl);
+            var chipNumericId = ExtractNumericDigits(c.Id);
+
+            if (!string.IsNullOrEmpty(numericFromLogo))
+            {
+                if (numericFromLogo == chipNumericId || numericFromLogo == chipNumericLogo)
+                    return true;
+            }
+            if (!string.IsNullOrEmpty(numericFromId) && int.TryParse(numericFromId, out int targetNum))
+            {
+                if ((int.TryParse(chipNumericId, out int cNum) && targetNum == cNum) ||
+                    (int.TryParse(chipNumericLogo, out int cLogoNum) && targetNum == cLogoNum))
+                    return true;
+            }
+
+            return false;
+        });
+    }
+
+    public static string NormalizeCompetitionSearchKey(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        foreach (char c in name)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                sb.Append(char.ToLowerInvariant(c));
+            }
+        }
+        return sb.ToString();
+    }
+
+    public static string ExtractNumericDigits(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return string.Empty;
+        var match = System.Text.RegularExpressions.Regex.Match(id, @"\d+");
+        return match.Success ? match.Value : string.Empty;
+    }
+
+    public static string? ResolveCompetitionLogoUrl(string id, string? name, string? existingLogoUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(existingLogoUrl) &&
+            !existingLogoUrl.Contains("placeholder", StringComparison.OrdinalIgnoreCase) &&
+            !existingLogoUrl.EndsWith("/comp.png", StringComparison.OrdinalIgnoreCase))
+        {
+            return existingLogoUrl;
+        }
+
+        var digits = ExtractNumericDigits(id);
+        if (!string.IsNullOrEmpty(digits))
+        {
+            return $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{digits}.png";
+        }
+
+        int? fotmobId = ResolveFotmobLeagueId(id, name);
+        if (fotmobId.HasValue && fotmobId.Value > 0)
+        {
+            return $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{fotmobId.Value}.png";
+        }
+
+        return existingLogoUrl;
+    }
+
+    public string ResolveCompetitionFriendlyName(string id, string? name)
+    {
+        var scheduleGroup = CompetitionGroups.FirstOrDefault(g =>
+            string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(g.CompetitionId, id, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(g.CompetitionKey, id, StringComparison.OrdinalIgnoreCase) ||
+            (int.TryParse(ExtractNumericDigits(id), out int idNum) && int.TryParse(ExtractNumericDigits(g.CompetitionId), out int gNum) && idNum == gNum));
+
+        if (scheduleGroup != null && !string.IsNullOrWhiteSpace(scheduleGroup.Name))
+        {
+            return scheduleGroup.Name;
+        }
+
+        return ResolveCompetitionName(id, name);
+    }
+
+    public static string ResolveCompetitionName(string id, string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(name) &&
+            !name.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) &&
+            !name.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase) &&
+            !name.StartsWith("comp_", StringComparison.OrdinalIgnoreCase) &&
+            !int.TryParse(name, out _))
+        {
+            return name;
+        }
+
+        var lower = (id ?? string.Empty).ToLowerInvariant();
+        var digits = ExtractNumericDigits(id);
+
+        if (digits == "10216" || lower.Contains("conference") || lower.Contains("uecl")) return "UEFA Conference League";
+        if (digits == "73" || lower.Contains("europa") || lower.Contains("uel")) return "UEFA Europa League";
+        if (digits == "47" || lower.Contains("premier_league") || lower.Contains("pl") || lower == CanonicalEntityIds.PremierLeague.ToLowerInvariant()) return "Premier League";
+        if (digits == "87" || lower.Contains("laliga") || lower.Contains("la_liga") || lower == CanonicalEntityIds.LaLiga.ToLowerInvariant()) return "LaLiga";
+        if (digits == "42" || lower.Contains("champions_league") || lower.Contains("ucl") || lower == CanonicalEntityIds.ChampionsLeague.ToLowerInvariant()) return "UEFA Champions League";
+        if (digits == "55" || lower.Contains("serie_a") || lower.Contains("serie a")) return "Serie A";
+        if (digits == "54" || lower.Contains("bundesliga")) return "Bundesliga";
+        if (digits == "53" || lower.Contains("ligue_1") || lower.Contains("ligue 1")) return "Ligue 1";
+        if (digits == "525" || lower.Contains("egypt") || lower == CanonicalEntityIds.EgyptianPremierLeague.ToLowerInvariant()) return "Egyptian Premier League";
+        if (digits == "536" || lower.Contains("saudi") || lower.Contains("spl")) return "Saudi Pro League";
+        if (digits == "130" || lower.Contains("mls")) return "Major League Soccer";
+        if (digits == "57" || lower.Contains("eredivisie")) return "Eredivisie";
+        if (digits == "61" || lower.Contains("primeira") || lower.Contains("portugal")) return "Liga Portugal";
+        if (digits == "48" || lower.Contains("championship")) return "Championship";
+        if (digits == "77" || lower.Contains("world_cup") || lower.Contains("world cup")) return "World Cup";
+        if (digits == "132" || lower.Contains("afcon") || lower.Contains("africa_cup")) return "Africa Cup of Nations";
+
+        return !string.IsNullOrWhiteSpace(name) ? name : "Competition";
+    }
+
+    public static int? ResolveFotmobLeagueId(string? id, string? name, string? logoUrl = null)
+    {
+        var logoDigits = ExtractFotmobLeagueIdFromLogoUrl(logoUrl);
+        if (int.TryParse(logoDigits, out int logoNum) && logoNum > 0)
+        {
+            return logoNum;
+        }
+
+        var digits = ExtractNumericDigits(id);
+        if (int.TryParse(digits, out int numeric) && numeric > 0)
+        {
+            return numeric;
+        }
+
+        var combined = $"{id} {name}".ToLowerInvariant();
+
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            var idLower = id.ToLowerInvariant();
+            if (idLower == CanonicalEntityIds.PremierLeague.ToLowerInvariant()) return 47;
+            if (idLower == CanonicalEntityIds.LaLiga.ToLowerInvariant()) return 87;
+            if (idLower == CanonicalEntityIds.EgyptianPremierLeague.ToLowerInvariant()) return 525;
+            if (idLower == CanonicalEntityIds.ChampionsLeague.ToLowerInvariant()) return 42;
+            if (idLower == CanonicalEntityIds.AfricaCupOfNations.ToLowerInvariant()) return 132;
+            if (idLower == CanonicalEntityIds.WorldCup.ToLowerInvariant()) return 77;
+        }
+
+        if (combined.Contains("conference") || combined.Contains("uecl")) return 10216;
+        if (combined.Contains("europa") || combined.Contains("uel")) return 73;
+        if (combined.Contains("premier") && combined.Contains("league") && !combined.Contains("egy")) return 47;
+        if (combined.Contains("laliga") || combined.Contains("la liga") || combined.Contains("la_liga")) return 87;
+        if (combined.Contains("champions") || combined.Contains("ucl")) return 42;
+        if (combined.Contains("serie a") || combined.Contains("serie_a")) return 55;
+        if (combined.Contains("bundesliga")) return 54;
+        if (combined.Contains("ligue 1") || combined.Contains("ligue_1")) return 53;
+        if (combined.Contains("egypt")) return 525;
+        if (combined.Contains("saudi") || combined.Contains("spl")) return 536;
+        if (combined.Contains("mls") || combined.Contains("major league")) return 130;
+        if (combined.Contains("eredivisie")) return 57;
+        if (combined.Contains("primeira") || combined.Contains("portugal")) return 61;
+        if (combined.Contains("championship")) return 48;
+        if (combined.Contains("world cup")) return 77;
+        if (combined.Contains("afcon") || combined.Contains("africa cup")) return 132;
+
+        return null;
+    }
+
+    private CancellationTokenSource? _hubLoadingCts;
+
+    public async Task LoadCompetitionHubAsync(string competitionId, string? targetName = null, string? targetLogoUrl = null)
+    {
+        if (string.IsNullOrWhiteSpace(competitionId)) return;
+
+        _hubLoadingCts?.Cancel();
+        _hubLoadingCts?.Dispose();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+        _hubLoadingCts = cts;
+
+        RunOnUiSafe(() =>
+        {
+            IsLoadingHub = true;
+            HubErrorMessage = null;
+        }, nameof(LoadCompetitionHubAsync));
+
+        try
+        {
+            // Extract numeric ID from logoUrl if available (e.g. /leaguelogo/dark/73.png -> 73) or resolve from name/id
+            string effectiveId = competitionId;
+            var logoDigits = ExtractFotmobLeagueIdFromLogoUrl(targetLogoUrl);
+            if (!string.IsNullOrEmpty(logoDigits))
+            {
+                effectiveId = logoDigits;
+            }
+            else
+            {
+                var resolvedId = ResolveFotmobLeagueId(competitionId, targetName, targetLogoUrl);
+                if (resolvedId.HasValue && resolvedId.Value > 0)
+                {
+                    effectiveId = resolvedId.Value.ToString();
+                }
+                else
+                {
+                    var idDigits = ExtractNumericDigits(competitionId);
+                    if (!string.IsNullOrEmpty(idDigits))
+                    {
+                        effectiveId = idDigits;
+                    }
+                }
+            }
+
+            var res = await _apiClient.GetCompetitionHubAsync(effectiveId, targetName, targetLogoUrl, cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            if (res.IsSuccess && res.Envelope?.Data != null)
+            {
+                var hub = res.Envelope.Data;
+                RunOnUiSafe(() =>
+                {
+                    if (cts.IsCancellationRequested) return;
+
+                    var resolvedName = !string.IsNullOrWhiteSpace(targetName) && !targetName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase) && !targetName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !targetName.StartsWith("comp_", StringComparison.OrdinalIgnoreCase)
+                        ? targetName
+                        : (!string.IsNullOrWhiteSpace(hub.CompetitionName) && hub.CompetitionName != "Competition" ? hub.CompetitionName : ResolveCompetitionFriendlyName(hub.CompetitionId, hub.CompetitionName));
+
+                    var resolvedLogo = ResolveCompetitionLogoUrl(hub.CompetitionId, resolvedName, !string.IsNullOrWhiteSpace(targetLogoUrl) ? targetLogoUrl : hub.CompetitionLogoUrl);
+
+                    CurrentCompetitionName = resolvedName;
+                    CurrentCompetitionLogoUrl = resolvedLogo;
+                    OnPropertyChanged(nameof(CurrentCompetitionName));
+                    OnPropertyChanged(nameof(CurrentCompetitionLogoUrl));
+                    CurrentSeasonDisplay = !string.IsNullOrEmpty(hub.Season) ? $"Season {hub.Season}" : "";
+
+                    CurrentStandings.Clear();
+                    var prefs = _preferencesService.GetPreferences();
+                    var followedTeamIds = prefs?.GetFollowedTeamIdSet() ?? new HashSet<string>();
+                    var followedNames = prefs?.FollowedTeams?.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var row in hub.Standings)
+                    {
+                        bool isFollowed = followedTeamIds.Contains(row.TeamId) || followedNames.Contains(row.TeamName) || (!string.IsNullOrEmpty(row.TeamShortName) && followedNames.Contains(row.TeamShortName));
+                        CurrentStandings.Add(new StandingRowItemViewModel(row, isFollowed));
+                    }
+
+                    CurrentTopScorers.Clear();
+                    foreach (var s in hub.TopScorers)
+                    {
+                        CurrentTopScorers.Add(new PlayerStatLeaderItemViewModel(s, isAssistLeader: false));
+                    }
+
+                    CurrentTopAssists.Clear();
+                    foreach (var a in hub.TopAssists)
+                    {
+                        CurrentTopAssists.Add(new PlayerStatLeaderItemViewModel(a, isAssistLeader: true));
+                    }
+
+                    OnPropertyChanged(nameof(HasStandings));
+                    OnPropertyChanged(nameof(HasTopScorers));
+                    OnPropertyChanged(nameof(HasTopAssists));
+                }, nameof(LoadCompetitionHubAsync));
+            }
+            else
+            {
+                if (cts.IsCancellationRequested) return;
+                var errMsg = res.ErrorMessage ?? "Failed to load competition data.";
+                Diagnostics.AppDiagnosticsLogger.LogError("MainViewModel", "LoadCompetitionHubFailed", $"Failed to load competition '{competitionId}': {errMsg}");
+                RunOnUiSafe(() =>
+                {
+                    if (!cts.IsCancellationRequested)
+                    {
+                        HubErrorMessage = errMsg;
+                    }
+                }, nameof(LoadCompetitionHubAsync));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on cancellation or disposal
+        }
+        catch (Exception ex)
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                Diagnostics.AppDiagnosticsLogger.LogError("MainViewModel", "LoadCompetitionHubException", $"Exception loading competition '{competitionId}': [{ex.GetType().Name}] {ex.Message}", ex);
+                RunOnUiSafe(() =>
+                {
+                    HubErrorMessage = $"Error loading competition data: {ex.Message}";
+                }, nameof(LoadCompetitionHubAsync));
+            }
+        }
+        finally
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                RunOnUiSafe(() =>
+                {
+                    IsLoadingHub = false;
+                }, nameof(LoadCompetitionHubAsync));
+            }
+        }
+    }
+
+    public void NavigateToCompetitionStandings(CompetitionGroupViewModel group)
+    {
+        if (group == null) return;
+
+        if (HubCompetitions.Count == 0)
+        {
+            RebuildHubCompetitions();
+        }
+
+        var match = FindMatchingHubCompetition(group.CompetitionId, group.CompetitionName, group.LogoUrl);
+        var resolvedLogo = ResolveCompetitionLogoUrl(group.CompetitionId, group.CompetitionName, group.LogoUrl);
+        var resolvedName = !string.IsNullOrWhiteSpace(group.CompetitionName) && !group.CompetitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !group.CompetitionName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase)
+            ? group.CompetitionName
+            : ResolveCompetitionFriendlyName(group.CompetitionId, group.CompetitionName);
+
+        if (match != null)
+        {
+            _isTransientJumpActive = false;
+            SelectedHubCompetition = match;
+            CurrentCompetitionName = match.Name;
+            CurrentCompetitionLogoUrl = match.LogoUrl;
+            _isMatchesMode = false;
+            OnPropertyChanged(nameof(IsMatchesMode));
+            OnPropertyChanged(nameof(IsStandingsMode));
+            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+            OnPropertyChanged(nameof(MatchesTabForegroundHex));
+            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+            OnPropertyChanged(nameof(StandingsTabForegroundHex));
+            _ = LoadCompetitionHubAsync(match.Id, match.Name, match.LogoUrl);
+        }
+        else
+        {
+            // Case B: No match in HubCompetitions — Transient Click-to-Jump League
+            _isTransientJumpActive = true;
+            _selectedHubCompetitionId = group.CompetitionId;
+            _selectedHubCompetition = null;
+            OnPropertyChanged(nameof(SelectedHubCompetition));
+
+            foreach (var c in HubCompetitions)
+            {
+                c.IsSelected = false;
+            }
+
+            CurrentCompetitionName = resolvedName;
+            CurrentCompetitionLogoUrl = resolvedLogo;
+
+            _isMatchesMode = false;
+            OnPropertyChanged(nameof(IsMatchesMode));
+            OnPropertyChanged(nameof(IsStandingsMode));
+            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+            OnPropertyChanged(nameof(MatchesTabForegroundHex));
+            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+            OnPropertyChanged(nameof(StandingsTabForegroundHex));
+
+            _ = LoadCompetitionHubAsync(group.CompetitionId, resolvedName, resolvedLogo);
+        }
+    }
+
+    public void NavigateToCompetitionStandings(string competitionId, string? competitionName = null, string? logoUrl = null, string? country = null)
+    {
+        if (string.IsNullOrWhiteSpace(competitionId)) return;
+
+        if (HubCompetitions.Count == 0)
+        {
+            RebuildHubCompetitions();
+        }
+
+        var match = FindMatchingHubCompetition(competitionId, competitionName, logoUrl);
+        var resolvedLogo = ResolveCompetitionLogoUrl(competitionId, competitionName, logoUrl);
+        var resolvedName = !string.IsNullOrWhiteSpace(competitionName) && !competitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !competitionName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase)
+            ? competitionName
+            : ResolveCompetitionFriendlyName(competitionId, competitionName);
+
+        if (match != null)
+        {
+            _isTransientJumpActive = false;
+            SelectedHubCompetition = match;
+            CurrentCompetitionName = match.Name;
+            CurrentCompetitionLogoUrl = match.LogoUrl;
+            _isMatchesMode = false;
+            OnPropertyChanged(nameof(IsMatchesMode));
+            OnPropertyChanged(nameof(IsStandingsMode));
+            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+            OnPropertyChanged(nameof(MatchesTabForegroundHex));
+            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+            OnPropertyChanged(nameof(StandingsTabForegroundHex));
+            _ = LoadCompetitionHubAsync(match.Id, match.Name, match.LogoUrl);
+        }
+        else
+        {
+            // Case B: No match in HubCompetitions — Transient Click-to-Jump League
+            _isTransientJumpActive = true;
+            _selectedHubCompetitionId = competitionId;
+            _selectedHubCompetition = null;
+            OnPropertyChanged(nameof(SelectedHubCompetition));
+
+            foreach (var c in HubCompetitions)
+            {
+                c.IsSelected = false;
+            }
+
+            CurrentCompetitionName = resolvedName;
+            CurrentCompetitionLogoUrl = resolvedLogo;
+
+            _isMatchesMode = false;
+            OnPropertyChanged(nameof(IsMatchesMode));
+            OnPropertyChanged(nameof(IsStandingsMode));
+            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+            OnPropertyChanged(nameof(MatchesTabForegroundHex));
+            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+            OnPropertyChanged(nameof(StandingsTabForegroundHex));
+
+            _ = LoadCompetitionHubAsync(competitionId, resolvedName, resolvedLogo);
         }
     }
 
@@ -820,7 +1662,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public async Task ToggleCompetitionFollowAsync(string compId, string? compName = null, string? compCode = null)
+    public async Task ToggleCompetitionFollowAsync(string compId, string? compName = null, string? compCode = null, string? logoUrl = null, string? country = null)
     {
         if (string.IsNullOrWhiteSpace(compId)) return;
 
@@ -838,17 +1680,34 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 var compVm = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase));
+                var friendlyName = !string.IsNullOrWhiteSpace(compName) && !compName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase) && !compName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !int.TryParse(compName, out _)
+                    ? compName
+                    : ResolveCompetitionFriendlyName(compId, compName);
+
+                var resolvedLogo = ResolveCompetitionLogoUrl(compId, friendlyName, logoUrl ?? compVm?.LogoUrl);
+
                 var domainComp = compVm?.ToDomain() ?? new FollowedCompetition
                 {
                     Id = compId,
-                    Name = !string.IsNullOrWhiteSpace(compName) ? compName : compId,
-                    Code = compCode ?? "COMP"
+                    Name = friendlyName,
+                    Code = compCode ?? "COMP",
+                    LogoUrl = resolvedLogo,
+                    Country = country ?? compVm?.Country
                 };
+
+                if (string.IsNullOrWhiteSpace(domainComp.LogoUrl) && !string.IsNullOrWhiteSpace(resolvedLogo))
+                {
+                    domainComp.LogoUrl = resolvedLogo;
+                }
 
                 await _preferencesService.FollowCompetitionAsync(domainComp);
                 if (compVm != null)
                 {
                     compVm.IsFollowed = true;
+                    if (string.IsNullOrWhiteSpace(compVm.LogoUrl) && !string.IsNullOrWhiteSpace(resolvedLogo))
+                    {
+                        compVm.LogoUrl = resolvedLogo;
+                    }
                 }
                 else
                 {
@@ -859,6 +1718,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             StatusMessage = null;
             ReapplyRelevanceAndFilters();
             Settings.RefreshFollowedLists();
+
+            // Issue 3: If unfollowed competition was the currently selected hub competition,
+            // ensure selection resets cleanly to the first available competition and immediately loads it.
+            if (isCurrentlyFollowed && !string.IsNullOrEmpty(_selectedHubCompetitionId))
+            {
+                bool stillPresent = HubCompetitions.Any(c =>
+                    c.Id.Equals(_selectedHubCompetitionId, StringComparison.OrdinalIgnoreCase) ||
+                    (int.TryParse(ExtractNumericDigits(_selectedHubCompetitionId), out int sNum) && int.TryParse(ExtractNumericDigits(c.Id), out int cNum) && sNum == cNum));
+
+                if (!stillPresent)
+                {
+                    _selectedHubCompetition = null;
+                    _selectedHubCompetitionId = HubCompetitions.FirstOrDefault()?.Id;
+                    SelectedHubCompetition = HubCompetitions.FirstOrDefault();
+                    if (_selectedHubCompetitionId != null)
+                    {
+                        _ = LoadCompetitionHubAsync(_selectedHubCompetitionId);
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -944,7 +1823,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         if (!enqueued)
         {
-            Diagnostics.AppLogger.Warn("UI", "DispatchEnqueueFailed", $"DispatcherQueue.TryEnqueue returned false for '{actionName}'. UI dispatcher may be shutting down.");
+            Diagnostics.AppLogger.Warn("UI", "DispatchEnqueueFailed", $"DispatcherQueue.TryEnqueue returned false for '{actionName}'. Fallback to synchronous execution.");
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.AppLogger.Error("UI", "FallbackExecutionError", $"Fallback execution failed for '{actionName}': [{ex.GetType().Name}] {ex.Message}", ex: ex);
+            }
         }
     }
 
@@ -1041,6 +1928,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             foreach (var kvp in _latestTrayData.FollowedCountsByDate)
             {
                 _followedCountsByDate[kvp.Key] = kvp.Value;
+            }
+        }
+
+        if (_latestTrayData?.FollowedTeamCompetitions != null)
+        {
+            bool changed = _followedTeamCompetitions.Count != _latestTrayData.FollowedTeamCompetitions.Count ||
+                           !_followedTeamCompetitions.Select(c => c.Id).SequenceEqual(_latestTrayData.FollowedTeamCompetitions.Select(c => c.Id));
+            if (changed)
+            {
+                _followedTeamCompetitions.Clear();
+                _followedTeamCompetitions.AddRange(_latestTrayData.FollowedTeamCompetitions);
+                RebuildHubCompetitions();
             }
         }
 
@@ -2323,6 +3222,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         HasOtherMatches = OtherMatches.Count > 0;
         IsOtherMatchesVisible = HasOtherMatches && _activeFilter != MatchFilterType.Following;
         OtherMatchesHeader = $"Other Matches ({OtherMatches.Count})";
+        RebuildHubCompetitions();
 
         bool filterChanged = _lastFilterApplied != _activeFilter;
         bool dateChanged = _lastDateApplied != _selectedCalendarDate.Date;
@@ -3014,6 +3914,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _disposeCts.Cancel();
         _disposeCts.Dispose();
+        _hubLoadingCts?.Cancel();
+        _hubLoadingCts?.Dispose();
         SearchCatalog.Dispose();
         Settings?.Dispose();
         _preferencesService.PreferencesChanged -= OnPreferencesChanged;
@@ -3021,6 +3923,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _syncService.TrayUpdated -= OnTrayUpdated;
             _syncService.SyncStateChanged -= OnSyncStateChanged;
+        }
+        if (_disposeApiClient)
+        {
+            _apiClient.Dispose();
         }
     }
 

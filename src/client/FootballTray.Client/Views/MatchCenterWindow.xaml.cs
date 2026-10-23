@@ -43,6 +43,7 @@ public sealed partial class MatchCenterWindow : Window
         Closed += OnWindowClosed;
         SetupSplitterCursor();
         UpdateTabStyles();
+        UpdateRightTabStyles();
     }
 
 
@@ -121,6 +122,7 @@ public sealed partial class MatchCenterWindow : Window
 
             UpdateStarAndPinVisuals();
             UpdateTabStyles();
+            UpdateRightTabStyles();
 
             // Immediate clock and score sync to taskbar ticker
             App.CurrentTickerCoordinator?.UpdateMatchFromDetails(match);
@@ -322,22 +324,70 @@ public sealed partial class MatchCenterWindow : Window
         });
     }
 
-    private void OnTabChecked(object sender, RoutedEventArgs e)
+    private enum RightPaneTab
     {
-        if (StatisticsControl == null || LineupControl == null) return;
+        Statistics,
+        Lineups,
+        Standings
+    }
 
-        if (StatsTabRadio?.IsChecked == true)
+    private RightPaneTab _activeRightTab = RightPaneTab.Statistics;
+
+    private void OnStatsTabClicked(object sender, RoutedEventArgs e)
+    {
+        _activeRightTab = RightPaneTab.Statistics;
+        UpdateRightTabStyles();
+        StatisticsControl?.Update(ViewModel);
+    }
+
+    private void OnLineupsTabClicked(object sender, RoutedEventArgs e)
+    {
+        _activeRightTab = RightPaneTab.Lineups;
+        ViewModel.EnsureLineupPitchPopulated();
+        LineupControl?.Update(ViewModel);
+        UpdateRightTabStyles();
+    }
+
+    private void OnStandingsTabClicked(object sender, RoutedEventArgs e)
+    {
+        _activeRightTab = RightPaneTab.Standings;
+        UpdateRightTabStyles();
+    }
+
+    private void UpdateRightTabStyles()
+    {
+        try
         {
-            StatisticsControl.Visibility = Visibility.Visible;
-            LineupControl.Visibility = Visibility.Collapsed;
-            StatisticsControl.Update(ViewModel);
+            if (StatsTabButton == null || LineupsTabButton == null || StandingsTabButton == null) return;
+
+            bool isStats = _activeRightTab == RightPaneTab.Statistics;
+            bool isLineups = _activeRightTab == RightPaneTab.Lineups;
+            bool isStandings = _activeRightTab == RightPaneTab.Standings;
+
+            // Stats tab button & panel
+            StatsTabButton.Background = isStats ? ActiveTabBg : InactiveTabBg;
+            StatsTabButton.BorderBrush = isStats ? ActiveTabBorder : InactiveTabBorder;
+            StatsTabButton.BorderThickness = isStats ? new Thickness(1) : new Thickness(0);
+            if (StatsTabText != null) StatsTabText.Foreground = isStats ? ActiveTabFg : InactiveTabFg;
+            if (StatisticsControl != null) StatisticsControl.Visibility = isStats ? Visibility.Visible : Visibility.Collapsed;
+
+            // Lineups tab button & panel
+            LineupsTabButton.Background = isLineups ? ActiveTabBg : InactiveTabBg;
+            LineupsTabButton.BorderBrush = isLineups ? ActiveTabBorder : InactiveTabBorder;
+            LineupsTabButton.BorderThickness = isLineups ? new Thickness(1) : new Thickness(0);
+            if (LineupsTabText != null) LineupsTabText.Foreground = isLineups ? ActiveTabFg : InactiveTabFg;
+            if (LineupControl != null) LineupControl.Visibility = isLineups ? Visibility.Visible : Visibility.Collapsed;
+
+            // Standings tab button & panel
+            StandingsTabButton.Background = isStandings ? ActiveTabBg : InactiveTabBg;
+            StandingsTabButton.BorderBrush = isStandings ? ActiveTabBorder : InactiveTabBorder;
+            StandingsTabButton.BorderThickness = isStandings ? new Thickness(1) : new Thickness(0);
+            if (StandingsTabText != null) StandingsTabText.Foreground = isStandings ? ActiveTabFg : InactiveTabFg;
+            if (StandingsScrollContainer != null) StandingsScrollContainer.Visibility = isStandings ? Visibility.Visible : Visibility.Collapsed;
         }
-        else if (LineupsTabRadio?.IsChecked == true)
+        catch (Exception ex)
         {
-            StatisticsControl.Visibility = Visibility.Collapsed;
-            LineupControl.Visibility = Visibility.Visible;
-            ViewModel.EnsureLineupPitchPopulated();
-            LineupControl.Update(ViewModel);
+            Diagnostics.AppLogger.Error("MatchCenter", "UpdateRightTabStylesError", $"Error updating right tab styles: {ex.Message}", ex: ex);
         }
     }
 

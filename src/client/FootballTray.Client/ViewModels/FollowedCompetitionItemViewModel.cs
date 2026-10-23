@@ -19,13 +19,60 @@ public sealed class FollowedCompetitionItemViewModel : INotifyPropertyChanged
     public string Name { get; init; } = string.Empty;
     public string Code { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;
-    public string? LogoUrl { get; init; }
+    private string? _logoUrl;
+    public string? LogoUrl
+    {
+        get => _logoUrl;
+        set
+        {
+            if (SetProperty(ref _logoUrl, value))
+            {
+                OnPropertyChanged(nameof(LogoSource));
+                OnPropertyChanged(nameof(HasLogo));
+                OnPropertyChanged(nameof(LogoVisibility));
+                OnPropertyChanged(nameof(FallbackVisibility));
+                if (!string.IsNullOrWhiteSpace(_logoUrl))
+                {
+                    _ = EnsureLogoCachedAsync();
+                }
+            }
+        }
+    }
 
     public Uri? CachedLogoUri
     {
         get => _cachedLogoUri;
-        set => SetProperty(ref _cachedLogoUri, value);
+        set
+        {
+            if (SetProperty(ref _cachedLogoUri, value))
+            {
+                OnPropertyChanged(nameof(LogoSource));
+                OnPropertyChanged(nameof(HasLogo));
+                OnPropertyChanged(nameof(LogoVisibility));
+                OnPropertyChanged(nameof(FallbackVisibility));
+            }
+        }
     }
+
+    public Microsoft.UI.Xaml.Media.ImageSource? LogoSource
+    {
+        get
+        {
+            if (CachedLogoUri != null)
+            {
+                return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(CachedLogoUri);
+            }
+            if (!string.IsNullOrWhiteSpace(LogoUrl) && Uri.TryCreate(LogoUrl, UriKind.Absolute, out var uri))
+            {
+                return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(uri);
+            }
+            return null;
+        }
+    }
+
+    public bool HasLogo => CachedLogoUri != null || !string.IsNullOrWhiteSpace(LogoUrl);
+    public Microsoft.UI.Xaml.Visibility LogoVisibility => HasLogo ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+    public Microsoft.UI.Xaml.Visibility FallbackVisibility => HasLogo ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
 
     public bool IsFollowed
     {
@@ -50,31 +97,48 @@ public sealed class FollowedCompetitionItemViewModel : INotifyPropertyChanged
     public static FollowedCompetitionItemViewModel FromDomain(FollowedCompetition comp, bool isFollowed)
     {
         ArgumentNullException.ThrowIfNull(comp);
-        return new FollowedCompetitionItemViewModel
+        var logo = comp.LogoUrl;
+        if (string.IsNullOrWhiteSpace(logo))
+        {
+            logo = MainViewModel.ResolveCompetitionLogoUrl(comp.Id, comp.Name, null);
+            comp.LogoUrl = logo;
+        }
+
+        var vm = new FollowedCompetitionItemViewModel
         {
             Id = comp.Id ?? string.Empty,
             LegacyId = null,
             Name = comp.Name ?? string.Empty,
             Code = comp.Code ?? string.Empty,
             Country = comp.Country ?? string.Empty,
-            LogoUrl = comp.LogoUrl,
+            LogoUrl = logo,
             IsFollowed = isFollowed
         };
+        _ = vm.EnsureLogoCachedAsync();
+        return vm;
     }
 
     public static FollowedCompetitionItemViewModel FromCatalogDto(FootballTray.Core.Dto.V2CatalogCompetitionDto dto, bool isFollowed)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        return new FollowedCompetitionItemViewModel
+        var logo = dto.LogoUrl ?? dto.Logo;
+        if (string.IsNullOrWhiteSpace(logo))
+        {
+            logo = MainViewModel.ResolveCompetitionLogoUrl(dto.Id, dto.Name, null);
+        }
+
+        var vm = new FollowedCompetitionItemViewModel
         {
             Id = dto.Id ?? string.Empty,
             LegacyId = dto.LegacyId,
             Name = dto.Name ?? string.Empty,
             Code = dto.Code ?? string.Empty,
             Country = dto.Country ?? string.Empty,
-            LogoUrl = dto.LogoUrl ?? dto.Logo,
+            LogoUrl = logo,
             IsFollowed = isFollowed
         };
+        _ = vm.EnsureLogoCachedAsync();
+        return vm;
     }
 
     public async System.Threading.Tasks.Task EnsureLogoCachedAsync(FootballTray.Client.Services.ImageCacheService? imageCacheService = null)

@@ -1,13 +1,15 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { createHash } from 'crypto';
+import { eq, or } from 'drizzle-orm';
 import { FixturesRepository } from '../repositories/fixtures.repository.js';
-import { checkDatabaseConnection } from '../db/index.js';
+import { checkDatabaseConnection, db, schema } from '../db/index.js';
 import { createResponseEnvelope, createErrorEnvelope } from './envelope.js';
 import { RequestGateway } from '../gateway/request-gateway.js';
-import { formatV2TrayMatch, formatV2MatchDetail } from './v2-dto.js';
+import { formatV2TrayMatch, formatV2MatchDetail, formatV2CompetitionHub } from './v2-dto.js';
 import { CatalogRepository } from '../repositories/catalog.repository.js';
 import { createProvider } from '../acquisition/provider-factory.js';
 import { SyncService } from '../acquisition/sync.service.js';
+import { FotmobProvider } from '../providers/fotmob/fotmob.provider.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const fixturesRepo = new FixturesRepository();
@@ -363,6 +365,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         toDate: windowEnd,
       });
 
+      const followedTeamCompetitions = await fixturesRepo.getFollowedTeamCompetitions(teams);
+
       // Ensure pinned match is always present in response regardless of calendar date
       const prefService = (fastify as any).preferencesService;
       const pinnedMatchIds: string[] = [];
@@ -477,6 +481,7 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           quotaExhausted,
           syncState: isDateSyncing ? 'SYNCING' : 'IDLE',
           followedCountsByDate,
+          followedTeamCompetitions,
         },
         { schemaVersion: '2.0', version: 2, quotaExhausted }
       );
@@ -718,6 +723,37 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         if (cached?.referee && !fixture.referee) {
           fixture.referee = cached.referee;
         }
+        if (cached?.standings) {
+          fixture.standings = cached.standings;
+        }
+        if (cached?.topScorers) {
+          fixture.topScorers = cached.topScorers;
+        }
+        if (cached?.topAssists) {
+          fixture.topAssists = cached.topAssists;
+        }
+
+        if (!fixture.standings && syncService?.provider && typeof (syncService.provider as any).getCompetitionHub === 'function') {
+          const compId = fixture.competition?.canonicalId || fixture.competitionId || fixture.competition?.id;
+          if (compId) {
+            try {
+              const hub = await (syncService.provider as any).getCompetitionHub(compId);
+              if (hub && hub.standings) {
+                const homeId = fixture.homeTeam?.canonicalId || fixture.homeTeam?.id || fixture.homeTeamId;
+                const awayId = fixture.awayTeam?.canonicalId || fixture.awayTeam?.id || fixture.awayTeamId;
+                fixture.standings = (hub.standings || []).map((s: any) => ({
+                  ...s,
+                  isHomeTeam: String(s.teamId) === String(homeId) || String(s.teamName).toLowerCase() === String(fixture.homeTeam?.name || '').toLowerCase(),
+                  isAwayTeam: String(s.teamId) === String(awayId) || String(s.teamName).toLowerCase() === String(fixture.awayTeam?.name || '').toLowerCase(),
+                }));
+                fixture.topScorers = hub.topScorers || [];
+                fixture.topAssists = hub.topAssists || [];
+              }
+            } catch {
+              // Non-blocking fallback
+            }
+          }
+        }
       }
 
       // 3. Compute fixture ETag based on entity updatedAt timestamp, events count, commentary count, and stats/lineups hash
@@ -751,6 +787,237 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // Register primary route and backward-compatible singular alias
   fastify.get<{ Params: { id: string } }>('/api/v2/matches/:id', handleMatchDetails);
   fastify.get<{ Params: { id: string } }>('/api/v2/match/:id', handleMatchDetails);
+
+  // ----------------------------------------------------
+  // Delivery API v2: Competition Hub (Standings & Leaders)
+  // ----------------------------------------------------
+  const competitionHubCache = new Map<string, { timestamp: number; payload: any }>();
+
+  const handleCompetitionHub = async (request: any, reply: any) => {
+    const id = request.params.id;
+    if (!id || typeof id !== 'string' || id.trim().length === 0) {
+      return reply.status(400).send(createErrorEnvelope('INVALID_PARAMS', 'Missing competition id'));
+    }
+
+    const trimmedId = id.trim();
+    const queryName = typeof (request.query as any)?.name === 'string' ? (request.query as any).name.trim() : null;
+    const queryLogoUrl = typeof (request.query as any)?.logoUrl === 'string' ? (request.query as any).logoUrl.trim() : null;
+
+    const resolvedFotmobId = FotmobProvider.resolveFotmobLeagueId(trimmedId, queryName, queryLogoUrl);
+    const cacheKey = resolvedFotmobId ? `hub_${resolvedFotmobId}` : `${trimmedId.toLowerCase()}_${(queryName || '').toLowerCase()}`;
+    const cachedEntry = competitionHubCache.get(cacheKey);
+    if (cachedEntry && Date.now() - cachedEntry.timestamp < 15 * 60 * 1000) {
+      reply.header('Cache-Control', 'public, max-age=900, stale-while-revalidate=60');
+      return reply.send(createResponseEnvelope(cachedEntry.payload, { schemaVersion: '2.0', version: 2 }));
+    }
+
+    try {
+      let syncService = (request.server as any).syncService || (fastify as any).syncService;
+      if (!syncService) {
+        const provider = createProvider();
+        syncService = new SyncService(provider);
+        (fastify as any).syncService = syncService;
+      }
+
+      let hub: any = null;
+      if (syncService?.provider && typeof (syncService.provider as any).getCompetitionHub === 'function') {
+        hub = await (syncService.provider as any).getCompetitionHub(trimmedId, queryName, queryLogoUrl);
+      }
+
+      // Check DB for competition metadata if missing
+      let compRecord: any = null;
+      try {
+        compRecord = await db.query.competitions.findFirst({
+          where: or(
+            eq(schema.competitions.canonicalId, trimmedId),
+            eq(schema.competitions.id, trimmedId),
+            queryName ? eq(schema.competitions.name, queryName) : undefined
+          ),
+        });
+      } catch {
+        // Non-blocking
+      }
+
+      if (!hub && compRecord) {
+        const altId = compRecord.canonicalId || compRecord.id || compRecord.name;
+        if (altId && altId !== trimmedId && syncService?.provider && typeof (syncService.provider as any).getCompetitionHub === 'function') {
+          hub = await (syncService.provider as any).getCompetitionHub(altId, compRecord.name || queryName, compRecord.logoUrl || queryLogoUrl);
+        }
+      }
+
+      // Match-Center Parity Fallback: query SQLite fixtures for this competition to extract numeric ID or use match details
+      if (!hub || !hub.standings || hub.standings.length === 0) {
+        try {
+          const sampleFixture = await db
+            .select({
+              id: schema.fixtures.id,
+              competitionId: schema.fixtures.competitionId,
+              compName: schema.competitions.name,
+              compLogoUrl: schema.competitions.logoUrl,
+            })
+            .from(schema.fixtures)
+            .innerJoin(schema.competitions, eq(schema.fixtures.competitionId, schema.competitions.id))
+            .where(
+              or(
+                eq(schema.fixtures.competitionId, trimmedId),
+                eq(schema.competitions.canonicalId, trimmedId),
+                compRecord?.id ? eq(schema.fixtures.competitionId, compRecord.id) : undefined,
+                queryName ? eq(schema.competitions.name, queryName) : undefined
+              )
+            )
+            .limit(1);
+
+          if (sampleFixture && sampleFixture.length > 0) {
+            const fix = sampleFixture[0];
+            const fixLogoId = FotmobProvider.resolveFotmobLeagueId(fix.competitionId, fix.compName, fix.compLogoUrl);
+            if (fixLogoId && (!resolvedFotmobId || resolvedFotmobId !== fixLogoId) && syncService?.provider && typeof (syncService.provider as any).getCompetitionHub === 'function') {
+              hub = await (syncService.provider as any).getCompetitionHub(fixLogoId, fix.compName, fix.compLogoUrl);
+            }
+
+            // If still no hub or standings, use Match Details parity fallback
+            if ((!hub || !hub.standings || hub.standings.length === 0) && syncService?.provider && typeof (syncService.provider as any).getMatchDetails === 'function') {
+              const details = await (syncService.provider as any).getMatchDetails(fix.id);
+              if (details && details.standings && details.standings.length > 0) {
+                hub = {
+                  competitionId: trimmedId,
+                  competitionName: fix.compName || queryName || compRecord?.name || 'Competition',
+                  competitionLogoUrl: fix.compLogoUrl || queryLogoUrl || compRecord?.logoUrl || (fixLogoId ? `https://images.fotmob.com/image_resources/logo/leaguelogo/dark/${fixLogoId}.png` : null),
+                  countryCode: compRecord?.country || null,
+                  season: null,
+                  standings: details.standings,
+                  topScorers: details.topScorers || [],
+                  topAssists: details.topAssists || [],
+                };
+              }
+            }
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      // Offline fallback: ONLY aggregate from local matches strictly for targetCompId if competition was found in DB
+      if (!hub || !hub.standings || hub.standings.length === 0) {
+        const targetCompId = compRecord?.id;
+        if (targetCompId) {
+          try {
+            const localMatches = await fixturesRepo.getTrayMatches({ competitions: [targetCompId], limit: 100 });
+            if (localMatches && localMatches.length > 0) {
+              const teamMap = new Map<string, { id: string; name: string; logoUrl?: string; played: number; wins: number; draws: number; losses: number; gf: number; ga: number; pts: number; form: string[] }>();
+
+              for (const m of localMatches) {
+                if (!m.homeTeam || !m.awayTeam) continue;
+                const hId = m.homeTeam.id;
+                const aId = m.awayTeam.id;
+                if (!teamMap.has(hId)) {
+                  teamMap.set(hId, { id: hId, name: m.homeTeam.name || 'Home Team', logoUrl: m.homeTeam.logoUrl ?? undefined, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, pts: 0, form: [] });
+                }
+                if (!teamMap.has(aId)) {
+                  teamMap.set(aId, { id: aId, name: m.awayTeam.name || 'Away Team', logoUrl: m.awayTeam.logoUrl ?? undefined, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, pts: 0, form: [] });
+                }
+                const h = teamMap.get(hId)!;
+                const a = teamMap.get(aId)!;
+                const st = String(m.state || '').toUpperCase();
+                if (st.includes('FINISH') || st === 'FT' || st === 'AET' || st === 'PEN') {
+                  h.played++;
+                  a.played++;
+                  const hScore = m.homeScore ?? (m as any).score?.home ?? 0;
+                  const aScore = m.awayScore ?? (m as any).score?.away ?? 0;
+                  h.gf += hScore;
+                  h.ga += aScore;
+                  a.gf += aScore;
+                  a.ga += hScore;
+                  if (hScore > aScore) {
+                    h.wins++;
+                    h.pts += 3;
+                    h.form.push('W');
+                    a.losses++;
+                    a.form.push('L');
+                  } else if (hScore < aScore) {
+                    a.wins++;
+                    a.pts += 3;
+                    a.form.push('W');
+                    h.losses++;
+                    h.form.push('L');
+                  } else {
+                    h.draws++;
+                    h.pts += 1;
+                    h.form.push('D');
+                    a.draws++;
+                    a.pts += 1;
+                    a.form.push('D');
+                  }
+                }
+              }
+
+              const sortedTeams = Array.from(teamMap.values()).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+              const syntheticStandings = sortedTeams.map((t, idx) => ({
+                rank: idx + 1,
+                teamId: t.id,
+                teamName: t.name,
+                teamLogoUrl: t.logoUrl,
+                played: t.played,
+                wins: t.wins,
+                draws: t.draws,
+                losses: t.losses,
+                goalsFor: t.gf,
+                goalsAgainst: t.ga,
+                goalDiff: t.gf - t.ga,
+                points: t.pts,
+                form: t.form.slice(-5).join(''),
+              }));
+
+              hub = {
+                competitionId: trimmedId,
+                competitionName: compRecord?.name || queryName || 'Competition',
+                competitionLogoUrl: compRecord?.logoUrl || queryLogoUrl || (resolvedFotmobId ? `https://images.fotmob.com/image_resources/logo/leaguelogo/dark/${resolvedFotmobId}.png` : null),
+                countryCode: compRecord?.country || null,
+                standings: syntheticStandings,
+                topScorers: hub?.topScorers || [],
+                topAssists: hub?.topAssists || [],
+              };
+            }
+          } catch {
+            // Non-blocking
+          }
+        }
+      }
+
+      if (!hub) {
+        hub = {
+          competitionId: trimmedId,
+          competitionName: queryName || compRecord?.name || 'Competition',
+          competitionLogoUrl: queryLogoUrl || compRecord?.logoUrl || (resolvedFotmobId ? `https://images.fotmob.com/image_resources/logo/leaguelogo/dark/${resolvedFotmobId}.png` : null),
+          countryCode: compRecord?.country || null,
+          standings: [],
+          topScorers: [],
+          topAssists: [],
+        };
+      } else {
+        // Preserve clean queryName and queryLogoUrl if hub has generic/id defaults
+        if (queryName && (!hub.competitionName || hub.competitionName === 'Competition' || hub.competitionName.startsWith('fotmob_') || hub.competitionName.startsWith('comp_') || hub.competitionName.startsWith('ft_comp_'))) {
+          hub.competitionName = queryName;
+        }
+        if (!hub.competitionLogoUrl && queryLogoUrl) {
+          hub.competitionLogoUrl = queryLogoUrl;
+        }
+      }
+
+      const formatted = formatV2CompetitionHub(hub);
+      competitionHubCache.set(cacheKey, { timestamp: Date.now(), payload: formatted });
+
+      reply.header('Cache-Control', 'public, max-age=900, stale-while-revalidate=60');
+      return reply.send(createResponseEnvelope(formatted, { schemaVersion: '2.0', version: 2 }));
+    } catch (err: any) {
+      request.log.error(err, `Failed to retrieve competition hub '${id}'`);
+      return reply.status(500).send(
+        createErrorEnvelope('INTERNAL_ERROR', 'Failed to retrieve competition hub', { details: err?.message }, { schemaVersion: '2.0' })
+      );
+    }
+  };
+
+  fastify.get<{ Params: { id: string } }>('/api/v2/competitions/:id/hub', handleCompetitionHub);
+  fastify.get<{ Params: { id: string } }>('/api/v2/competition/:id/hub', handleCompetitionHub);
 
   // ----------------------------------------------------
   // Delivery API v2: Catalog Search (Teams)

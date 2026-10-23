@@ -137,6 +137,7 @@ export const FotmobMatchDetailsResponseSchema: z.ZodType<FotmobMatchDetailsRespo
     poll: z.any().nullish(),
     superlive: z.any().nullish(),
     commentary: z.any().nullish(),
+    table: z.any().nullish(),
   }).passthrough().nullish(),
 }).passthrough();
 

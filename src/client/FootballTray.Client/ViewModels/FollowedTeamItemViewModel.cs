@@ -24,8 +24,37 @@ public sealed class FollowedTeamItemViewModel : INotifyPropertyChanged
     public Uri? CachedLogoUri
     {
         get => _cachedLogoUri;
-        set => SetProperty(ref _cachedLogoUri, value);
+        set
+        {
+            if (SetProperty(ref _cachedLogoUri, value))
+            {
+                OnPropertyChanged(nameof(LogoSource));
+                OnPropertyChanged(nameof(HasLogo));
+                OnPropertyChanged(nameof(LogoVisibility));
+                OnPropertyChanged(nameof(FallbackVisibility));
+            }
+        }
     }
+
+    public Microsoft.UI.Xaml.Media.ImageSource? LogoSource
+    {
+        get
+        {
+            if (CachedLogoUri != null)
+            {
+                return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(CachedLogoUri);
+            }
+            if (!string.IsNullOrWhiteSpace(LogoUrl) && Uri.TryCreate(LogoUrl, UriKind.Absolute, out var uri))
+            {
+                return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(uri);
+            }
+            return null;
+        }
+    }
+
+    public bool HasLogo => CachedLogoUri != null || !string.IsNullOrWhiteSpace(LogoUrl);
+    public Microsoft.UI.Xaml.Visibility LogoVisibility => HasLogo ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+    public Microsoft.UI.Xaml.Visibility FallbackVisibility => HasLogo ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
 
     public bool IsFollowed
     {

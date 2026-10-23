@@ -19,6 +19,19 @@ public sealed class CompetitionGroupViewModel : INotifyPropertyChanged
     public bool HasLogoUrl => !string.IsNullOrWhiteSpace(LogoUrl);
     public Visibility LogoVisibility => HasLogoUrl ? Visibility.Visible : Visibility.Collapsed;
 
+    public Microsoft.UI.Xaml.Media.ImageSource? LogoSource
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(LogoUrl)) return null;
+            if (Uri.TryCreate(LogoUrl, UriKind.Absolute, out var uri))
+            {
+                return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(uri);
+            }
+            return null;
+        }
+    }
+
     public bool HasFollowedTeams { get; private set; }
     public bool IsFollowedCompetition { get; private set; }
     public bool IsFollowed => HasFollowedTeams || IsFollowedCompetition;
@@ -26,6 +39,8 @@ public sealed class CompetitionGroupViewModel : INotifyPropertyChanged
     public ObservableCollection<MatchItemViewModel> Matches { get; } = new();
 
     public string CompetitionKey => !string.IsNullOrWhiteSpace(CompetitionId) ? CompetitionId : CompetitionName;
+    public string Id => CompetitionId;
+    public string Name => CompetitionName;
 
     public int MatchCount => Matches.Count;
     public string MatchCountText => Matches.Count.ToString();

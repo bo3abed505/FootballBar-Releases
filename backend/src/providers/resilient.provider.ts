@@ -18,6 +18,7 @@ import {
   NormalizedLiveMatch,
   NormalizedMatch,
   NormalizedMatchDetails,
+  NormalizedCompetitionHub,
 } from './types.js';
 import { CircuitBreaker, CircuitState } from '../resilience/circuit-breaker.js';
 import { FotmobProvider } from './fotmob/fotmob.provider.js';
@@ -151,6 +152,27 @@ export class ResilientFootballProvider implements IDataProvider {
       }
       throw error;
     }
+  }
+
+  public async getCompetitionHub(
+    competitionId: string | number,
+    competitionName?: string | null,
+    logoUrl?: string | null
+  ): Promise<NormalizedCompetitionHub | null> {
+    if (typeof this.primary.getCompetitionHub === 'function') {
+      try {
+        return await this.primary.getCompetitionHub(competitionId, competitionName, logoUrl);
+      } catch (error: any) {
+        if (this.isCircuitOrNetworkError(error)) {
+          if (this.fallback && typeof (this.fallback as any).getCompetitionHub === 'function') {
+            return await (this.fallback as any).getCompetitionHub(competitionId, competitionName, logoUrl);
+          }
+          return null;
+        }
+        throw error;
+      }
+    }
+    return null;
   }
 
   private isCircuitOrNetworkError(error: any): boolean {

@@ -147,8 +147,6 @@
                             TextAlignment="Center" />
                     </StackPanel>
                 </Border>
-
-                <!-- ============================================== -->
                 <!-- SECTION 2: 🔮 Predictions & History            -->
                 <!-- ============================================== -->
                 <!-- Win Probability Card -->
@@ -388,6 +386,8 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
+
+                <!-- ============================================== -->
             </StackPanel>
         </ScrollViewer>
     </Grid>

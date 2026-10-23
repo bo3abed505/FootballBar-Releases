@@ -84,6 +84,19 @@ public class CatalogSearchApiResponse<T>
         new() { IsSuccess = false, ErrorMessage = message };
 }
 
+public class CompetitionHubApiResponse
+{
+    public bool IsSuccess { get; init; }
+    public ApiResponseEnvelope<CompetitionHubDto>? Envelope { get; init; }
+    public string? ErrorMessage { get; init; }
+
+    public static CompetitionHubApiResponse Success(ApiResponseEnvelope<CompetitionHubDto> envelope) =>
+        new() { IsSuccess = true, Envelope = envelope };
+
+    public static CompetitionHubApiResponse Error(string message) =>
+        new() { IsSuccess = false, ErrorMessage = message };
+}
+
 public class FootballApiClient : IDisposable
 {
     public const string DefaultBaseUrl = "http://127.0.0.1:4000";
@@ -668,6 +681,89 @@ public class FootballApiClient : IDisposable
         {
             System.Diagnostics.Debug.WriteLine($"[FootballApiClient] Failed to update pinned match: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Fetches full competition standings, top scorers, and top assists via GET /api/v2/competitions/{id}/hub.
+    /// </summary>
+    public async Task<CompetitionHubApiResponse> GetCompetitionHubAsync(
+        string competitionId,
+        string? name = null,
+        string? logoUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(competitionId))
+        {
+            return CompetitionHubApiResponse.Error("Competition ID cannot be empty.");
+        }
+
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+        var sb = new System.Text.StringBuilder($"/api/v2/competitions/{Uri.EscapeDataString(competitionId.Trim())}/hub");
+        var hasQuery = false;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            sb.Append(hasQuery ? "&" : "?");
+            sb.Append("name=").Append(Uri.EscapeDataString(name.Trim()));
+            hasQuery = true;
+        }
+        if (!string.IsNullOrWhiteSpace(logoUrl))
+        {
+            sb.Append(hasQuery ? "&" : "?");
+            sb.Append("logoUrl=").Append(Uri.EscapeDataString(logoUrl.Trim()));
+            hasQuery = true;
+        }
+        string url = sb.ToString();
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, linkedCts.Token);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync(linkedCts.Token);
+                try
+                {
+                    var envelope = JsonSerializer.Deserialize(
+                        json,
+                        FootballJsonSerializerContext.Default.ApiResponseEnvelopeCompetitionHubDto
+                    );
+
+                    if (envelope?.Data == null)
+                    {
+                        var snippet = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
+                        Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubNullData", $"Competition hub envelope Data was null for '{competitionId}'. Payload: {snippet}");
+                        return CompetitionHubApiResponse.Error("Failed to deserialize competition hub response.");
+                    }
+
+                    return CompetitionHubApiResponse.Success(envelope);
+                }
+                catch (JsonException jEx)
+                {
+                    var snippet = json.Length > 300 ? json.Substring(0, 300) + "..." : json;
+                    Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubDeserializationFailed", $"Failed to parse JSON for '{competitionId}': {jEx.Message}. Payload: {snippet}", jEx);
+                    return CompetitionHubApiResponse.Error($"JSON deserialization error: {jEx.Message}");
+                }
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync(linkedCts.Token);
+            Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubHttpError", $"HTTP {(int)response.StatusCode} for '{url}': {errorBody}");
+            return CompetitionHubApiResponse.Error($"Server returned HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubTimeout", $"Request timed out after 10s for '{url}'");
+            return CompetitionHubApiResponse.Error($"Request to '{url}' timed out after 10 seconds.");
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubNetworkError", $"Network error for '{url}': [{ex.GetType().Name}] {ex.Message}", ex);
+            return CompetitionHubApiResponse.Error($"Network error: {ex.Message}");
         }
     }
 

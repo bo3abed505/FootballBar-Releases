@@ -133,6 +133,52 @@ export interface NormalizedTeamHeatmap {
   points: NormalizedHeatmapPoint[];
 }
 
+export interface NormalizedStandingRow {
+  rank: number;
+  teamId: string;
+  teamName: string;
+  teamShortName?: string;
+  teamLogoUrl?: string | null;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
+  points: number;
+  form?: string | null;
+  qualificationColor?: string | null;
+  isHomeTeam?: boolean;
+  isAwayTeam?: boolean;
+}
+
+export interface NormalizedPlayerStatLeader {
+  rank: number;
+  playerId: string;
+  playerName: string;
+  teamId: string;
+  teamName: string;
+  teamLogoUrl?: string | null;
+  goals?: number;
+  assists?: number;
+  penalties?: number;
+  matchesPlayed?: number;
+}
+
+export interface NormalizedCompetitionHub {
+  competitionId: string;
+  competitionName: string;
+  competitionCode?: string | null;
+  competitionLogoUrl?: string | null;
+  countryCode?: string | null;
+  countryName?: string | null;
+  season?: string | null;
+  standings: NormalizedStandingRow[];
+  topScorers: NormalizedPlayerStatLeader[];
+  topAssists: NormalizedPlayerStatLeader[];
+}
+
 export interface NormalizedMatchDetails {
   providerMatchId: string;
   time: NormalizedMatchTime;
@@ -153,6 +199,9 @@ export interface NormalizedMatchDetails {
   cachedAt?: number;
   h2hAndPredictions?: NormalizedH2HAndPredictions | null;
   heatmaps?: NormalizedTeamHeatmap[] | null;
+  standings?: NormalizedStandingRow[] | null;
+  topScorers?: NormalizedPlayerStatLeader[] | null;
+  topAssists?: NormalizedPlayerStatLeader[] | null;
 }
 
 export interface IDataProvider {
@@ -160,6 +209,11 @@ export interface IDataProvider {
   getLiveMatches(): Promise<NormalizedLiveMatch[]>;
   getDailyMatches(date: string): Promise<NormalizedMatch[]>;
   getMatchDetails(providerMatchId: string): Promise<NormalizedMatchDetails>;
+  getCompetitionHub?(
+    competitionId: string | number,
+    competitionName?: string | null,
+    logoUrl?: string | null
+  ): Promise<NormalizedCompetitionHub | null>;
 }
 
 export interface FixtureFilter {

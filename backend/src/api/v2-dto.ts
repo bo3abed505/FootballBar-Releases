@@ -112,6 +112,9 @@ export interface V2MatchDetail {
   statistics: any[];
   h2hAndPredictions?: any;
   heatmaps?: any;
+  standings?: any;
+  topScorers?: any[];
+  topAssists?: any[];
   trust: V2TrustMetadata;
 }
 
@@ -512,6 +515,9 @@ export function formatV2MatchDetail(fixture: any, now: Date = new Date()): V2Mat
     })),
     h2hAndPredictions: fixture.h2hAndPredictions ?? null,
     heatmaps: fixture.heatmaps ?? null,
+    standings: fixture.standings ?? null,
+    topScorers: fixture.topScorers ?? null,
+    topAssists: fixture.topAssists ?? null,
     trust: calculateTrustMetadata(fixture, now),
   };
 }
@@ -574,6 +580,115 @@ export function formatV2CatalogCompetition(comp: {
     country: comp.country ?? null,
     logo: comp.logoUrl ?? null,
     logoUrl: comp.logoUrl ?? null,
+  };
+}
+
+export interface V2StandingRow {
+  rank: number;
+  teamId: string;
+  teamName: string;
+  teamShortName?: string;
+  teamLogoUrl?: string | null;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
+  points: number;
+  form?: string | null;
+  qualificationColor?: string | null;
+  isHomeTeam?: boolean;
+  isAwayTeam?: boolean;
+}
+
+export interface V2PlayerStatLeader {
+  rank: number;
+  playerId: string;
+  playerName: string;
+  teamId: string;
+  teamName: string;
+  teamLogoUrl?: string | null;
+  goals?: number;
+  assists?: number;
+  penalties?: number;
+  matchesPlayed?: number;
+}
+
+export interface V2CompetitionHub {
+  competitionId: string;
+  competitionName: string;
+  competitionCode?: string | null;
+  competitionLogoUrl?: string | null;
+  countryCode?: string | null;
+  countryName?: string | null;
+  season?: string | null;
+  standings: V2StandingRow[];
+  topScorers: V2PlayerStatLeader[];
+  topAssists: V2PlayerStatLeader[];
+}
+
+export function formatV2CompetitionHub(hub: {
+  competitionId: string;
+  competitionName: string;
+  competitionCode?: string | null;
+  competitionLogoUrl?: string | null;
+  countryCode?: string | null;
+  countryName?: string | null;
+  season?: string | null;
+  standings?: any[];
+  topScorers?: any[];
+  topAssists?: any[];
+}): V2CompetitionHub {
+  return {
+    competitionId: hub.competitionId,
+    competitionName: hub.competitionName,
+    competitionCode: hub.competitionCode ?? null,
+    competitionLogoUrl: hub.competitionLogoUrl ?? null,
+    countryCode: hub.countryCode ?? null,
+    countryName: hub.countryName ?? null,
+    season: hub.season ?? null,
+    standings: (hub.standings || []).map((s: any, idx: number) => ({
+      rank: s.rank ?? (idx + 1),
+      teamId: String(s.teamId || s.id || ''),
+      teamName: s.teamName || s.name || '',
+      teamShortName: s.teamShortName || s.shortName || undefined,
+      teamLogoUrl: s.teamLogoUrl || (s.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${s.teamId}.png` : null),
+      played: Number(s.played ?? 0),
+      wins: Number(s.wins ?? 0),
+      draws: Number(s.draws ?? 0),
+      losses: Number(s.losses ?? 0),
+      goalsFor: Number(s.goalsFor ?? 0),
+      goalsAgainst: Number(s.goalsAgainst ?? 0),
+      goalDiff: Number(s.goalDiff ?? (Number(s.goalsFor ?? 0) - Number(s.goalsAgainst ?? 0))),
+      points: Number(s.points ?? s.pts ?? 0),
+      form: s.form ?? null,
+      qualificationColor: s.qualificationColor ?? s.qualColor ?? null,
+      isHomeTeam: Boolean(s.isHomeTeam),
+      isAwayTeam: Boolean(s.isAwayTeam),
+    })),
+    topScorers: (hub.topScorers || []).map((p: any, idx: number) => ({
+      rank: p.rank ?? (idx + 1),
+      playerId: String(p.playerId || p.id || ''),
+      playerName: p.playerName || p.name || '',
+      teamId: String(p.teamId || ''),
+      teamName: p.teamName || '',
+      teamLogoUrl: p.teamLogoUrl || (p.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${p.teamId}.png` : null),
+      goals: p.goals != null ? Number(p.goals) : undefined,
+      penalties: p.penalties != null ? Number(p.penalties) : undefined,
+      matchesPlayed: p.matchesPlayed != null ? Number(p.matchesPlayed) : undefined,
+    })),
+    topAssists: (hub.topAssists || []).map((p: any, idx: number) => ({
+      rank: p.rank ?? (idx + 1),
+      playerId: String(p.playerId || p.id || ''),
+      playerName: p.playerName || p.name || '',
+      teamId: String(p.teamId || ''),
+      teamName: p.teamName || '',
+      teamLogoUrl: p.teamLogoUrl || (p.teamId ? `https://images.fotmob.com/image_resources/logo/teamlogo/${p.teamId}.png` : null),
+      assists: p.assists != null ? Number(p.assists) : undefined,
+      matchesPlayed: p.matchesPlayed != null ? Number(p.matchesPlayed) : undefined,
+    })),
   };
 }
 

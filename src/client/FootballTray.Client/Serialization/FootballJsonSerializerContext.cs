@@ -54,6 +54,14 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(List<V2CatalogCompetitionDto>))]
 [JsonSerializable(typeof(ApiResponseEnvelope<List<V2CatalogCompetitionDto>>))]
 [JsonSerializable(typeof(SyncPreferencesRequestDto))]
+[JsonSerializable(typeof(CompetitionHubDto))]
+[JsonSerializable(typeof(ApiResponseEnvelope<CompetitionHubDto>))]
+[JsonSerializable(typeof(StandingRowDto))]
+[JsonSerializable(typeof(List<StandingRowDto>))]
+[JsonSerializable(typeof(PlayerStatLeaderDto))]
+[JsonSerializable(typeof(List<PlayerStatLeaderDto>))]
+[JsonSerializable(typeof(CompetitionSummaryDto))]
+[JsonSerializable(typeof(List<CompetitionSummaryDto>))]
 public partial class FootballJsonSerializerContext : JsonSerializerContext
 {
 }
