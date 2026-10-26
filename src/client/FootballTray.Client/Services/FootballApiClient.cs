@@ -9,7 +9,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Serialization;
+using FootballTray.Client.Services.Telemetry;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.Services;
@@ -100,8 +102,28 @@ public class FootballApiClient : IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly bool _disposeClient;
+    private readonly bool _isCustomHttpClient;
     private readonly ConcurrentDictionary<string, string> _etagsByUrl = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ApiResponseEnvelope<TrayDataDto>> _payloadsByUrl = new(StringComparer.OrdinalIgnoreCase);
+
+    // In-process Tier-2 Native Telemetry Provider & fast circuit breaker state
+    private readonly NativeTelemetryProvider _nativeProvider = new();
+    private readonly LocalCacheService _cacheService;
+    private volatile bool _useStandaloneNativeEngine = false;
+    private bool _enableNativeFallback;
+    private DateTimeOffset _lastProbeTime = DateTimeOffset.MinValue;
+    private static readonly TimeSpan ProbeInterval = TimeSpan.FromMinutes(5);
+    private int _probingLock = 0;
+
+    public bool IsStandaloneNativeEngineActive => _useStandaloneNativeEngine;
+
+    internal void SetStandaloneNativeEngineActiveForTesting(bool active) => _useStandaloneNativeEngine = active;
+
+    public bool EnableNativeFallback
+    {
+        get => _enableNativeFallback;
+        set => _enableNativeFallback = value;
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -136,8 +158,16 @@ public class FootballApiClient : IDisposable
     public string? GetCachedETag(string uri) =>
         _etagsByUrl.TryGetValue(uri, out var etag) ? etag : null;
 
-    public FootballApiClient(HttpClient? httpClient = null, string? baseUrl = null)
+    public FootballApiClient(
+        HttpClient? httpClient = null,
+        string? baseUrl = null,
+        LocalCacheService? cacheService = null,
+        bool? enableNativeFallback = null)
     {
+        _cacheService = cacheService ?? new LocalCacheService();
+        _enableNativeFallback = enableNativeFallback ?? (httpClient == null && baseUrl == null);
+        _isCustomHttpClient = (httpClient != null);
+
         if (httpClient != null)
         {
             _httpClient = httpClient;
@@ -159,8 +189,128 @@ public class FootballApiClient : IDisposable
         }
     }
 
+    #region Circuit Breaker & Probing Engine
+
+    private async Task EnsureEngineStateAsync(CancellationToken ct = default)
+    {
+        if (!_enableNativeFallback)
+        {
+            return;
+        }
+
+        var manifest = OtaConfigService.Instance.CurrentManifest;
+
+        // If OTA manifest designates native-only mode, bypass network probe completely
+        if (string.Equals(manifest?.RoutingMode, "native-only", StringComparison.OrdinalIgnoreCase))
+        {
+            _useStandaloneNativeEngine = true;
+            return;
+        }
+
+        // If OTA manifest designates cloud-primary mode, configure base address to cloud server
+        if (string.Equals(manifest?.RoutingMode, "cloud-primary", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(manifest?.CloudBaseUrl) &&
+            Uri.TryCreate(manifest.CloudBaseUrl, UriKind.Absolute, out var cloudUri))
+        {
+            if (_httpClient.BaseAddress != cloudUri)
+            {
+                _httpClient.BaseAddress = cloudUri;
+                _lastProbeTime = DateTimeOffset.MinValue;
+            }
+        }
+
+        // Production Standalone Optimization:
+        // When FOOTBALLTRAY_ENABLE_LOCAL_DAEMON is not "1" and no custom mock HttpClient was injected (production runtime),
+        // go straight to NativeTelemetryProvider to prevent hijacking by stale 127.0.0.1:4000 processes.
+        bool isLocalDaemonExplicitlyEnabled = string.Equals(Environment.GetEnvironmentVariable("FOOTBALLTRAY_ENABLE_LOCAL_DAEMON"), "1", StringComparison.OrdinalIgnoreCase);
+        if (!isLocalDaemonExplicitlyEnabled && !_isCustomHttpClient)
+        {
+            _useStandaloneNativeEngine = true;
+            return;
+        }
+
+        if (_lastProbeTime == DateTimeOffset.MinValue)
+        {
+            // Initial probe with fast 1.5s probe to check if Tier 1 server responds
+            bool isHealthy = await CheckBackendHealthFastAsync(ct);
+            _lastProbeTime = DateTimeOffset.UtcNow;
+            if (!isHealthy)
+            {
+                _useStandaloneNativeEngine = true;
+                AppLogger.Info("ApiClient", "StandaloneModeActivated", "Tier 1 server is not reachable. Switched to In-Process Native C# Direct Telemetry Engine.");
+            }
+            else
+            {
+                _useStandaloneNativeEngine = false;
+            }
+            return;
+        }
+
+        if (_useStandaloneNativeEngine && DateTimeOffset.UtcNow - _lastProbeTime > ProbeInterval)
+        {
+            _lastProbeTime = DateTimeOffset.UtcNow;
+            if (Interlocked.CompareExchange(ref _probingLock, 1, 0) == 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        bool isHealthy = await CheckBackendHealthFastAsync(CancellationToken.None);
+                        if (isHealthy)
+                        {
+                            _useStandaloneNativeEngine = false;
+                            AppLogger.Info("ApiClient", "DaemonReconnected", "Tier 1 server is online. Switched to Tier 1 daemon.");
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore background probe failure
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _probingLock, 0);
+                    }
+                });
+            }
+        }
+    }
+
+    private void ActivateStandaloneMode(string reason)
+    {
+        if (!_enableNativeFallback)
+        {
+            return;
+        }
+
+        if (!_useStandaloneNativeEngine)
+        {
+            _useStandaloneNativeEngine = true;
+            _lastProbeTime = DateTimeOffset.UtcNow;
+            AppLogger.Info("ApiClient", "FailoverToNative", $"Local daemon unreachable ({reason}). Switched to in-process Native C# Telemetry Engine.");
+        }
+    }
+
+    private async Task<bool> CheckBackendHealthFastAsync(CancellationToken ct = default)
+    {
+        if (_httpClient.BaseAddress == null) return false;
+        try
+        {
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            probeCts.CancelAfter(TimeSpan.FromMilliseconds(1500));
+            using var response = await _httpClient.GetAsync("/health", HttpCompletionOption.ResponseHeadersRead, probeCts.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    #endregion
+
     /// <summary>
     /// Fetches the tray match collection from /api/v2/tray with optional date, followed teams, and ETag 304 validation.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
     /// </summary>
     public Task<TrayApiResponse> GetTrayAsync(string? ifNoneMatch, CancellationToken cancellationToken) =>
         GetTrayAsync(ifNoneMatch, null, null, null, null, cancellationToken);
@@ -180,6 +330,40 @@ public class FootballApiClient : IDisposable
         string? pinnedMatchId = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var effectiveDate = date ?? DateTime.Today;
+            var nativeRes = await _nativeProvider.GetTrayForDateAsync(
+                effectiveDate.ToString("yyyy-MM-dd"),
+                ifNoneMatch,
+                teams,
+                competitions,
+                pinnedMatchId,
+                cancellationToken);
+
+            if (nativeRes.IsSuccess && nativeRes.Envelope != null)
+            {
+                _ = _cacheService.SaveTrayDateCacheAsync(effectiveDate.ToString("yyyy-MM-dd"), nativeRes.Envelope, CancellationToken.None);
+                return nativeRes;
+            }
+
+            // Tier 3 Offline Disk Fallback
+            var offlineCached = await _cacheService.LoadTrayDateCacheAsync(effectiveDate.ToString("yyyy-MM-dd"), cancellationToken);
+            if (offlineCached != null)
+            {
+                offlineCached.Stale = true;
+                if (offlineCached.Data != null)
+                {
+                    offlineCached.Data.CachedFallback = true;
+                }
+                return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+            }
+
+            return nativeRes;
+        }
+
         try
         {
             var uriBuilder = new System.Text.StringBuilder("/api/v2/tray?");
@@ -293,6 +477,7 @@ public class FootballApiClient : IDisposable
                     _etagsByUrl[uri] = newEtag;
                 }
                 _payloadsByUrl[uri] = envelope;
+                _ = _cacheService.SaveTrayDateCacheAsync(effectiveDate.ToString("yyyy-MM-dd"), envelope, CancellationToken.None);
 
                 return TrayApiResponse.Success(envelope, newEtag, quotaExhaustedHeader);
             }
@@ -306,13 +491,46 @@ public class FootballApiClient : IDisposable
         }
         catch (Exception ex)
         {
-            return TrayApiResponse.Error($"Network error: {ex.Message}");
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var effectiveDate = date ?? DateTime.Today;
+                var nativeRes = await _nativeProvider.GetTrayForDateAsync(
+                    effectiveDate.ToString("yyyy-MM-dd"),
+                    ifNoneMatch,
+                    teams,
+                    competitions,
+                    pinnedMatchId,
+                    cancellationToken);
+
+                if (nativeRes.IsSuccess && nativeRes.Envelope != null)
+                {
+                    _ = _cacheService.SaveTrayDateCacheAsync(effectiveDate.ToString("yyyy-MM-dd"), nativeRes.Envelope, CancellationToken.None);
+                    return nativeRes;
+                }
+
+                // Tier 3 Offline Disk Fallback
+                var offlineCached = await _cacheService.LoadTrayDateCacheAsync(effectiveDate.ToString("yyyy-MM-dd"), cancellationToken);
+                if (offlineCached != null)
+                {
+                    offlineCached.Stale = true;
+                    if (offlineCached.Data != null)
+                    {
+                        offlineCached.Data.CachedFallback = true;
+                    }
+                    return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+                }
+
+                return nativeRes;
+            }
+
+            return TrayApiResponse.Error($"Failed to fetch tray data from daemon: {ex.Message}");
         }
     }
 
     /// <summary>
     /// Fetches lightweight live tray matches from /api/v2/tray/live with ETag 304 support.
-    /// Strictly queries SQLite canonical tables on daemon.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
     /// </summary>
     public async Task<TrayApiResponse> GetLiveTrayAsync(
         string? ifNoneMatch = null,
@@ -320,6 +538,38 @@ public class FootballApiClient : IDisposable
         IEnumerable<string>? competitions = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var nativeRes = await _nativeProvider.GetTrayForDateAsync(
+                DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                ifNoneMatch,
+                teams,
+                competitions,
+                null,
+                cancellationToken);
+
+            if (nativeRes.IsSuccess && nativeRes.Envelope != null)
+            {
+                _ = _cacheService.SaveTrayDateCacheAsync(DateTime.UtcNow.ToString("yyyy-MM-dd"), nativeRes.Envelope, CancellationToken.None);
+                return nativeRes;
+            }
+
+            var offlineCached = await _cacheService.LoadTrayDateCacheAsync(DateTime.UtcNow.ToString("yyyy-MM-dd"), cancellationToken);
+            if (offlineCached != null)
+            {
+                offlineCached.Stale = true;
+                if (offlineCached.Data != null)
+                {
+                    offlineCached.Data.CachedFallback = true;
+                }
+                return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+            }
+
+            return nativeRes;
+        }
+
         try
         {
             var uriBuilder = new System.Text.StringBuilder("/api/v2/tray/live?");
@@ -425,6 +675,8 @@ public class FootballApiClient : IDisposable
                     _etagsByUrl[uri] = newEtag;
                 }
 
+                _ = _cacheService.SaveTrayDateCacheAsync(DateTime.UtcNow.ToString("yyyy-MM-dd"), envelope, CancellationToken.None);
+
                 return TrayApiResponse.Success(envelope, newEtag, quotaExhaustedHeader, cachedFallbackHeader);
             }
 
@@ -437,12 +689,44 @@ public class FootballApiClient : IDisposable
         }
         catch (Exception ex)
         {
-            return TrayApiResponse.Error($"Network error: {ex.Message}");
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var nativeRes = await _nativeProvider.GetTrayForDateAsync(
+                    DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                    ifNoneMatch,
+                    teams,
+                    competitions,
+                    null,
+                    cancellationToken);
+
+                if (nativeRes.IsSuccess && nativeRes.Envelope != null)
+                {
+                    _ = _cacheService.SaveTrayDateCacheAsync(DateTime.UtcNow.ToString("yyyy-MM-dd"), nativeRes.Envelope, CancellationToken.None);
+                    return nativeRes;
+                }
+
+                var offlineCached = await _cacheService.LoadTrayDateCacheAsync(DateTime.UtcNow.ToString("yyyy-MM-dd"), cancellationToken);
+                if (offlineCached != null)
+                {
+                    offlineCached.Stale = true;
+                    if (offlineCached.Data != null)
+                    {
+                        offlineCached.Data.CachedFallback = true;
+                    }
+                    return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+                }
+
+                return nativeRes;
+            }
+
+            return TrayApiResponse.Error($"Failed to fetch live tray data from daemon: {ex.Message}");
         }
     }
 
     /// <summary>
     /// Fetches full match details and timeline from /api/v2/matches/:id with ETag 304 support.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
     /// </summary>
     public Task<MatchDetailApiResponse> GetMatchDetailsAsync(string matchId, CancellationToken cancellationToken = default) =>
         GetMatchDetailsAsync(matchId, null, cancellationToken);
@@ -455,6 +739,38 @@ public class FootballApiClient : IDisposable
         if (string.IsNullOrWhiteSpace(matchId))
         {
             return MatchDetailApiResponse.Error("Match ID cannot be empty.");
+        }
+
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var detail = await _nativeProvider.GetMatchDetailsAsync(matchId, cancellationToken);
+            if (detail != null)
+            {
+                var env = new ApiResponseEnvelope<MatchDetailDto>
+                {
+                    SchemaVersion = "2.0",
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    Version = 2,
+                    GeneratedAt = DateTimeOffset.UtcNow,
+                    ServerTime = DateTimeOffset.UtcNow,
+                    Stale = false,
+                    Data = detail
+                };
+                _ = _cacheService.SaveMatchDetailCacheAsync(matchId, env, CancellationToken.None);
+                return MatchDetailApiResponse.Success(env);
+            }
+
+            // Tier 3 Offline Disk Fallback
+            var offlineCached = await _cacheService.LoadMatchDetailCacheAsync(matchId, cancellationToken);
+            if (offlineCached != null)
+            {
+                offlineCached.Stale = true;
+                return MatchDetailApiResponse.Success(offlineCached);
+            }
+
+            return MatchDetailApiResponse.Error($"Match center details not found for '{matchId}'.");
         }
 
         try
@@ -509,6 +825,8 @@ public class FootballApiClient : IDisposable
                     _etagsByUrl[uri] = newEtag;
                 }
 
+                _ = _cacheService.SaveMatchDetailCacheAsync(matchId, envelope, CancellationToken.None);
+
                 return MatchDetailApiResponse.Success(envelope, newEtag);
             }
 
@@ -521,12 +839,42 @@ public class FootballApiClient : IDisposable
         }
         catch (Exception ex)
         {
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var detail = await _nativeProvider.GetMatchDetailsAsync(matchId, cancellationToken);
+                if (detail != null)
+                {
+                    var env = new ApiResponseEnvelope<MatchDetailDto>
+                    {
+                        SchemaVersion = "2.0",
+                        RequestId = Guid.NewGuid().ToString("N"),
+                        Version = 2,
+                        GeneratedAt = DateTimeOffset.UtcNow,
+                        ServerTime = DateTimeOffset.UtcNow,
+                        Stale = false,
+                        Data = detail
+                    };
+                    _ = _cacheService.SaveMatchDetailCacheAsync(matchId, env, CancellationToken.None);
+                    return MatchDetailApiResponse.Success(env);
+                }
+
+                // Tier 3 Offline Disk Fallback
+                var offlineCached = await _cacheService.LoadMatchDetailCacheAsync(matchId, cancellationToken);
+                if (offlineCached != null)
+                {
+                    offlineCached.Stale = true;
+                    return MatchDetailApiResponse.Success(offlineCached);
+                }
+            }
+
             return MatchDetailApiResponse.Error($"Network error: {ex.Message}");
         }
     }
 
     /// <summary>
-    /// Searches clubs/teams in the backend catalog via /api/v2/catalog/teams?q={query}.
+    /// Searches clubs/teams in the catalog via /api/v2/catalog/teams?q={query}.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
     /// </summary>
     public async Task<CatalogSearchApiResponse<V2CatalogTeamDto>> SearchTeamsAsync(string query, int limit = 20, CancellationToken cancellationToken = default)
     {
@@ -539,6 +887,24 @@ public class FootballApiClient : IDisposable
                 Version = 2
             };
             return CatalogSearchApiResponse<V2CatalogTeamDto>.Success(emptyEnvelope);
+        }
+
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var teams = await _nativeProvider.SearchTeamsAsync(query, limit, cancellationToken);
+            var env = new ApiResponseEnvelope<List<V2CatalogTeamDto>>
+            {
+                SchemaVersion = "2.0",
+                RequestId = Guid.NewGuid().ToString("N"),
+                Version = 2,
+                GeneratedAt = DateTimeOffset.UtcNow,
+                ServerTime = DateTimeOffset.UtcNow,
+                Stale = false,
+                Data = teams
+            };
+            return CatalogSearchApiResponse<V2CatalogTeamDto>.Success(env);
         }
 
         try
@@ -568,12 +934,30 @@ public class FootballApiClient : IDisposable
         }
         catch (Exception ex)
         {
-            return CatalogSearchApiResponse<V2CatalogTeamDto>.Error($"Network error: {ex.Message}");
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var teams = await _nativeProvider.SearchTeamsAsync(query, limit, cancellationToken);
+                var env = new ApiResponseEnvelope<List<V2CatalogTeamDto>>
+                {
+                    SchemaVersion = "2.0",
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    Version = 2,
+                    GeneratedAt = DateTimeOffset.UtcNow,
+                    ServerTime = DateTimeOffset.UtcNow,
+                    Stale = false,
+                    Data = teams
+                };
+                return CatalogSearchApiResponse<V2CatalogTeamDto>.Success(env);
+            }
+
+            return CatalogSearchApiResponse<V2CatalogTeamDto>.Error($"Search failed: {ex.Message}");
         }
     }
 
     /// <summary>
-    /// Searches leagues/competitions in the backend catalog via /api/v2/catalog/competitions?q={query}.
+    /// Searches leagues/competitions in the catalog via /api/v2/catalog/competitions?q={query}.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
     /// </summary>
     public async Task<CatalogSearchApiResponse<V2CatalogCompetitionDto>> SearchCompetitionsAsync(string query, int limit = 20, CancellationToken cancellationToken = default)
     {
@@ -586,6 +970,24 @@ public class FootballApiClient : IDisposable
                 Version = 2
             };
             return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Success(emptyEnvelope);
+        }
+
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var comps = await _nativeProvider.SearchCompetitionsAsync(query, limit, cancellationToken);
+            var env = new ApiResponseEnvelope<List<V2CatalogCompetitionDto>>
+            {
+                SchemaVersion = "2.0",
+                RequestId = Guid.NewGuid().ToString("N"),
+                Version = 2,
+                GeneratedAt = DateTimeOffset.UtcNow,
+                ServerTime = DateTimeOffset.UtcNow,
+                Stale = false,
+                Data = comps
+            };
+            return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Success(env);
         }
 
         try
@@ -615,12 +1017,30 @@ public class FootballApiClient : IDisposable
         }
         catch (Exception ex)
         {
-            return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Error($"Network error: {ex.Message}");
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var comps = await _nativeProvider.SearchCompetitionsAsync(query, limit, cancellationToken);
+                var env = new ApiResponseEnvelope<List<V2CatalogCompetitionDto>>
+                {
+                    SchemaVersion = "2.0",
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    Version = 2,
+                    GeneratedAt = DateTimeOffset.UtcNow,
+                    ServerTime = DateTimeOffset.UtcNow,
+                    Stale = false,
+                    Data = comps
+                };
+                return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Success(env);
+            }
+
+            return CatalogSearchApiResponse<V2CatalogCompetitionDto>.Error($"Search failed: {ex.Message}");
         }
     }
 
     /// <summary>
     /// Pushes the user's followed competitions and teams to the daemon via POST /api/v2/preferences.
+    /// In standalone mode, preferences are saved locally and returns true immediately.
     /// </summary>
     public async Task<bool> SyncPreferencesAsync(
         IEnumerable<string> competitionIds,
@@ -628,6 +1048,11 @@ public class FootballApiClient : IDisposable
         string? activeProvider = null,
         CancellationToken cancellationToken = default)
     {
+        if (_useStandaloneNativeEngine)
+        {
+            return true;
+        }
+
         try
         {
             var payload = new SyncPreferencesRequestDto
@@ -655,9 +1080,15 @@ public class FootballApiClient : IDisposable
 
     /// <summary>
     /// Updates the pinned match ID on the daemon via POST /api/v2/preferences.
+    /// In standalone mode, preferences are saved locally and returns true immediately.
     /// </summary>
     public async Task<bool> UpdatePinnedMatchAsync(string? pinnedMatchId, CancellationToken cancellationToken = default)
     {
+        if (_useStandaloneNativeEngine)
+        {
+            return true;
+        }
+
         try
         {
             var payload = new
@@ -683,6 +1114,7 @@ public class FootballApiClient : IDisposable
 
     /// <summary>
     /// Fetches full competition standings, top scorers, and top assists via GET /api/v2/competitions/{id}/hub.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
     /// </summary>
     public async Task<CompetitionHubApiResponse> GetCompetitionHubAsync(
         string competitionId,
@@ -693,6 +1125,38 @@ public class FootballApiClient : IDisposable
         if (string.IsNullOrWhiteSpace(competitionId))
         {
             return CompetitionHubApiResponse.Error("Competition ID cannot be empty.");
+        }
+
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var hub = await _nativeProvider.GetCompetitionHubAsync(competitionId, name, logoUrl, cancellationToken);
+            if (hub != null)
+            {
+                var env = new ApiResponseEnvelope<CompetitionHubDto>
+                {
+                    SchemaVersion = "2.0",
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    Version = 2,
+                    GeneratedAt = DateTimeOffset.UtcNow,
+                    ServerTime = DateTimeOffset.UtcNow,
+                    Stale = false,
+                    Data = hub
+                };
+                _ = _cacheService.SaveCompetitionHubCacheAsync(competitionId, env, CancellationToken.None);
+                return CompetitionHubApiResponse.Success(env);
+            }
+
+            // Tier 3 Offline Disk Fallback
+            var offlineCached = await _cacheService.LoadCompetitionHubCacheAsync(competitionId, cancellationToken);
+            if (offlineCached != null)
+            {
+                offlineCached.Stale = true;
+                return CompetitionHubApiResponse.Success(offlineCached);
+            }
+
+            return CompetitionHubApiResponse.Error($"Competition hub data not found for '{competitionId}'.");
         }
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -734,6 +1198,7 @@ public class FootballApiClient : IDisposable
                         return CompetitionHubApiResponse.Error("Failed to deserialize competition hub response.");
                     }
 
+                    _ = _cacheService.SaveCompetitionHubCacheAsync(competitionId, envelope, CancellationToken.None);
                     return CompetitionHubApiResponse.Success(envelope);
                 }
                 catch (JsonException jEx)
@@ -752,13 +1217,37 @@ public class FootballApiClient : IDisposable
         {
             throw;
         }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-        {
-            Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubTimeout", $"Request timed out after 10s for '{url}'");
-            return CompetitionHubApiResponse.Error($"Request to '{url}' timed out after 10 seconds.");
-        }
         catch (Exception ex)
         {
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var hub = await _nativeProvider.GetCompetitionHubAsync(competitionId, name, logoUrl, linkedCts.Token);
+                if (hub != null)
+                {
+                    var env = new ApiResponseEnvelope<CompetitionHubDto>
+                    {
+                        SchemaVersion = "2.0",
+                        RequestId = Guid.NewGuid().ToString("N"),
+                        Version = 2,
+                        GeneratedAt = DateTimeOffset.UtcNow,
+                        ServerTime = DateTimeOffset.UtcNow,
+                        Stale = false,
+                        Data = hub
+                    };
+                    _ = _cacheService.SaveCompetitionHubCacheAsync(competitionId, env, CancellationToken.None);
+                    return CompetitionHubApiResponse.Success(env);
+                }
+
+                // Tier 3 Offline Disk Fallback
+                var offlineCached = await _cacheService.LoadCompetitionHubCacheAsync(competitionId, cancellationToken);
+                if (offlineCached != null)
+                {
+                    offlineCached.Stale = true;
+                    return CompetitionHubApiResponse.Success(offlineCached);
+                }
+            }
+
             Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubNetworkError", $"Network error for '{url}': [{ex.GetType().Name}] {ex.Message}", ex);
             return CompetitionHubApiResponse.Error($"Network error: {ex.Message}");
         }
@@ -766,6 +1255,7 @@ public class FootballApiClient : IDisposable
 
     public void Dispose()
     {
+        _nativeProvider.Dispose();
         if (_disposeClient)
         {
             _httpClient.Dispose();

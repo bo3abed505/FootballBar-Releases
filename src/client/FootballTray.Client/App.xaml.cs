@@ -15,6 +15,7 @@ using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Daemon;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.Services.Telemetry;
 using FootballTray.Client.Services.Updates;
 using FootballTray.Client.ViewModels;
 
@@ -52,6 +53,7 @@ public partial class App : Application
     public static MainViewModel? CurrentMainViewModel { get; private set; }
     public static IDiagnosticsService? CurrentDiagnosticsService { get; private set; }
     public static PreferencesService? CurrentPreferencesService => _preferencesService;
+    public static FootballApiClient? CurrentApiClient { get; private set; }
     public DaemonLifecycleManager? CurrentDaemonManager => _daemonManager;
 
     public App()
@@ -109,17 +111,21 @@ public partial class App : Application
 
         // 2. Initialize Core Client Services
         _apiClient = new FootballApiClient();
+        CurrentApiClient = _apiClient;
         _cacheService = new LocalCacheService();
         var audioService = new AudioPlaybackService(_preferencesService);
         AudioPlaybackService.Instance = audioService;
         var notificationService = new NotificationService(audioService: audioService, apiClient: _apiClient);
         var notificationCoordinator = new NotificationCoordinator(_preferencesService);
         _syncService = new SyncService(_apiClient, _cacheService, notificationService, _preferencesService, TimeSpan.FromSeconds(15), notificationCoordinator);
-        _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService);
+        _diagnosticsService = new DiagnosticsService(_syncService, _preferencesService, _cacheService, _apiClient);
         CurrentDiagnosticsService = _diagnosticsService;
         _updateDiscoveryService = new UpdateDiscoveryService();
         _updatePackageAcquisitionService = new UpdatePackageAcquisitionService();
         _updateInstallationService = new UpdateInstallationService();
+
+        // 3. Start background OTA telemetry manifest updates
+        OtaConfigService.Instance.StartBackgroundSync(_appShutdownCts.Token);
 
         var shutdownHandler = new ActionShutdownHandler(() =>
         {

@@ -14,6 +14,7 @@ public class DiagnosticsService : IDiagnosticsService
     private readonly ISyncService? _syncService;
     private readonly IPreferencesService? _preferencesService;
     private readonly LocalCacheService? _cacheService;
+    private readonly FootballApiClient? _apiClient;
     private readonly DateTimeOffset _startupTime;
 
     private string _taskbarHostStatus = "Unattached";
@@ -26,11 +27,13 @@ public class DiagnosticsService : IDiagnosticsService
     public DiagnosticsService(
         ISyncService? syncService = null,
         IPreferencesService? preferencesService = null,
-        LocalCacheService? cacheService = null)
+        LocalCacheService? cacheService = null,
+        FootballApiClient? apiClient = null)
     {
         _syncService = syncService;
         _preferencesService = preferencesService;
         _cacheService = cacheService;
+        _apiClient = apiClient;
         _startupTime = DateTimeOffset.UtcNow;
     }
 
@@ -71,21 +74,25 @@ public class DiagnosticsService : IDiagnosticsService
             var freshness = _syncService?.FreshnessState ??
                 (currentData != null ? DataFreshnessState.Stale : DataFreshnessState.Empty);
 
-            // Compute ApplicationHealthState
+            // Compute ApplicationHealthState: Standalone syncing is fully Healthy
             var health = ApplicationHealthState.Healthy;
             if (_taskbarHostStatus.Contains("Recovering", StringComparison.OrdinalIgnoreCase))
             {
                 health = ApplicationHealthState.Recovering;
             }
-            else if (freshness == DataFreshnessState.Stale || _taskbarHostStatus.Contains("Unattached", StringComparison.OrdinalIgnoreCase))
-            {
-                health = ApplicationHealthState.Degraded;
-            }
             else if (_taskbarHostStatus.Contains("Failed", StringComparison.OrdinalIgnoreCase) ||
+                     _taskbarHostStatus.Contains("Waiting for recovery", StringComparison.OrdinalIgnoreCase) ||
                      _notificationRegistrationStatus.Contains("Failed", StringComparison.OrdinalIgnoreCase))
             {
                 health = ApplicationHealthState.Degraded;
             }
+            else if (freshness == DataFreshnessState.Stale)
+            {
+                health = ApplicationHealthState.Degraded;
+            }
+
+            var isStandalone = (_apiClient ?? App.CurrentApiClient)?.IsStandaloneNativeEngineActive == true;
+            var endpoint = isStandalone ? "in-process (live-telemetry)" : FootballApiClient.GetDefaultBaseUrl();
 
             return new ClientHealthSnapshot
             {
@@ -106,7 +113,7 @@ public class DiagnosticsService : IDiagnosticsService
                 TaskbarHostStatus = _taskbarHostStatus,
                 NotificationRegistrationStatus = _notificationRegistrationStatus,
                 LastErrorSummary = _lastErrorSummary,
-                BackendEndpoint = FootballApiClient.GetDefaultBaseUrl()
+                BackendEndpoint = endpoint
             };
         }
     }

@@ -14,6 +14,7 @@ using FootballTray.Client.Services.Audio;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Services.Startup;
+using FootballTray.Client.Services.Telemetry;
 using FootballTray.Client.Services.Updates;
 
 namespace FootballTray.Client.ViewModels;
@@ -335,11 +336,23 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public string? LatestVersion => _mainViewModel?.LatestVersion;
 
-    public string? UpdateStatusMessage => _mainViewModel?.UpdateStatusMessage;
+    private string? _customUpdateStatusMessage;
+    public string? UpdateStatusMessage
+    {
+        get => _customUpdateStatusMessage ?? _mainViewModel?.UpdateStatusMessage;
+        private set
+        {
+            if (_customUpdateStatusMessage != value)
+            {
+                _customUpdateStatusMessage = value;
+                OnPropertyChanged(nameof(UpdateStatusMessage));
+            }
+        }
+    }
 
     public string? UpdateReleaseNotes => _mainViewModel?.UpdateReleaseNotes;
 
-    public bool CanDownloadUpdate => _mainViewModel?.CanDownloadUpdate ?? false;
+    public bool CanDownloadUpdate => !AppDistributionHelper.IsPackaged && (_mainViewModel?.CanDownloadUpdate ?? false);
 
     public bool IsAcquiringUpdate => _mainViewModel?.IsAcquiringUpdate ?? false;
 
@@ -349,7 +362,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public bool IsUpdateDownloaded => _mainViewModel?.IsUpdateDownloaded ?? false;
 
-    public bool CanInstallUpdate => _mainViewModel?.CanInstallUpdate ?? false;
+    public bool CanInstallUpdate => !AppDistributionHelper.IsPackaged && (_mainViewModel?.CanInstallUpdate ?? false);
 
     public bool IsInstallingUpdate => _mainViewModel?.IsInstallingUpdate ?? false;
 
@@ -363,6 +376,15 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task CheckForUpdatesAsync()
     {
+        // On manual update check, always trigger on-demand OTA live telemetry refresh
+        _ = Task.Run(() => OtaConfigService.Instance.RefreshAsync());
+
+        if (AppDistributionHelper.IsPackaged)
+        {
+            UpdateStatusMessage = "App updates are managed automatically by the Microsoft Store. Live telemetry is up to date.";
+            return;
+        }
+
         if (_mainViewModel != null)
         {
             await _mainViewModel.CheckForUpdatesAsync();

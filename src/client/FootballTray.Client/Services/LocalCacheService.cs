@@ -19,6 +19,7 @@ public class CachedTrayPayload
 public class LocalCacheService
 {
     private readonly string _cacheDirectory;
+    private readonly string _entitiesCacheDirectory;
     private readonly string _cacheFilePath;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,13 +31,18 @@ public class LocalCacheService
     public LocalCacheService(string? customDirectory = null)
     {
         _cacheDirectory = customDirectory ?? GetDefaultCacheDirectory();
+        _entitiesCacheDirectory = Path.Combine(_cacheDirectory, "Cache");
         _cacheFilePath = Path.Combine(_cacheDirectory, "tray.json");
+
+        // Prune expired cache files older than 14 days asynchronously on startup
+        _ = Task.Run(() => PruneExpiredCaches());
     }
 
     public static string GetDefaultCacheDirectory() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FootballTray");
 
     public string CacheFilePath => _cacheFilePath;
+    public string EntitiesCacheDirectory => _entitiesCacheDirectory;
 
     /// <summary>
     /// Loads the cached tray payload from disk. Returns null if missing, corrupt, or structurally invalid.
@@ -180,5 +186,225 @@ public class LocalCacheService
             System.Diagnostics.Debug.WriteLine($"[CACHE] Failed to clear cache: {ex.Message}");
         }
     }
+
+    #region Multi-Entity Offline Disk Cache (Tier 3)
+
+    private static string SanitizeFileNameKey(string rawKey)
+    {
+        if (string.IsNullOrWhiteSpace(rawKey)) return "unknown";
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = rawKey.Trim().ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (Array.IndexOf(invalid, chars[i]) >= 0 || chars[i] == ' ')
+            {
+                chars[i] = '_';
+            }
+        }
+        return new string(chars);
+    }
+
+    /// <summary>
+    /// Persists daily match schedules (tray_{date}.json) to disk for resilient offline browsing.
+    /// </summary>
+    public async Task<bool> SaveTrayDateCacheAsync(string dateKey, ApiResponseEnvelope<TrayDataDto> envelope, CancellationToken cancellationToken = default)
+    {
+        if (!TrayPayloadValidator.IsValid(envelope, out _)) return false;
+        string safeKey = SanitizeFileNameKey(dateKey);
+        string path = Path.Combine(_entitiesCacheDirectory, $"tray_{safeKey}.json");
+        return await WriteAtomicEntityFileAsync(path, async stream =>
+        {
+            await JsonSerializer.SerializeAsync(stream, envelope, FootballJsonSerializerContext.Default.ApiResponseEnvelopeTrayDataDto, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Loads daily match schedule for a specific date from disk if present.
+    /// </summary>
+    public async Task<ApiResponseEnvelope<TrayDataDto>?> LoadTrayDateCacheAsync(string dateKey, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            string safeKey = SanitizeFileNameKey(dateKey);
+            string path = Path.Combine(_entitiesCacheDirectory, $"tray_{safeKey}.json");
+            if (!File.Exists(path)) return null;
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var envelope = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeTrayDataDto, cancellationToken);
+            if (envelope == null || !TrayPayloadValidator.IsValid(envelope, out _)) return null;
+            return envelope;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Persists match details, 5-anchor lineups, stats, commentary (match_{matchId}.json) for offline Match Center viewing.
+    /// </summary>
+    public async Task<bool> SaveMatchDetailCacheAsync(string matchId, ApiResponseEnvelope<MatchDetailDto> envelope, CancellationToken cancellationToken = default)
+    {
+        if (envelope?.Data == null) return false;
+        string safeKey = SanitizeFileNameKey(matchId);
+        string path = Path.Combine(_entitiesCacheDirectory, $"match_{safeKey}.json");
+        return await WriteAtomicEntityFileAsync(path, async stream =>
+        {
+            await JsonSerializer.SerializeAsync(stream, envelope, FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Loads match details for a specific match ID from disk if present.
+    /// </summary>
+    public async Task<ApiResponseEnvelope<MatchDetailDto>?> LoadMatchDetailCacheAsync(string matchId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            string safeKey = SanitizeFileNameKey(matchId);
+            string path = Path.Combine(_entitiesCacheDirectory, $"match_{safeKey}.json");
+            if (!File.Exists(path)) return null;
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var envelope = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeMatchDetailDto, cancellationToken);
+            if (envelope?.Data == null) return null;
+            return envelope;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Persists competition standings and leaders (hub_{competitionKey}.json) for offline viewing.
+    /// </summary>
+    public async Task<bool> SaveCompetitionHubCacheAsync(string competitionKey, ApiResponseEnvelope<CompetitionHubDto> envelope, CancellationToken cancellationToken = default)
+    {
+        if (envelope?.Data == null) return false;
+        string safeKey = SanitizeFileNameKey(competitionKey);
+        string path = Path.Combine(_entitiesCacheDirectory, $"hub_{safeKey}.json");
+        return await WriteAtomicEntityFileAsync(path, async stream =>
+        {
+            await JsonSerializer.SerializeAsync(stream, envelope, FootballJsonSerializerContext.Default.ApiResponseEnvelopeCompetitionHubDto, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Loads competition standings and leaders from disk if present.
+    /// </summary>
+    public async Task<ApiResponseEnvelope<CompetitionHubDto>?> LoadCompetitionHubCacheAsync(string competitionKey, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            string safeKey = SanitizeFileNameKey(competitionKey);
+            string path = Path.Combine(_entitiesCacheDirectory, $"hub_{safeKey}.json");
+            if (!File.Exists(path)) return null;
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var envelope = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeCompetitionHubDto, cancellationToken);
+            if (envelope?.Data == null) return null;
+            return envelope;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> WriteAtomicEntityFileAsync(string targetPath, Func<Stream, Task> serializeAction, CancellationToken ct)
+    {
+        try
+        {
+            if (!Directory.Exists(_entitiesCacheDirectory))
+            {
+                Directory.CreateDirectory(_entitiesCacheDirectory);
+            }
+
+            string tempPath = Path.Combine(_entitiesCacheDirectory, $"{Path.GetFileNameWithoutExtension(targetPath)}_{Guid.NewGuid():N}.tmp");
+
+            await using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await serializeAction(stream);
+                await stream.FlushAsync(ct);
+            }
+
+            if (File.Exists(targetPath))
+            {
+                try
+                {
+                    File.Replace(tempPath, targetPath, null);
+                }
+                catch
+                {
+                    File.Delete(targetPath);
+                    File.Move(tempPath, targetPath);
+                }
+            }
+            else
+            {
+                File.Move(tempPath, targetPath);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[CACHE] WriteAtomicEntityFileAsync failed for '{targetPath}': {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Evicts cached entity files older than the specified age (default 14 days) to keep disk usage negligible.
+    /// </summary>
+    public void PruneExpiredCaches(TimeSpan? maxAge = null)
+    {
+        try
+        {
+            if (!Directory.Exists(_entitiesCacheDirectory)) return;
+
+            var limit = DateTime.UtcNow - (maxAge ?? TimeSpan.FromDays(14));
+            var dir = new DirectoryInfo(_entitiesCacheDirectory);
+
+            foreach (var file in dir.EnumerateFiles("*.json"))
+            {
+                try
+                {
+                    if (file.LastWriteTimeUtc < limit)
+                    {
+                        file.Delete();
+                    }
+                }
+                catch
+                {
+                    // Ignore transient file lock
+                }
+            }
+
+            // Also prune any leftover temporary files (.tmp) older than 1 hour
+            var tmpLimit = DateTime.UtcNow - TimeSpan.FromHours(1);
+            foreach (var file in dir.EnumerateFiles("*.tmp"))
+            {
+                try
+                {
+                    if (file.LastWriteTimeUtc < tmpLimit)
+                    {
+                        file.Delete();
+                    }
+                }
+                catch
+                {
+                    // Ignore transient lock
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[CACHE] PruneExpiredCaches failed: {ex.Message}");
+        }
+    }
+
+    #endregion
 }
 

@@ -571,6 +571,78 @@ if (-not (Test-Path $ManifestFilePath)) {
     }
 }
 
+# 9. Verify OTA Telemetry Manifest (if present)
+$OtaManifestFilePath = Join-Path $ReleaseDir "ota-telemetry-manifest.json"
+Write-Host "`n[9/9] Checking OTA telemetry manifest (optional)..." -ForegroundColor Yellow
+if (-not (Test-Path $OtaManifestFilePath)) {
+    Write-Host "  No ota-telemetry-manifest.json found (optional artifact for historical releases; skipped)." -ForegroundColor Gray
+} else {
+    try {
+        $otaJson = Get-Content -Path $OtaManifestFilePath -Raw
+        $otaDoc = [System.Text.Json.JsonDocument]::Parse($otaJson)
+        try {
+            $root = $otaDoc.RootElement
+            $props = [System.Collections.Generic.Dictionary[string, System.Text.Json.JsonElement]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($p in $root.EnumerateObject()) {
+                $props[$p.Name] = $p.Value
+            }
+
+            # schemaVersion
+            if (-not $props.ContainsKey("schemaVersion") -or $props["schemaVersion"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("ota-telemetry-manifest.json: schemaVersion is missing or not a string.")
+            } else {
+                $sVer = $props["schemaVersion"].GetString()
+                if ($sVer -ne "1.0") {
+                    $validationErrors.Add("ota-telemetry-manifest.json: Unsupported schemaVersion '$sVer'. Expected '1.0'.")
+                } else {
+                    Write-Host "  OTA manifest schemaVersion is '1.0'" -ForegroundColor Green
+                }
+            }
+
+            # manifestVersion
+            if (-not $props.ContainsKey("manifestVersion") -or $props["manifestVersion"].ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+                $validationErrors.Add("ota-telemetry-manifest.json: manifestVersion is missing or not a string.")
+            } else {
+                $mVer = $props["manifestVersion"].GetString()
+                if ($mVer -ne $Version) {
+                    $validationErrors.Add("ota-telemetry-manifest.json: manifestVersion '$mVer' does not match expected release version '$Version'.")
+                } else {
+                    Write-Host "  OTA manifest manifestVersion matches '$Version'" -ForegroundColor Green
+                }
+            }
+
+            # routingMode
+            if ($props.ContainsKey("routingMode")) {
+                $mode = $props["routingMode"].GetString()
+                if ($mode -notin @("auto", "native-only", "cloud-primary")) {
+                    $validationErrors.Add("ota-telemetry-manifest.json: Invalid routingMode '$mode'. Expected 'auto', 'native-only', or 'cloud-primary'.")
+                } else {
+                    Write-Host "  OTA manifest routingMode is valid: '$mode'" -ForegroundColor Green
+                }
+            }
+
+            # endpoints
+            if (-not $props.ContainsKey("endpoints") -or $props["endpoints"].ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
+                $validationErrors.Add("ota-telemetry-manifest.json: endpoints object is missing or invalid.")
+            } else {
+                Write-Host "  OTA manifest endpoints configuration is present." -ForegroundColor Green
+            }
+
+            # White-label compliance check on manifest metadata
+            if ($props.ContainsKey("provider")) {
+                $providerName = $props["provider"].GetString()
+                if ($providerName -ne "live-telemetry") {
+                    $validationErrors.Add("ota-telemetry-manifest.json: White-label violation! provider must be 'live-telemetry', found '$providerName'.")
+                }
+            }
+        } finally {
+            $otaDoc.Dispose()
+        }
+    } catch {
+        $validationErrors.Add("ota-telemetry-manifest.json: Failed to parse or inspect manifest: $_")
+    }
+}
+
 Write-Host "`n============================================================" -ForegroundColor Cyan
 if ($validationErrors.Count -eq 0) {
     Write-Host " VALIDATION PASSED: Release artifact is complete, secure, and valid!" -ForegroundColor Green

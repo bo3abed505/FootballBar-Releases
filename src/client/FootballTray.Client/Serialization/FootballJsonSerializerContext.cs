@@ -62,6 +62,11 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(List<PlayerStatLeaderDto>))]
 [JsonSerializable(typeof(CompetitionSummaryDto))]
 [JsonSerializable(typeof(List<CompetitionSummaryDto>))]
+[JsonSerializable(typeof(OtaTelemetryManifestDto))]
+[JsonSerializable(typeof(OtaTelemetryEndpointsDto))]
+[JsonSerializable(typeof(OtaManifestCacheRecord))]
+[JsonSerializable(typeof(Dictionary<string, int>))]
+[JsonSerializable(typeof(List<int>))]
 public partial class FootballJsonSerializerContext : JsonSerializerContext
 {
 }

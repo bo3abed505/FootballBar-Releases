@@ -131,6 +131,12 @@ public sealed class DaemonLifecycleManager : IDisposable
     /// </summary>
     public async Task<bool> StartDaemonAsync(string activeProvider = "fotmob", CancellationToken cancellationToken = default)
     {
+        if (!string.Equals(Environment.GetEnvironmentVariable("FOOTBALLTRAY_ENABLE_LOCAL_DAEMON"), "1", StringComparison.OrdinalIgnoreCase))
+        {
+            AppLogger.Info("Daemon", "StandaloneMode", "Running with built-in Native C# Telemetry Engine (no external node daemon required).");
+            return false;
+        }
+
         // 1. Pre-flight check: Is the backend already running?
         if (await IsDaemonHealthyAsync(cancellationToken))
         {
@@ -152,7 +158,7 @@ public sealed class DaemonLifecycleManager : IDisposable
         string? backendDir = ResolveBackendDirectory();
         if (string.IsNullOrWhiteSpace(backendDir))
         {
-            AppLogger.Warn("Daemon", "DirectoryNotFound", "Could not locate backend directory with compiled dist/server.js.");
+            AppLogger.Info("Daemon", "StandaloneMode", "Running with built-in Native C# Telemetry Engine (no external node daemon required).");
             return false;
         }
 
@@ -160,7 +166,7 @@ public sealed class DaemonLifecycleManager : IDisposable
         string serverJsPath = Path.Combine(absoluteBackendDir, "dist", "server.js");
         if (!File.Exists(serverJsPath))
         {
-            AppLogger.Warn("Daemon", "EntryNotFound", $"Backend entry point not found at '{serverJsPath}'. Ensure 'npm run build' has been executed.");
+            AppLogger.Info("Daemon", "StandaloneMode", "Running with built-in Native C# Telemetry Engine (no external node daemon required).");
             return false;
         }
 

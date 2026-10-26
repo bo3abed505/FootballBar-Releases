@@ -264,8 +264,30 @@ if (-not $SkipArchive) {
     Write-Host "`n[6/8] Skipping archive creation (-SkipArchive was specified)." -ForegroundColor Gray
 }
 
-# 7. Compute SHA-256 Checksums
-Write-Host "`n[7/8] Generating SHA-256 checksums..." -ForegroundColor Yellow
+# 7. Generate and Stamp OTA Telemetry Manifest
+$otaSource = Join-Path $ScriptDir "ota-telemetry-manifest.json"
+$otaDest = Join-Path $ReleaseBaseDir "ota-telemetry-manifest.json"
+if (Test-Path $otaSource) {
+    Write-Host "`n[7/9] Stamping OTA telemetry manifest: $otaDest..." -ForegroundColor Yellow
+    $otaRaw = Get-Content -LiteralPath $otaSource -Raw
+    $otaDoc = [System.Text.Json.JsonDocument]::Parse($otaRaw)
+    $otaDict = [ordered]@{}
+    foreach ($prop in $otaDoc.RootElement.EnumerateObject()) {
+        if ($prop.Name -eq "manifestVersion") {
+            $otaDict[$prop.Name] = $Version
+        } elseif ($prop.Name -eq "updatedAt") {
+            $otaDict[$prop.Name] = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        } else {
+            $otaDict[$prop.Name] = ($prop.Value.GetRawText() | ConvertFrom-Json)
+        }
+    }
+    $otaOutJson = $otaDict | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($otaDest, $otaOutJson + "`n", [System.Text.UTF8Encoding]::new($false))
+    Write-Host "  OTA manifest stamped with version $Version." -ForegroundColor Green
+}
+
+# 8. Compute SHA-256 Checksums
+Write-Host "`n[8/9] Generating SHA-256 checksums..." -ForegroundColor Yellow
 $checksumEntries = [System.Collections.Generic.List[string]]::new()
 
 if (Test-Path $ArchiveFile) {
@@ -278,11 +300,17 @@ $exeHash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLowerInvariant
 $checksumEntries.Add("$exeHash  win-x64/FootballTray.exe")
 Write-Host "  $exeHash  win-x64/FootballTray.exe" -ForegroundColor Cyan
 
+if (Test-Path $otaDest) {
+    $otaHash = (Get-FileHash -Path $otaDest -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumEntries.Add("$otaHash  $([System.IO.Path]::GetFileName($otaDest))")
+    Write-Host "  $otaHash  $([System.IO.Path]::GetFileName($otaDest))" -ForegroundColor Cyan
+}
+
 Set-Content -Path $ChecksumFile -Value ($checksumEntries -join "`n")
 
-# 8. Generate Release Manifest (Optional)
+# 9. Generate Release Manifest (Optional)
 if ($hasUpdateUrl) {
-    Write-Host "`n[8/8] Generating release manifest: $ManifestFile..." -ForegroundColor Yellow
+    Write-Host "`n[9/9] Generating release manifest: $ManifestFile..." -ForegroundColor Yellow
     try {
         $notesFile = $releaseNotesPath
         New-ReleaseManifest `
@@ -298,7 +326,7 @@ if ($hasUpdateUrl) {
         exit 1
     }
 } else {
-    Write-Host "`n[8/8] Skipping release manifest (-UpdateDownloadUrl was not specified)." -ForegroundColor Gray
+    Write-Host "`n[9/9] Skipping release manifest (-UpdateDownloadUrl was not specified)." -ForegroundColor Gray
 }
 
 # Final gate: run validate-release.ps1 with -RequireAutoUpdateInstaller so every new

@@ -14,6 +14,7 @@ using FootballTray.Core.Dto;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
+using FootballTray.Client.Services.Telemetry;
 using FootballTray.Client.Services.Updates;
 
 namespace FootballTray.Client.ViewModels;
@@ -488,7 +489,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get
         {
-            if (IsAcquiringUpdate || !_isUpdateAvailable || _offeredManifest == null || _updateAcquisitionService == null)
+            if (AppDistributionHelper.IsPackaged || IsAcquiringUpdate || !_isUpdateAvailable || _offeredManifest == null || _updateAcquisitionService == null)
             {
                 return false;
             }
@@ -566,7 +567,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         get
         {
-            if (IsInstallingUpdate || !_isUpdateAvailable || _offeredManifest == null || _updateInstallationService == null)
+            if (AppDistributionHelper.IsPackaged || IsInstallingUpdate || !_isUpdateAvailable || _offeredManifest == null || _updateInstallationService == null)
             {
                 return false;
             }
@@ -3383,6 +3384,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (isManual)
         {
             Interlocked.Exchange(ref _manualUpdateCheckRequested, 1);
+            // On manual update check, always trigger on-demand OTA live telemetry refresh
+            _ = Task.Run(() => OtaConfigService.Instance.RefreshAsync());
+        }
+
+        if (AppDistributionHelper.IsPackaged)
+        {
+            if (isManual)
+            {
+                RunOnUiSafe(() =>
+                {
+                    IsCheckingForUpdates = false;
+                    IsUpdateAvailable = false;
+                    UpdateStatusMessage = "App updates are managed automatically by the Microsoft Store. Live telemetry is up to date.";
+                }, nameof(CheckForUpdatesAsync));
+            }
+            SemanticVersion.TryParse(AppVersionInfo.Version, out var currVer);
+            return new UpdateCheckResult
+            {
+                State = UpdateCheckState.UpToDate,
+                CurrentVersion = currVer,
+                TargetVersion = currVer,
+                Message = "App updates are managed automatically by the Microsoft Store.",
+                CheckedAt = DateTimeOffset.UtcNow
+            };
         }
 
         if (_updateDiscoveryService == null)

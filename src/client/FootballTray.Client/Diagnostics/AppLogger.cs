@@ -45,6 +45,9 @@ public static class AppLogger
     public static void Warn(string component, string eventName, string message, string? correlationId = null, Exception? ex = null) =>
         Log(DiagnosticLogLevel.Warning, component, eventName, message, correlationId, ex);
 
+    public static void Warning(string component, string eventName, string message, string? correlationId = null, Exception? ex = null) =>
+        Warn(component, eventName, message, correlationId, ex);
+
     public static void Error(string component, string eventName, string message, string? correlationId = null, Exception? ex = null) =>
         Log(DiagnosticLogLevel.Error, component, eventName, message, correlationId, ex);
 
