@@ -297,7 +297,10 @@ public partial class App : Application
                     (fixtureId, formattedText) => _tickerControl?.UpdateDisplay(fixtureId, formattedText),
                     (fixtureId, formattedText, homeLogo, awayLogo) => _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo),
                     (fixtureId, formattedText, homeLogo, awayLogo, match, isPinned) =>
-                        _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo, match, isPinned));
+                    {
+                        _tickerControl?.UpdateDisplay(fixtureId, formattedText, homeLogo, awayLogo, match, isPinned);
+                        CurrentMainViewModel?.OnTickerRotated(fixtureId, match, isPinned);
+                    });
             }
             CurrentTickerCoordinator = _tickerCoordinator;
             if (_tickerControl != null)

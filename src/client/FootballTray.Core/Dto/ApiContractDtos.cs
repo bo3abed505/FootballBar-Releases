@@ -74,6 +74,9 @@ public class TrayDataDto
 
     [JsonPropertyName("followedTeamCompetitions")]
     public List<CompetitionSummaryDto>? FollowedTeamCompetitions { get; set; }
+
+    [JsonPropertyName("featuredMatch")]
+    public TrayMatchDto? FeaturedMatch { get; set; }
 }
 
 public class TrayMatchDto
@@ -487,6 +490,24 @@ public class LineupPlayerDto
     [JsonPropertyName("isCaptain")]
     public bool? IsCaptain { get; set; }
 
+    [JsonPropertyName("goals")]
+    public int Goals { get; set; }
+
+    [JsonPropertyName("assists")]
+    public int Assists { get; set; }
+
+    [JsonPropertyName("yellowCards")]
+    public int YellowCards { get; set; }
+
+    [JsonPropertyName("redCards")]
+    public int RedCards { get; set; }
+
+    [JsonPropertyName("subInMinute")]
+    public int? SubInMinute { get; set; }
+
+    [JsonPropertyName("subOutMinute")]
+    public int? SubOutMinute { get; set; }
+
     public int? EffectiveNumber => Number ?? ShirtNumber;
 }
 
@@ -616,6 +637,9 @@ public class H2HAndPredictionsDto
 
     [JsonPropertyName("awayWinProbabilityPct")]
     public int AwayWinProbabilityPct { get; set; }
+
+    [JsonPropertyName("summaryDisplay")]
+    public string? SummaryDisplay { get; set; }
 }
 
 public class LineupDto

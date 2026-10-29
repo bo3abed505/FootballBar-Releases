@@ -1,3 +1,4 @@
+using System.IO;
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -7,7 +8,9 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Views;
@@ -25,6 +28,7 @@ public sealed partial class TaskbarTicker : UserControl
     private int _initialOffsetX = 0;
     private DispatcherTimer? _clickResolutionTimer;
     private string? _pendingClickMatchId;
+    private bool _isUpdatingMenu;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -43,6 +47,7 @@ public sealed partial class TaskbarTicker : UserControl
     public TaskbarTicker()
     {
         InitializeComponent();
+        EnsureFallbackLogoLoaded();
         BuildDisplayMenu();
         if (TickerContextMenu != null)
         {
@@ -54,8 +59,17 @@ public sealed partial class TaskbarTicker : UserControl
                     var currentMode = App.CurrentMainViewModel?.PreferencesService?.Current.SoundMode ?? NotificationSoundMode.Custom;
                     MenuMuteToggle.IsChecked = (currentMode == NotificationSoundMode.Off);
                 }
+                UpdatePinAndAutoRotateMenuState();
             };
         }
+    }
+
+    /// <summary>
+    /// Explicitly switches taskbar ticker pill to idle/fallback state with logo.
+    /// </summary>
+    public void ShowFallback(string text = "FootballTray")
+    {
+        UpdateDisplay(null, text, null, null, null, false);
     }
 
     /// <summary>
@@ -94,6 +108,7 @@ public sealed partial class TaskbarTicker : UserControl
 
             if (match != null)
             {
+                if (FallbackPanel != null) FallbackPanel.Visibility = Visibility.Collapsed;
                 if (FallbackText != null) FallbackText.Visibility = Visibility.Collapsed;
 
                 if (HomeTeamName != null)
@@ -180,7 +195,27 @@ public sealed partial class TaskbarTicker : UserControl
                 if (AwayCrest != null) AwayCrest.Visibility = Visibility.Collapsed;
                 if (StatusText != null) StatusText.Visibility = Visibility.Collapsed;
 
-                if (FallbackText != null)
+                if (FallbackPanel != null)
+                {
+                    EnsureFallbackLogoLoaded();
+                    if (FallbackLogo != null) FallbackLogo.Visibility = Visibility.Visible;
+                    if (FallbackText != null)
+                    {
+                        string cleanText = formattedText;
+                        if (cleanText.StartsWith("⚽ ", StringComparison.Ordinal))
+                        {
+                            cleanText = cleanText["⚽ ".Length..];
+                        }
+                        else if (cleanText.StartsWith("⚽", StringComparison.Ordinal))
+                        {
+                            cleanText = cleanText["⚽".Length..].TrimStart();
+                        }
+                        FallbackText.Text = !string.IsNullOrWhiteSpace(cleanText) ? cleanText : "FootballTray";
+                        FallbackText.Visibility = Visibility.Visible;
+                    }
+                    FallbackPanel.Visibility = Visibility.Visible;
+                }
+                else if (FallbackText != null)
                 {
                     string cleanText = formattedText;
                     if (cleanText.StartsWith("⚽ ", StringComparison.Ordinal))
@@ -280,6 +315,12 @@ public sealed partial class TaskbarTicker : UserControl
                 FlyoutEventsPanel.Visibility = Visibility.Collapsed;
             }
 
+            if ((match.Events == null || match.Events.Count == 0 || match.RecentEvents == null || match.RecentEvents.Count == 0) &&
+                (match.Score?.Home > 0 || match.Score?.Away > 0))
+            {
+                _ = EnrichFlyoutEventsAsync(match.Id);
+            }
+
             FlyoutPinHintText.Text = isPinned
                 ? "📌 Match is pinned (right-click to unpin)"
                 : "Right-click to pin match or open details";
@@ -293,6 +334,117 @@ public sealed partial class TaskbarTicker : UserControl
             FlyoutAwayTeamText.Text = "";
             FlyoutEventsPanel.Visibility = Visibility.Collapsed;
             FlyoutPinHintText.Text = "";
+        }
+    }
+
+    private async void EnsureFallbackLogoLoaded()
+    {
+        if (FallbackLogo == null || FallbackLogo.Source != null) return;
+        try
+        {
+            string? logoPath = GetAppLogoFilePath();
+            if (!string.IsNullOrEmpty(logoPath) && System.IO.File.Exists(logoPath))
+            {
+                using var stream = System.IO.File.OpenRead(logoPath);
+                var bitmap = new BitmapImage
+                {
+                    DecodePixelWidth = 28,
+                    DecodePixelHeight = 28
+                };
+                await bitmap.SetSourceAsync(stream.AsRandomAccessStream());
+                FallbackLogo.Source = bitmap;
+                FallbackLogo.Visibility = Visibility.Visible;
+                return;
+            }
+
+            var uri = GetAppLogoUri();
+            if (uri != null)
+            {
+                FallbackLogo.Source = new BitmapImage(uri)
+                {
+                    DecodePixelWidth = 28,
+                    DecodePixelHeight = 28
+                };
+                FallbackLogo.Visibility = Visibility.Visible;
+            }
+        }
+        catch
+        {
+            // Best effort
+        }
+    }
+
+    private static string? GetAppLogoFilePath()
+    {
+        string[] candidates =
+        {
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppLogo.png"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Square44x44Logo.png"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Square44x44Logo.targetsize-24_altform-unplated.png"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Square44x44Logo.png"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "StoreLogo.png"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Square150x150Logo.png")
+        };
+
+        foreach (var path in candidates)
+        {
+            if (System.IO.File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static Uri GetAppLogoUri()
+    {
+        string? path = GetAppLogoFilePath();
+        if (!string.IsNullOrEmpty(path))
+        {
+            return new Uri(path);
+        }
+
+        return ImageCacheService.DefaultFallbackShieldUri;
+    }
+
+    private async Task EnrichFlyoutEventsAsync(string? matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId) || _currentMatch == null || _currentMatch.Id != matchId)
+            return;
+
+        try
+        {
+            var apiClient = App.CurrentApiClient;
+            if (apiClient == null) return;
+
+            var response = await apiClient.GetMatchDetailsAsync(matchId).ConfigureAwait(false);
+            var matchDetail = response?.Envelope?.Data;
+            if (matchDetail != null && matchDetail.Events != null && matchDetail.Events.Count > 0)
+            {
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (_currentMatch != null && _currentMatch.Id == matchId)
+                    {
+                        _currentMatch.Events = matchDetail.Events;
+                        _currentMatch.RecentEvents = matchDetail.Events;
+                        var peekData = PeekViewFormatter.Format(_currentMatch);
+                        if (peekData.HasEvents && FlyoutEventsPanel != null)
+                        {
+                            FlyoutEventsPanel.Visibility = Visibility.Visible;
+                            if (FlyoutHomeEventsHeader != null) FlyoutHomeEventsHeader.Text = peekData.HomeHeader;
+                            if (FlyoutHomeEventsText != null) FlyoutHomeEventsText.Text = peekData.HomeEventsText;
+                            if (FlyoutAwayEventsHeader != null) FlyoutAwayEventsHeader.Text = peekData.AwayHeader;
+                            if (FlyoutAwayEventsText != null) FlyoutAwayEventsText.Text = peekData.AwayEventsText;
+                            if (FlyoutGoalscorersText != null) FlyoutGoalscorersText.Text = peekData.FormattedToolTipText;
+                        }
+                    }
+                });
+            }
+        }
+        catch
+        {
+            // Best effort enrichment
         }
     }
 
@@ -427,6 +579,10 @@ public sealed partial class TaskbarTicker : UserControl
     private void RootBorder_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
         RootBorder.Opacity = 0.85;
+        if (_currentMatch != null && (_currentMatch.Events == null || _currentMatch.Events.Count == 0 || _currentMatch.RecentEvents == null || _currentMatch.RecentEvents.Count == 0))
+        {
+            _ = EnrichFlyoutEventsAsync(_currentMatch.Id);
+        }
     }
 
     private void RootBorder_PointerExited(object sender, PointerRoutedEventArgs e)
@@ -452,10 +608,101 @@ public sealed partial class TaskbarTicker : UserControl
         OpenMatchCenterForMatch(_currentDisplayedMatchId);
     }
 
+    private void UpdatePinAndAutoRotateMenuState()
+    {
+        _isUpdatingMenu = true;
+        try
+        {
+            bool hasCurrentMatch = !string.IsNullOrEmpty(_currentDisplayedMatchId);
+            bool isPinned = (App.CurrentTickerCoordinator?.IsPinned == true) ||
+                            (!string.IsNullOrEmpty(_currentDisplayedMatchId) && string.Equals(App.CurrentMainViewModel?.ManualPinnedMatchId, _currentDisplayedMatchId, StringComparison.Ordinal));
+
+            if (MenuPinMatch != null)
+            {
+                MenuPinMatch.Visibility = (hasCurrentMatch && !isPinned) ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (MenuUnpinMatch != null)
+            {
+                MenuUnpinMatch.Visibility = (hasCurrentMatch && isPinned) ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (MenuAutoRotateToggle != null)
+            {
+                var carouselEnabled = App.CurrentMainViewModel?.PreferencesService?.Current.EnableTickerCarousel ?? true;
+                MenuAutoRotateToggle.IsChecked = carouselEnabled;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("TaskbarTicker", "UpdatePinAndAutoRotateMenuStateFailed", "Failed updating pin and auto-rotate menu state", ex: ex);
+        }
+        finally
+        {
+            _isUpdatingMenu = false;
+        }
+    }
+
+    private void OnPinMatchClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(_currentDisplayedMatchId))
+            {
+                App.CurrentMainViewModel?.PinMatch(_currentDisplayedMatchId);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("TaskbarTicker", "PinMatchFailed", "Failed pinning match from menu", ex: ex);
+        }
+    }
+
+    private void OnUnpinMatchClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            App.CurrentMainViewModel?.UnpinMatch(_currentDisplayedMatchId);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("TaskbarTicker", "UnpinMatchFailed", "Failed unpinning match from menu", ex: ex);
+        }
+    }
+
+    private async void MenuAutoRotateToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingMenu) return;
+        try
+        {
+            var prefs = App.CurrentMainViewModel?.PreferencesService;
+            if (prefs == null) return;
+            bool isChecked = MenuAutoRotateToggle?.IsChecked ?? true;
+            await prefs.SetEnableTickerCarouselAsync(isChecked);
+            if (App.CurrentMainViewModel != null)
+            {
+                await App.CurrentMainViewModel.SetEnableTickerCarouselAsync(isChecked);
+            }
+            else
+            {
+                App.CurrentTickerCoordinator?.SetCarouselEnabled(isChecked);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("TaskbarTicker", "AutoRotateToggleFailed", "Failed toggling auto-rotate from taskbar menu", ex: ex);
+        }
+    }
+
     private void OnTogglePinClicked(object sender, RoutedEventArgs e)
     {
-        var matchId = _currentDisplayedMatchId;
-        PinToggled?.Invoke(this, matchId);
+        try
+        {
+            var matchId = _currentDisplayedMatchId;
+            PinToggled?.Invoke(this, matchId);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("TaskbarTicker", "TogglePinFailed", "Failed toggling pin from menu", ex: ex);
+        }
     }
 
     private void OnOpenAppClicked(object sender, RoutedEventArgs e)
@@ -624,7 +871,7 @@ public sealed partial class TaskbarTicker : UserControl
 
         foreach (var item in TickerContextMenu.Items)
         {
-            if (item is ToggleMenuFlyoutItem toggleItem && toggleItem != MenuMuteToggle)
+            if (item is ToggleMenuFlyoutItem toggleItem && toggleItem != MenuMuteToggle && toggleItem != MenuAutoRotateToggle)
             {
                 string? tag = toggleItem.Tag as string;
                 if (string.IsNullOrEmpty(tag))

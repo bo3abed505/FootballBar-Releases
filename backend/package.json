@@ -1,6 +1,6 @@
 {
   "name": "footballtray-backend",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "FootballTray backend data ingestion and normalized API service",
   "type": "module",
   "main": "dist/server.js",

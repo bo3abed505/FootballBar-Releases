@@ -497,6 +497,8 @@ public sealed partial class MainPage : Page
                 var window = new Views.MatchCenterWindow();
                 window.Populate(response.Envelope.Data);
                 window.Activate();
+                App.CurrentMainViewModel?.UpdateMatchFromDetails(response.Envelope.Data);
+                App.CurrentTickerCoordinator?.UpdateMatchFromDetails(response.Envelope.Data);
             }
             else
             {

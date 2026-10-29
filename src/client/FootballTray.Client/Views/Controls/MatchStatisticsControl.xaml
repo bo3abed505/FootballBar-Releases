@@ -329,7 +329,7 @@
                             <Border Grid.Column="1" Background="#1E293B" CornerRadius="6" Padding="8,6">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="MIDFIELD" FontSize="9" FontWeight="Bold" Foreground="#FBBF24" HorizontalAlignment="Center" />
-                                    <TextBlock Text="Contest" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    <TextBlock Text="{Binding MidfieldContestDisplay}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
                                     <TextBlock Text="Battle Zone" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center" />
                                 </StackPanel>
                             </Border>

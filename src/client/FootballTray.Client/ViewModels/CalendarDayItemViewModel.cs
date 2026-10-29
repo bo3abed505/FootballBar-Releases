@@ -14,6 +14,7 @@ public sealed class CalendarDayItemViewModel : INotifyPropertyChanged
 {
     private bool _isSelected;
     private int _matchCount;
+    private int _followedMatchCount = -1;
 
     public DateTime Date { get; }
     public bool IsToday { get; }
@@ -49,8 +50,21 @@ public sealed class CalendarDayItemViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool HasMatches => _matchCount > 0;
-    public string MatchCountText => $"{_matchCount} {(_matchCount == 1 ? "match" : "matches")}";
+    public int FollowedMatchCount
+    {
+        get => _followedMatchCount >= 0 ? _followedMatchCount : _matchCount;
+        set
+        {
+            if (SetProperty(ref _followedMatchCount, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasMatches)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MatchCountText)));
+            }
+        }
+    }
+
+    public bool HasMatches => FollowedMatchCount > 0;
+    public string MatchCountText => FollowedMatchCount == 0 ? "No matches" : $"{FollowedMatchCount} {(FollowedMatchCount == 1 ? "match" : "matches")}";
 
     /// <summary>
     /// Dynamic button style resolving to AccentButtonStyle when selected, or DefaultButtonStyle otherwise.
@@ -73,12 +87,13 @@ public sealed class CalendarDayItemViewModel : INotifyPropertyChanged
         }
     }
 
-    public CalendarDayItemViewModel(DateTime date, bool isToday, bool isSelected = false, int matchCount = 0)
+    public CalendarDayItemViewModel(DateTime date, bool isToday, bool isSelected = false, int matchCount = 0, int? followedMatchCount = null)
     {
         Date = date.Date;
         IsToday = isToday;
         _isSelected = isSelected;
         _matchCount = matchCount;
+        _followedMatchCount = followedMatchCount ?? -1;
 
         DayOfWeekName = date.ToString("ddd");
         DayNumber = date.ToString("%d");

@@ -166,6 +166,80 @@
                         </Viewbox>
                     </Border>
 
+                    <!-- Pitch Node Atlas / Legend Bar Directly Below Pitch -->
+                    <Border
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="12,7"
+                        HorizontalAlignment="Stretch">
+                        <Grid ColumnSpacing="16" HorizontalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                                <!-- Legend Title -->
+                                <TextBlock Text="Pitch Legend:" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,4,0" />
+
+                                <!-- Captain -->
+                                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                    <Border Width="16" Height="16" CornerRadius="8" Background="#CA8A04" BorderBrush="#FACC15" BorderThickness="1">
+                                        <TextBlock Text="C" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-0.5,0,0" />
+                                    </Border>
+                                    <TextBlock Text="Captain" FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <!-- Goal -->
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <Border Width="18" Height="18" CornerRadius="9" Background="#0F172A" BorderBrush="#334155" BorderThickness="1">
+                                        <TextBlock Text="⚽" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" />
+                                    </Border>
+                                    <TextBlock Text="Goal" FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <!-- Assist -->
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <Border Width="18" Height="18" CornerRadius="9" Background="#0F172A" BorderBrush="#334155" BorderThickness="1">
+                                        <TextBlock Text="👟" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" />
+                                    </Border>
+                                    <TextBlock Text="Assist" FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <!-- Cards -->
+                                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                    <Border Width="9" Height="13" CornerRadius="2" Background="#FACC15" BorderBrush="#0F172A" BorderThickness="0.5" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="13" CornerRadius="2" Background="#EF4444" BorderBrush="#0F172A" BorderThickness="0.5" VerticalAlignment="Center" />
+                                    <TextBlock Text="Cards" FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <!-- Sub Out / In -->
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <Border CornerRadius="4" Background="#7F1D1D" BorderBrush="#EF4444" BorderThickness="1" Padding="4,1">
+                                        <TextBlock Text="▼ Sub Out" FontSize="9" FontWeight="Bold" Foreground="#EF4444" />
+                                    </Border>
+                                    <Border CornerRadius="4" Background="#166534" BorderBrush="#22C55E" BorderThickness="1" Padding="4,1">
+                                        <TextBlock Text="▲ Sub In" FontSize="9" FontWeight="Bold" Foreground="#22C55E" />
+                                    </Border>
+                                </StackPanel>
+
+                                <!-- Rating Scale -->
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock Text="Rating:" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                    <Border Background="#0EA5E9" CornerRadius="3" Padding="4,1">
+                                        <TextBlock Text="≥ 8.0" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    </Border>
+                                    <Border Background="#22C55E" CornerRadius="3" Padding="4,1">
+                                        <TextBlock Text="7.0–7.9" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    </Border>
+                                    <Border Background="#F59E0B" CornerRadius="3" Padding="4,1">
+                                        <TextBlock Text="6.0–6.9" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    </Border>
+                                    <Border Background="#EF4444" CornerRadius="3" Padding="4,1">
+                                        <TextBlock Text="&lt; 6.0" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
                     <!-- Bench / Substitutes Section -->
                     <Border
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -202,6 +276,9 @@
                                                     
                                                     <!-- Incident Badges -->
                                                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center" Margin="4,0,4,0">
+                                                        <Border Width="13" Height="13" CornerRadius="6.5" Background="#CA8A04" BorderBrush="#FACC15" BorderThickness="1" Visibility="{x:Bind CaptainBadgeVisibility}" ToolTipService.ToolTip="Team Captain" Margin="0,0,2,0">
+                                                            <TextBlock Text="C" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-0.5,0,0" />
+                                                        </Border>
                                                         <Border Background="#166534" BorderBrush="#22C55E" BorderThickness="1" CornerRadius="3" Padding="4,1" Visibility="{x:Bind SubInVisibility}" ToolTipService.ToolTip="{x:Bind SubInTooltip}">
                                                             <TextBlock Text="{x:Bind SubInText}" FontSize="9" FontWeight="Bold" Foreground="#22C55E" />
                                                         </Border>
@@ -251,6 +328,9 @@
                                                     
                                                     <!-- Incident Badges -->
                                                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center" Margin="4,0,4,0">
+                                                        <Border Width="13" Height="13" CornerRadius="6.5" Background="#CA8A04" BorderBrush="#FACC15" BorderThickness="1" Visibility="{x:Bind CaptainBadgeVisibility}" ToolTipService.ToolTip="Team Captain" Margin="0,0,2,0">
+                                                            <TextBlock Text="C" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-0.5,0,0" />
+                                                        </Border>
                                                         <Border Background="#166534" BorderBrush="#22C55E" BorderThickness="1" CornerRadius="3" Padding="4,1" Visibility="{x:Bind SubInVisibility}" ToolTipService.ToolTip="{x:Bind SubInTooltip}">
                                                             <TextBlock Text="{x:Bind SubInText}" FontSize="9" FontWeight="Bold" Foreground="#22C55E" />
                                                         </Border>

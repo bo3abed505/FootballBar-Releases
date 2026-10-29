@@ -315,9 +315,11 @@ public sealed partial class MatchLineupPitchControl : UserControl
         // Anchor 2 (Upper-Left): Subbed Off ▼
         if (node.IsSubbedOff)
         {
+            bool hasMin = node.SubOutMinute.HasValue && node.SubOutMinute > 0;
+            string subText = hasMin ? $"▼ {node.SubOutMinute}'" : "▼";
+
             var subDot = new Border
             {
-                Width = 18,
                 Height = 18,
                 CornerRadius = new CornerRadius(9),
                 Background = new SolidColorBrush(Color.FromArgb(255, 0xEF, 0x44, 0x44)),
@@ -326,10 +328,12 @@ public sealed partial class MatchLineupPitchControl : UserControl
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(-5, -5, 0, 0),
+                Padding = hasMin ? new Thickness(4, 1, 4, 1) : new Thickness(0),
+                Width = hasMin ? double.NaN : 18,
                 Child = new TextBlock
                 {
-                    Text = "▼",
-                    FontSize = 10.0,
+                    Text = subText,
+                    FontSize = hasMin ? 9.0 : 10.0,
                     FontWeight = FontWeights.Bold,
                     Foreground = new SolidColorBrush(Colors.White),
                     HorizontalAlignment = HorizontalAlignment.Center,

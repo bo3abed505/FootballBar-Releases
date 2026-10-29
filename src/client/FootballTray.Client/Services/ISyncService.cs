@@ -22,6 +22,7 @@ public interface ISyncService : IDisposable
     string? LastKnownETag { get; }
     DateTimeOffset? LastValidatedAt { get; }
     Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default);
+    Task<DataFreshnessState> PollOnceAsync(DateTime targetDate, CancellationToken cancellationToken = default) => PollOnceAsync(cancellationToken);
     Task StartAsync(CancellationToken cancellationToken = default);
     DateTime TargetDate { get; set; }
     void TriggerImmediateSync();

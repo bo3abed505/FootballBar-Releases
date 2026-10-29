@@ -658,4 +658,51 @@ public class TaskbarTickerCoordinatorTests
         Assert.IsTrue(xaml.Contains("x:Name=\"AwayCrest\""), "TaskbarTicker.xaml must declare AwayCrest.");
         Assert.IsTrue(xaml.Contains("x:Name=\"StatusText\""), "TaskbarTicker.xaml must declare StatusText.");
     }
+    [TestMethod]
+    public void Test24_ToggleAutoRotate_OnPastDateScheduleWithZeroCandidates_DoesNotThrowAndRemainsGraceful()
+    {
+        var timer = new TestTickerTimer();
+        string? emittedText = null;
+        string? emittedId = null;
+
+        var coordinator = new TaskbarTickerCoordinator(
+            timer,
+            (id, text) => { emittedId = id; emittedText = text; });
+
+        coordinator.SetCarouselEnabled(false);
+
+        // 1. Simulate Yesterday's schedule: finished matches, 0 live
+        var m1 = CreateMatch("m1", "MCI", "BHA", "FINISHED", 90, 1, 1);
+        m1.KickoffTime = DateTime.UtcNow.AddDays(-1);
+        var m2 = CreateMatch("m2", "ARS", "CHE", "FINISHED", 90, 2, 0);
+        m2.KickoffTime = DateTime.UtcNow.AddDays(-1);
+        var prefs = new FootballTray.Client.Services.Preferences.UserPreferences
+        {
+            EnableTickerCarousel = false,
+            FollowedTeams = new() { new() { Id = "MCI", Name = "Manchester City" } }
+        };
+        var trayData = new TrayDataDto { Matches = new List<TrayMatchDto> { m1, m2 } };
+        coordinator.ApplySnapshot(trayData, TickerConnectionState.OnlineFresh, prefs);
+
+
+
+        // Auto-Rotate is OFF and no match is pinned -> 0 candidates, not cycling, fallback text
+        Assert.IsFalse(coordinator.IsCycling);
+        Assert.AreEqual(0, coordinator.State.Candidates.Count);
+        Assert.AreEqual("FootballTray", emittedText);
+
+        // 2. Toggle Auto-Rotate ON while viewing Yesterday's schedule
+        // Must not throw, must re-evaluate candidates cleanly
+        coordinator.SetCarouselEnabled(true);
+
+        // All matches are finished and date is yesterday, so 0 live candidates -> cannot cycle, stays graceful
+        Assert.IsFalse(coordinator.IsCycling);
+        Assert.AreEqual(0, coordinator.State.Candidates.Count);
+        Assert.AreEqual("FootballTray", emittedText);
+
+        // 3. Toggle Auto-Rotate OFF again
+        coordinator.SetCarouselEnabled(false);
+        Assert.IsFalse(coordinator.IsCycling);
+        Assert.AreEqual(0, coordinator.State.Candidates.Count);
+    }
 }

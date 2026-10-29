@@ -378,8 +378,16 @@ public class LineupPlayerItemViewModel : INotifyPropertyChanged
     public bool IsCaptain
     {
         get => _isCaptain;
-        set => SetProperty(ref _isCaptain, value);
+        set
+        {
+            if (SetProperty(ref _isCaptain, value))
+            {
+                OnPropertyChanged(nameof(CaptainBadgeVisibility));
+            }
+        }
     }
+
+    public Visibility CaptainBadgeVisibility => IsCaptain ? Visibility.Visible : Visibility.Collapsed;
 
     public string Number
     {
@@ -2174,7 +2182,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private int _awayDefensiveThirdPct = 25;
 
     public int HomeAttackingThirdPct { get => _homeAttackingThirdPct; set => SetProperty(ref _homeAttackingThirdPct, value); }
-    public int HomeMiddleThirdPct { get => _homeMiddleThirdPct; set => SetProperty(ref _homeMiddleThirdPct, value); }
+    public int HomeMiddleThirdPct { get => _homeMiddleThirdPct; set { if (SetProperty(ref _homeMiddleThirdPct, value)) OnPropertyChanged(nameof(MidfieldContestDisplay)); } }
+    public string MidfieldContestDisplay => $"{HomeMiddleThirdPct}%";
     public int HomeDefensiveThirdPct { get => _homeDefensiveThirdPct; set => SetProperty(ref _homeDefensiveThirdPct, value); }
 
     public int AwayAttackingThirdPct { get => _awayAttackingThirdPct; set => SetProperty(ref _awayAttackingThirdPct, value); }
@@ -2187,9 +2196,10 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private int _homeWinPct = 45;
     private int _drawPct = 25;
     private int _awayWinPct = 30;
-    private int _h2hHomeWins = 2;
-    private int _h2hDraws = 1;
-    private int _h2hAwayWins = 2;
+    private int _h2hHomeWins = 0;
+    private int _h2hDraws = 0;
+    private int _h2hAwayWins = 0;
+    private string? _h2hSummaryDisplay;
 
     public int HomeWinPct
     {
@@ -2268,7 +2278,16 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     public int H2HDraws { get => _h2hDraws; set { if (SetProperty(ref _h2hDraws, value)) OnPropertyChanged(nameof(H2HRecordDisplay)); } }
     public int H2HAwayWins { get => _h2hAwayWins; set { if (SetProperty(ref _h2hAwayWins, value)) OnPropertyChanged(nameof(H2HRecordDisplay)); } }
 
-    public string H2HRecordDisplay => $"{H2HHomeWins}W – {H2HDraws}D – {H2HAwayWins}W";
+    public string H2HRecordDisplay
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_h2hSummaryDisplay)) return _h2hSummaryDisplay;
+            int total = H2HHomeWins + H2HDraws + H2HAwayWins;
+            if (total == 0) return "No previous meetings";
+            return $"{H2HHomeWins}W – {H2HDraws}D – {H2HAwayWins}W";
+        }
+    }
 
     public ObservableCollection<FormBadgeViewModel> HomeFormBadges { get; } = new();
     public ObservableCollection<FormBadgeViewModel> AwayFormBadges { get; } = new();
@@ -2341,7 +2360,14 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         // Status badge
         StatusText = FormatStatusText(match);
 
-        ScoreText = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0}";
+        if (match.Score?.Penalty?.Home is int penH && match.Score?.Penalty?.Away is int penA)
+        {
+            ScoreText = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0} ({penH}-{penA} Pens)";
+        }
+        else
+        {
+            ScoreText = $"{match.Score?.Home ?? 0} - {match.Score?.Away ?? 0}";
+        }
 
         // Compute match winner based on final score for finished matches (Accent Color Foreground ONLY for winning team)
         string stateNorm = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
@@ -2634,6 +2660,10 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 if (!isGoalEvent && !isMissedPenEvent && !isRedEvent)
                     continue;
 
+                // Do not display penalty shootout kicks as regular match goal incidents in header
+                if (e.Minute >= 121 || e.Detail?.Contains("Shootout", StringComparison.OrdinalIgnoreCase) == true)
+                    continue;
+
                 string dedupeKey = $"{e.Minute}_{e.ExtraMinute}_{(e.PlayerName ?? string.Empty).Trim().ToLowerInvariant()}_{(e.Type ?? string.Empty).Trim().ToLowerInvariant()}";
                 if (!seenIncidentKeys.Add(dedupeKey))
                 {
@@ -2793,8 +2823,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     || detailLower.Contains("period") || detailLower.Contains("halftime") || detailLower.Contains("fulltime") || detailLower.Contains("whistle") || detailLower.Contains("half")
                     || descLower.Contains("half time") || descLower.Contains("full time") || descLower.Contains("kickoff") || descLower.Contains("whistle");
 
-                bool isMissedPen = IsMissedPenalty(ev);
-                string icon = isMissedPen ? "❌" : typeLower switch
+                bool isShootoutKick = ev.Minute >= 121 || ev.Detail?.Contains("Shootout", StringComparison.OrdinalIgnoreCase) == true;
+                bool isMissedPen = IsMissedPenalty(ev) || (isShootoutKick && typeLower != "goal");
+                string icon = isShootoutKick
+                    ? (typeLower == "goal" ? "⚽" : "❌")
+                    : (isMissedPen ? "❌" : typeLower switch
                 {
                     "goal" or "penalty" or "owngoal" => "⚽",
                     "yellowcard" or "yellow_card" => "🟨",
@@ -2814,7 +2847,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     _ when typeLower.Contains("red") || detailLower.Contains("red") || descLower.Contains("red card") => "🟥",
                     _ when typeLower.Contains("card") || detailLower.Contains("yellow") || descLower.Contains("yellow card") => "🟨",
                     _ => "📌"
-                };
+                });
 
                 bool isNeutralType = typeLower is "periodstart" or "periodend" or "halftime" or "fulltime" or "kickoff"
                     || typeLower.Contains("period") || typeLower.Contains("halftime") || typeLower.Contains("fulltime");
@@ -2851,14 +2884,20 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     }
                 }
 
-                string minuteDisplay = ev.ExtraMinute > 0 ? $"{ev.Minute}+{ev.ExtraMinute}'" : $"{ev.Minute}'";
+                string minuteDisplay = isShootoutKick ? "PEN" : (ev.ExtraMinute > 0 ? $"{ev.Minute}+{ev.ExtraMinute}'" : $"{ev.Minute}'");
                 string cleanedDesc = CleanDescription(ev.Description, ev.Type);
                 string eventTitle;
                 string eventSubtitle;
 
                 bool isSub = typeLower is "substitution" or "sub";
 
-                if (isSub)
+                if (isShootoutKick)
+                {
+                    string player = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
+                    eventTitle = !string.IsNullOrWhiteSpace(player) ? player : "Penalty Kick";
+                    eventSubtitle = ev.Detail ?? (typeLower == "goal" ? "Scored" : "Missed");
+                }
+                else if (isSub)
                 {
                     string outPlayer = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
                     string inPlayer = FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups, ev.AssistPlayerId);
@@ -2993,12 +3032,16 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         // Synthesize unified match-state transition whistle markers:
         // 1' Kickoff, HT (45+x'), 45' Start 2nd Half, ET breaks, PEN, FT / AET / PEN (at very top)
-        bool wentToExtraTime = stateNorm is "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "P" or "AET" or "PEN" or "FINISHED_AET" or "FINISHED_PEN"
-            || (match.Score?.ExtraTime != null && (match.Score.ExtraTime.Home != null || match.Score.ExtraTime.Away != null))
-            || match.ElapsedMinute > 90;
+        bool hasExplicitExtraTime = stateNorm is "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "AET" or "FINISHED_AET"
+            || (match.Score?.ExtraTime != null && (match.Score.ExtraTime.Home != null || match.Score.ExtraTime.Away != null));
+
+        bool hasEventsInExtraTime = match.Events != null && match.Events.Any(e => e.Minute > 90 && e.Minute <= 120 && !e.Type.Contains("Shootout", StringComparison.OrdinalIgnoreCase) && e.Detail?.Contains("Shootout", StringComparison.OrdinalIgnoreCase) != true);
+
+        bool wentToExtraTime = hasExplicitExtraTime || hasEventsInExtraTime;
 
         bool wentToPenalties = stateNorm is "PENALTIES" or "P" or "PEN" or "FINISHED_PEN"
-            || (match.Score?.Penalty != null && (match.Score.Penalty.Home != null || match.Score.Penalty.Away != null));
+            || (match.Score?.Penalty != null && (match.Score.Penalty.Home != null || match.Score.Penalty.Away != null))
+            || (match.Events != null && match.Events.Any(e => e.Minute >= 121 || e.Type.Contains("Shootout", StringComparison.OrdinalIgnoreCase) || e.Detail?.Contains("Shootout", StringComparison.OrdinalIgnoreCase) == true));
 
         bool hasStarted = (stateNorm is "LIVE" or "IN_PLAY" or "FIRST_HALF" or "1H" or "HALFTIME" or "HT" or "SECOND_HALF" or "2H" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "ET" or "BT" or "PENALTIES" or "P" || isConcluded)
             || match.ElapsedMinute > 0;
@@ -3166,13 +3209,32 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             }
         }
 
+        // If match went straight to penalties without extra time, add 90 Min Full-Time whistle marker
+        if (wentToPenalties && !wentToExtraTime && !allTimelineList.Any(i => i.EventId == "marker_end_90"))
+        {
+            AddTimelineMarker(new MatchTimelineItem
+            {
+                EventId = "marker_end_90",
+                Minute = 90,
+                ExtraMinute = maxFtExtraMinute > 0 ? maxFtExtraMinute : 90,
+                SortPriority = 8,
+                MinuteDisplay = maxFtExtraMinute > 0 ? $"90+{maxFtExtraMinute}'" : "90'",
+                IconGlyph = "🏁",
+                EventTitle = "Full-Time (90 Min)",
+                EventSubtitle = "Heading directly to Penalty Shootout",
+                Description = "Full-Time (90 Min)",
+                IsHomeTeam = false,
+                IsAwayTeam = false
+            });
+        }
+
         // 5. Penalty Shootout Marker (if match went to penalties)
         if (wentToPenalties)
         {
             if (!allTimelineList.Any(i => i.EventId == "marker_pen_start"))
             {
-                string penSubtitle = (match.Score?.Penalty?.Home != null && match.Score?.Penalty?.Away != null)
-                    ? $"Shootout ({match.Score.Penalty.Home} - {match.Score.Penalty.Away})"
+                string penSubtitle = (match.Score?.Penalty?.Home is int ph && match.Score?.Penalty?.Away is int pa)
+                    ? $"Shootout ({ph} - {pa})"
                     : "Penalty shootout begins";
 
                 AddTimelineMarker(new MatchTimelineItem
@@ -3878,7 +3940,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     {
                         isSubbedOff = true;
                         subOutMinute = minute;
-                        subOutText = "▼";
+                        subOutText = minute > 0 ? $"▼ {minute}'" : "▼";
                     }
                     else
                     {
@@ -3886,7 +3948,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                         {
                             isSubbedOn = true;
                             subInMinute = minute;
-                            subInText = "▲";
+                            subInText = minute > 0 ? $"▲ {minute}'" : "▲";
                         }
                     }
                 }
@@ -4080,6 +4142,17 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     out int ownGoals,
                     out int assists);
 
+                if (regGoals == 0 && item.Player.Goals > 0) regGoals = item.Player.Goals;
+                if (assists == 0 && item.Player.Assists > 0) assists = item.Player.Assists;
+                if (!hasYellow && item.Player.YellowCards > 0) hasYellow = true;
+                if (!hasRed && item.Player.RedCards > 0) hasRed = true;
+                if (!isSubbedOff && item.Player.SubOutMinute.HasValue)
+                {
+                    isSubbedOff = true;
+                    subOutMin = item.Player.SubOutMinute;
+                    subOutText = subOutMin > 0 ? $"▼ {subOutMin}'" : "▼";
+                }
+
                 int? effectiveNumber = item.Player.EffectiveNumber;
                 string numberStr = effectiveNumber.HasValue ? effectiveNumber.Value.ToString() : (item.Index + 1).ToString();
 
@@ -4151,6 +4224,23 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             out int penGoals,
             out int ownGoals,
             out int assists);
+
+        if (regGoals == 0 && p.Goals > 0) regGoals = p.Goals;
+        if (assists == 0 && p.Assists > 0) assists = p.Assists;
+        if (!hasYellow && p.YellowCards > 0) hasYellow = true;
+        if (!hasRed && p.RedCards > 0) hasRed = true;
+        if (!isSubbedOn && p.SubInMinute.HasValue)
+        {
+            isSubbedOn = true;
+            subInMin = p.SubInMinute;
+            subInText = subInMin > 0 ? $"▲ {subInMin}'" : "▲";
+        }
+        if (!isSubbedOff && p.SubOutMinute.HasValue)
+        {
+            isSubbedOff = true;
+            subOutMin = p.SubOutMinute;
+            subOutText = subOutMin > 0 ? $"▼ {subOutMin}'" : "▼";
+        }
 
         return new LineupPlayerItemViewModel
         {
@@ -4360,6 +4450,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             H2HHomeWins = h2h.HomeWins;
             H2HDraws = h2h.Draws;
             H2HAwayWins = h2h.AwayWins;
+            _h2hSummaryDisplay = h2h.SummaryDisplay;
 
             HomeFormBadges.Clear();
             foreach (var f in h2h.HomeForm)
@@ -4371,6 +4462,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     Score = f.Score
                 });
             }
+            OnPropertyChanged(nameof(HomeFormBadges));
 
             AwayFormBadges.Clear();
             foreach (var f in h2h.AwayForm)
@@ -4382,6 +4474,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     Score = f.Score
                 });
             }
+            OnPropertyChanged(nameof(AwayFormBadges));
 
             LastFiveMeetings.Clear();
             foreach (var m in h2h.LastFiveMeetings)
@@ -4409,28 +4502,20 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
         else
         {
-            // Default realistic fallback
             HomeWinPct = 45;
             DrawPct = 25;
             AwayWinPct = 30;
-            H2HHomeWins = 2;
-            H2HDraws = 1;
-            H2HAwayWins = 2;
+            H2HHomeWins = 0;
+            H2HDraws = 0;
+            H2HAwayWins = 0;
+            _h2hSummaryDisplay = "No previous meetings";
 
             HomeFormBadges.Clear();
-            HomeFormBadges.Add(new FormBadgeViewModel { Result = "W", OpponentName = "Recent Match", Score = "2-1" });
-            HomeFormBadges.Add(new FormBadgeViewModel { Result = "W", OpponentName = "Recent Match", Score = "3-0" });
-            HomeFormBadges.Add(new FormBadgeViewModel { Result = "D", OpponentName = "Recent Match", Score = "1-1" });
-            HomeFormBadges.Add(new FormBadgeViewModel { Result = "L", OpponentName = "Recent Match", Score = "0-1" });
-            HomeFormBadges.Add(new FormBadgeViewModel { Result = "W", OpponentName = "Recent Match", Score = "2-0" });
-
             AwayFormBadges.Clear();
-            AwayFormBadges.Add(new FormBadgeViewModel { Result = "D", OpponentName = "Recent Match", Score = "1-1" });
-            AwayFormBadges.Add(new FormBadgeViewModel { Result = "W", OpponentName = "Recent Match", Score = "1-0" });
-            AwayFormBadges.Add(new FormBadgeViewModel { Result = "L", OpponentName = "Recent Match", Score = "1-2" });
-            AwayFormBadges.Add(new FormBadgeViewModel { Result = "W", OpponentName = "Recent Match", Score = "2-1" });
-            AwayFormBadges.Add(new FormBadgeViewModel { Result = "L", OpponentName = "Recent Match", Score = "0-2" });
+            LastFiveMeetings.Clear();
         }
+
+        OnPropertyChanged(nameof(H2HRecordDisplay));
 
         // Heatmaps
         PopulateHeatmaps(match);
@@ -4459,8 +4544,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 bool isHome = h == match.Heatmaps[0];
                 foreach (var pt in h.Points)
                 {
-                    double left = Math.Round((pt.X / 100.0) * 340.0 - 20.0, 1);
-                    double top = Math.Round((pt.Y / 100.0) * 500.0 - 20.0, 1);
+                    double left = Math.Round((pt.X / 100.0) * 340.0 - 18.0, 1);
+                    double top = Math.Round((pt.Y / 100.0) * 500.0 - 18.0, 1);
                     var brush = isHome
                         ? new SolidColorBrush(Windows.UI.Color.FromArgb((byte)(pt.Intensity * 180), 14, 165, 233))
                         : new SolidColorBrush(Windows.UI.Color.FromArgb((byte)(pt.Intensity * 180), 239, 68, 68));
@@ -4478,13 +4563,14 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
         else
         {
-            HomeAttackingThirdPct = 36;
-            HomeMiddleThirdPct = 42;
-            HomeDefensiveThirdPct = 22;
+            HomeAttackingThirdPct = 34;
+            HomeMiddleThirdPct = 38;
+            HomeDefensiveThirdPct = 28;
             AwayAttackingThirdPct = 28;
-            AwayMiddleThirdPct = 44;
-            AwayDefensiveThirdPct = 28;
+            AwayMiddleThirdPct = 38;
+            AwayDefensiveThirdPct = 34;
         }
+        OnPropertyChanged(nameof(MidfieldContestDisplay));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

@@ -1206,15 +1206,13 @@ public class MainViewModelAndUiTests
         vm.UnpinMatch("m_1");
 
         Assert.IsNull(vm.ManualPinnedMatchId);
-        Assert.IsNull(vm.ActiveMatchId);
         Assert.IsTrue(vm.IsExplicitlyUnpinned);
-        Assert.AreEqual("📌 Auto-Rotate Ticker (Carousel Mode)", vm.ActiveTickerText);
+        Assert.IsTrue(vm.ActiveTickerText.StartsWith("🔄 Auto-Rotate • "));
 
         // Switch filter - must not auto-repin m_1
         vm.SetFilter(MatchFilterType.Live);
-        Assert.IsNull(vm.ActiveMatchId);
         Assert.IsTrue(vm.IsExplicitlyUnpinned);
-        Assert.AreEqual("📌 Auto-Rotate Ticker (Carousel Mode)", vm.ActiveTickerText);
+        Assert.IsTrue(vm.ActiveTickerText.StartsWith("🔄 Auto-Rotate • "));
     }
 
     [TestMethod]

@@ -140,16 +140,22 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         {
             if (SetProperty(ref _isActiveTaskbarMatch, value))
             {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsPinned)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinGlyph)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinButtonText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinStatusText)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinToolTipText)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PinButtonOpacity)));
             }
         }
     }
 
+    public bool IsPinned => _isActiveTaskbarMatch;
     public string PinGlyph => _isActiveTaskbarMatch ? "\uE840" : "\uE718";
     public string PinText => _isActiveTaskbarMatch ? "Pinned" : "Pin";
+    public string PinButtonText => PinText;
+    public string PinStatusText => _isActiveTaskbarMatch ? "Pinned" : "Pin";
     public string PinToolTipText => _isActiveTaskbarMatch ? "Pinned to taskbar. Click to unpin." : "Pin this match to the taskbar.";
     public double PinButtonOpacity => _isActiveTaskbarMatch ? 1.0 : 0.7;
 
@@ -360,7 +366,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
         bool isExplicitLiveCode = upperState is "LIVE" or "FIRST_HALF" or "SECOND_HALF" or "1H" or "2H" or "HT" or "ET" or "BT" or "P" or "SUSP" or "INT"
             or "IN_PLAY" or "HALFTIME" or "EXTRA_TIME" or "PENALTIES";
 
-        bool isFinished = upperState is "FT" or "AET" or "PEN" or "FINISHED";
+        bool isFinished = upperState is "FT" or "AET" or "PEN" or "FINISHED" or "FINISHED_AET" or "FINISHED_PEN";
         bool isCancelledOrPostponed = upperState is "POSTP" or "POSTPONED" or "CANC" or "CANCELLED" or "ABD" or "AWD" or "WO";
 
         bool hasActiveScore = match.Score != null && (match.Score.Home > 0 || match.Score.Away > 0);
@@ -400,6 +406,14 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
             stateDisplay = match.ElapsedMinute > 0
                 ? (match.ExtraMinute > 0 ? $"LIVE {match.ElapsedMinute}+{match.ExtraMinute}'" : $"LIVE {match.ElapsedMinute}'")
                 : "LIVE";
+        }
+        else if (upperState is "AET" or "FINISHED_AET")
+        {
+            stateDisplay = "After Extra Time (AET)";
+        }
+        else if (upperState is "PEN" or "FINISHED_PEN")
+        {
+            stateDisplay = "After Penalties (PEN)";
         }
         else if (isFinished)
         {

@@ -22,6 +22,7 @@ public class TrayUpdateEventArgs : EventArgs
     public string? ETag { get; init; }
     public DateTimeOffset? LastValidatedAt { get; init; }
     public bool QuotaExhausted { get; init; }
+    public DateTime? QueryDate { get; init; }
 }
 
 public class SyncService : ISyncService
@@ -240,6 +241,11 @@ public class SyncService : ISyncService
     /// </summary>
     public Task<DataFreshnessState> PollOnceAsync(CancellationToken cancellationToken = default)
     {
+        return PollOnceAsync(_targetDate, cancellationToken);
+    }
+
+    public Task<DataFreshnessState> PollOnceAsync(DateTime targetDate, CancellationToken cancellationToken = default)
+    {
         lock (_refreshLock)
         {
             if (_inFlightPollTask != null && !_inFlightPollTask.IsCompleted)
@@ -247,12 +253,12 @@ public class SyncService : ISyncService
                 return _inFlightPollTask;
             }
 
-            _inFlightPollTask = ExecutePollInternalAsync(cancellationToken);
+            _inFlightPollTask = ExecutePollInternalAsync(targetDate, cancellationToken);
             return _inFlightPollTask;
         }
     }
 
-    private async Task<DataFreshnessState> ExecutePollInternalAsync(CancellationToken cancellationToken)
+    private async Task<DataFreshnessState> ExecutePollInternalAsync(DateTime queryDateParam, CancellationToken cancellationToken)
     {
         await _refreshLock.WaitAsync(cancellationToken);
         _isSyncing = true;
@@ -313,7 +319,7 @@ public class SyncService : ISyncService
             compIds.Add("ft_comp_01M467Y24DRWPKFG9AX4XX88ZE");
             compIds.Add(FootballTray.Client.Services.Preferences.CanonicalEntityIds.CopaAmerica);
 
-            DateTime queryDate = _targetDate.Date;
+            DateTime queryDate = queryDateParam.Date;
             var teamIdList = teamIds.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
             var compIdList = compIds.OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
             var requestKey = BuildRequestKey(queryDate, teamIdList, compIdList);
@@ -460,8 +466,12 @@ public class SyncService : ISyncService
                     AppLogger.Info("Sync", "LowerVersionAccepted", $"Server version v{serverVersion} is lower than cached v{_lastKnownVersion}. Accepting authoritative server payload.");
                 }
 
-                var previousData = _currentTrayData;
-                _currentTrayData = envelope.Data;
+                var previousData = _dataByKey.TryGetValue(requestKey, out var prev) ? prev : _currentTrayData;
+                bool isViewingTargetDate = _targetDate.Date == queryDate;
+                if (isViewingTargetDate)
+                {
+                    _currentTrayData = envelope.Data;
+                }
                 _lastKnownVersion = serverVersion;
                 _lastKnownEtag = response.ETag;
                 _lastValidatedAt = DateTimeOffset.UtcNow;
@@ -469,14 +479,14 @@ public class SyncService : ISyncService
                 _freshnessState = DataFreshnessState.Fresh;
 
                 // Cache in memory by requestKey
-                _dataByKey[requestKey] = _currentTrayData;
+                _dataByKey[requestKey] = envelope.Data;
                 if (!string.IsNullOrWhiteSpace(response.ETag))
                 {
                     _etagsByKey[requestKey] = response.ETag;
                 }
 
-                // Atomically persist to disk if current view is today
-                if (_targetDate.Date == DateTime.Today)
+                // Atomically persist to disk if query is today
+                if (queryDate == DateTime.Today)
                 {
                     await _cacheService.SaveCacheAsync(envelope, response.ETag, cancellationToken);
                 }
@@ -486,13 +496,13 @@ public class SyncService : ISyncService
                 {
                     var preferences = _preferencesService?.GetPreferences();
                     pinnedMatchId ??= App.CurrentTickerCoordinator?.PinnedMatchId ?? App.CurrentMainViewModel?.ManualPinnedMatchId;
-                    await _notificationService.ProcessTrayUpdateAsync(previousData, _currentTrayData, preferences, pinnedMatchId, cancellationToken);
+                    await _notificationService.ProcessTrayUpdateAsync(previousData, envelope.Data, preferences, pinnedMatchId, cancellationToken);
                 }
 
-                AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {_currentTrayData.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms).");
-                _notificationCoordinator?.ProcessKickoffReminders(_currentTrayData, _preferencesService?.GetPreferences());
+                AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {envelope.Data.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms, Date: {normalizedDate}).");
+                _notificationCoordinator?.ProcessKickoffReminders(envelope.Data, _preferencesService?.GetPreferences());
                 _lastPublishedDate = normalizedDate;
-                PublishUpdate(_currentTrayData, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt);
+                PublishUpdate(envelope.Data, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt, queryDate);
                 return _freshnessState;
             }
 
@@ -547,7 +557,8 @@ public class SyncService : ISyncService
             try
             {
                 await timer.WaitForNextTickAsync(cancellationToken);
-                await PollOnceAsync(cancellationToken);
+                // Background live sync is strictly locked to Today so live ticker and notifications stay current
+                await PollOnceAsync(DateTime.Today, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -561,7 +572,7 @@ public class SyncService : ISyncService
         }
     }
 
-    private void PublishUpdate(TrayDataDto? data, DataFreshnessState freshness, int version, string? etag, DateTimeOffset? lastValidated)
+    private void PublishUpdate(TrayDataDto? data, DataFreshnessState freshness, int version, string? etag, DateTimeOffset? lastValidated, DateTime? queryDate = null)
     {
         var targetData = data ?? _currentTrayData;
         var connectionState = MapToConnectionState(freshness);
@@ -577,6 +588,7 @@ public class SyncService : ISyncService
             ETag = etag,
             LastValidatedAt = lastValidated,
             QuotaExhausted = targetData?.QuotaExhausted ?? false,
+            QueryDate = queryDate ?? _targetDate.Date
         };
 
         var handler = TrayUpdated;

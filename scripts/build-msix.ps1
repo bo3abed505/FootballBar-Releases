@@ -5,7 +5,7 @@
     Packages the compiled win-x64 standalone publish directory along with Package.appxmanifest
     and required Store visual assets into an MSIX container using makeappx.exe.
 .PARAMETER Version
-    Target release version (e.g. 1.2.1). Defaults to the content of the root VERSION file.
+    Target release version (e.g. 1.2.2). Defaults to the content of the root VERSION file.
 .PARAMETER ReleaseDir
     Release output directory. Defaults to artifacts/releases/v$Version.
 .PARAMETER PublishDir
@@ -36,7 +36,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     if (Test-Path $VersionFile) {
         $Version = (Get-Content $VersionFile -Raw).Trim()
     } else {
-        $Version = "1.2.1"
+        $Version = "1.2.2"
     }
 }
 

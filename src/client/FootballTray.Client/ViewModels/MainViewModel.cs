@@ -11,6 +11,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using FootballTray.Core;
 using FootballTray.Core.Dto;
+using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Services;
 using FootballTray.Client.Services.Notifications;
 using FootballTray.Client.Services.Preferences;
@@ -35,6 +36,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly FootballApiClient _apiClient;
     private readonly bool _disposeApiClient;
 
+    private bool _isHandlingTickerRotation;
     private bool _isMatchesMode = true;
     private int _standingsSubTabIndex;
     private HubCompetitionItemViewModel? _selectedHubCompetition;
@@ -400,8 +402,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task SetEnableTickerCarouselAsync(bool enableCarousel)
     {
-        await _preferencesService.SetEnableTickerCarouselAsync(enableCarousel);
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EnableTickerCarousel)));
+        if (_isHandlingTickerRotation) return;
+        _isHandlingTickerRotation = true;
+        try
+        {
+            await _preferencesService.SetEnableTickerCarouselAsync(enableCarousel);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EnableTickerCarousel)));
+            App.CurrentTickerCoordinator?.SetCarouselEnabled(enableCarousel);
+            ApplyCurrentFilter();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("MainViewModel", "SetEnableTickerCarouselFailed", "Failed to update carousel preference", ex: ex);
+        }
+        finally
+        {
+            _isHandlingTickerRotation = false;
+        }
     }
 
     public UpdateCheckState UpdateCheckState
@@ -667,6 +684,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public string? ManualPinnedMatchId { get; private set; }
+    private TrayMatchDto? _pinnedMatchSnapshot;
     public bool IsExplicitlyUnpinned { get; private set; }
     public string? GoalJumpMatchId { get; private set; }
     private readonly Dictionary<string, (int Home, int Away)> _previousScores = new(StringComparer.OrdinalIgnoreCase);
@@ -806,7 +824,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     ApplyCurrentFilter();
                 }
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateOffset)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateDisplay)));
+            }
+        }
+    }
+
+    public DateTimeOffset? SelectedCalendarDateOffset
+    {
+        get => new DateTimeOffset(_selectedCalendarDate.Date);
+        set
+        {
+            if (value.HasValue)
+            {
+                SelectedCalendarDate = value.Value.LocalDateTime.Date;
             }
         }
     }
@@ -1870,21 +1901,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             CheckAndExecuteSync();
             IsSyncing = false;
-            if (e.TrayData != null)
-            {
-                _latestTrayData = e.TrayData;
-            }
-            else if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
-            {
-                _latestTrayData = _syncService.CurrentTrayData;
-            }
 
-            if (e.QuotaExhausted && _latestTrayData != null)
-            {
-                _latestTrayData.QuotaExhausted = true;
-            }
+            bool isForSelectedDate = !e.QueryDate.HasValue || e.QueryDate.Value.Date == _selectedCalendarDate.Date;
 
-            RefreshMatches(_latestTrayData, e.FreshnessState, e.ConnectionState);
+            if (isForSelectedDate)
+            {
+                if (e.TrayData != null)
+                {
+                    _latestTrayData = e.TrayData;
+                }
+                else if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
+                {
+                    _latestTrayData = _syncService.CurrentTrayData;
+                }
+
+                if (e.QuotaExhausted && _latestTrayData != null)
+                {
+                    _latestTrayData.QuotaExhausted = true;
+                }
+
+                RefreshMatches(_latestTrayData, e.FreshnessState, e.ConnectionState);
+            }
+            else
+            {
+                // Background live sync for Today while user is inspecting another date
+                RebuildCalendarDays();
+            }
         }, nameof(OnTrayUpdated));
     }
 
@@ -2029,6 +2071,70 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncIconGlyph)));
     }
 
+    public void SyncPinnedStateAcrossItems(string? pinnedMatchId = null)
+    {
+        pinnedMatchId ??= ManualPinnedMatchId;
+        var prefs = _preferencesService?.GetPreferences();
+        bool isCarousel = prefs?.EnableTickerCarousel == true;
+        string? activeTickerId = isCarousel
+            ? (App.CurrentTickerCoordinator?.CurrentMatchId ?? ActiveMatchId)
+            : null;
+
+        bool IsMatchActive(string matchId)
+        {
+            if (string.IsNullOrEmpty(matchId)) return false;
+            if (!string.IsNullOrEmpty(pinnedMatchId) && string.Equals(matchId, pinnedMatchId, StringComparison.Ordinal)) return true;
+            if (isCarousel && !string.IsNullOrEmpty(activeTickerId) && string.Equals(matchId, activeTickerId, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        foreach (var match in FilteredMatches)
+        {
+            match.IsActiveTaskbarMatch = IsMatchActive(match.Id);
+        }
+
+        foreach (var match in FollowedMatches)
+        {
+            match.IsActiveTaskbarMatch = IsMatchActive(match.Id);
+        }
+
+        foreach (var match in OtherMatches)
+        {
+            match.IsActiveTaskbarMatch = IsMatchActive(match.Id);
+        }
+
+        foreach (var group in CompetitionGroups)
+        {
+            foreach (var match in group.Matches)
+            {
+                match.IsActiveTaskbarMatch = IsMatchActive(match.Id);
+            }
+        }
+    }
+
+    public void OnTickerRotated(string? fixtureId, TrayMatchDto? match, bool isPinned)
+    {
+        RunOnUiSafe(() =>
+        {
+            if (_isHandlingTickerRotation) return;
+            var prefs = _preferencesService?.GetPreferences();
+            if (string.IsNullOrEmpty(ManualPinnedMatchId) && prefs?.EnableTickerCarousel == true)
+            {
+                if (match != null)
+                {
+                    ActiveMatchId = match.Id;
+                    ActiveTickerText = $"🔄 Auto-Rotate • {TrayTickerFormatter.FormatMatchTicker(match, TickerConnectionState.OnlineFresh, prefs)}";
+                }
+                else
+                {
+                    ActiveMatchId = null;
+                    ActiveTickerText = "🔄 Auto-Rotate • No active matches";
+                }
+                SyncPinnedStateAcrossItems(null);
+            }
+        }, nameof(OnTickerRotated));
+    }
+
     public void TogglePinMatch(string matchId)
     {
         if (string.IsNullOrWhiteSpace(matchId)) return;
@@ -2051,15 +2157,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         IsExplicitlyUnpinned = false;
         ActiveMatchId = matchId;
 
-        App.CurrentTickerCoordinator?.PinMatch(matchId);
+        // Resolve match from currently loaded matches or tray data or previous snapshot
+        var pinnedMatch = _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, matchId, StringComparison.Ordinal))
+            ?? _pinnedMatchSnapshot;
 
-        foreach (var match in FilteredMatches)
+        if (pinnedMatch != null)
         {
-            match.IsActiveTaskbarMatch = string.Equals(match.Id, matchId, StringComparison.Ordinal);
+            _pinnedMatchSnapshot = pinnedMatch;
         }
 
-        var allMatches = _latestTrayData?.Matches;
-        var pinnedMatch = allMatches?.FirstOrDefault(m => string.Equals(m.Id, matchId, StringComparison.Ordinal));
+        App.CurrentTickerCoordinator?.PinMatch(matchId, _pinnedMatchSnapshot);
+
+        SyncPinnedStateAcrossItems(matchId);
+
         if (pinnedMatch != null)
         {
             if (_syncService is SyncService sync) sync.NotificationService?.Engine?.IngestMatchBaseline(pinnedMatch);
@@ -2092,20 +2202,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         App.CurrentTickerCoordinator?.UnpinMatch();
         ManualPinnedMatchId = null;
+        _pinnedMatchSnapshot = null;
         IsExplicitlyUnpinned = true;
-        ActiveMatchId = null;
         var prefs = _preferencesService?.GetPreferences();
-        ActiveTickerText = prefs?.EnableTickerCarousel == true
-            ? "📌 Auto-Rotate Ticker (Carousel Mode)"
-            : "📌 No pinned matches";
-
-        foreach (var match in FilteredMatches)
+        if (prefs?.EnableTickerCarousel == true)
         {
-            if (string.IsNullOrEmpty(matchId) || match.Id == matchId)
+            var activeMatch = App.CurrentTickerCoordinator?.State?.CurrentCandidate ?? TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
+            if (activeMatch != null)
             {
-                match.IsActiveTaskbarMatch = false;
+                ActiveMatchId = activeMatch.Id;
+                ActiveTickerText = $"🔄 Auto-Rotate • {TrayTickerFormatter.FormatMatchTicker(activeMatch, TickerConnectionState.OnlineFresh, prefs)}";
+            }
+            else
+            {
+                ActiveMatchId = null;
+                ActiveTickerText = "🔄 Auto-Rotate • No active matches";
             }
         }
+        else
+        {
+            ActiveMatchId = null;
+            ActiveTickerText = "📌 No Pinned Matches";
+        }
+
+        SyncPinnedStateAcrossItems(null);
     }
 
     public void OnTaskbarPinChanged(string? pinnedMatchId)
@@ -2113,15 +2233,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ManualPinnedMatchId = pinnedMatchId;
         IsExplicitlyUnpinned = string.IsNullOrEmpty(pinnedMatchId);
         ActiveMatchId = pinnedMatchId;
-
-        foreach (var match in FilteredMatches)
+        if (string.IsNullOrEmpty(pinnedMatchId))
         {
-            match.IsActiveTaskbarMatch = !string.IsNullOrEmpty(pinnedMatchId) && string.Equals(match.Id, pinnedMatchId, StringComparison.Ordinal);
+            _pinnedMatchSnapshot = null;
         }
+
+        SyncPinnedStateAcrossItems(pinnedMatchId);
 
         if (!string.IsNullOrEmpty(pinnedMatchId))
         {
-            var pinnedMatch = _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, pinnedMatchId, StringComparison.Ordinal));
+            var pinnedMatch = _latestTrayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, pinnedMatchId, StringComparison.Ordinal))
+                ?? _pinnedMatchSnapshot;
             if (pinnedMatch != null)
             {
                 if (_syncService is SyncService sync) sync.NotificationService?.Engine?.IngestMatchBaseline(pinnedMatch);
@@ -2147,8 +2269,85 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
-            var prefs = _preferencesService.GetPreferences();
-            ActiveTickerText = prefs?.EnableTickerCarousel == true ? "📌 Auto-Rotate Ticker (Carousel Mode)" : "📌 No pinned matches";
+            var prefs = _preferencesService?.GetPreferences();
+            if (prefs?.EnableTickerCarousel == true)
+            {
+                var activeMatch = App.CurrentTickerCoordinator?.State?.CurrentCandidate ?? TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
+                if (activeMatch != null)
+                {
+                    ActiveMatchId = activeMatch.Id;
+                    ActiveTickerText = $"🔄 Auto-Rotate • {TrayTickerFormatter.FormatMatchTicker(activeMatch, TickerConnectionState.OnlineFresh, prefs)}";
+                }
+                else
+                {
+                    ActiveMatchId = null;
+                    ActiveTickerText = "🔄 Auto-Rotate • No active matches";
+                }
+            }
+            else
+            {
+                ActiveMatchId = null;
+                ActiveTickerText = "📌 No Pinned Matches";
+            }
+        }
+    }
+
+    public void UpdateMatchFromDetails(MatchDetailDto detail)
+    {
+        if (detail == null || string.IsNullOrWhiteSpace(detail.Id)) return;
+
+        bool updated = false;
+        if (_latestTrayData?.Matches != null)
+        {
+            foreach (var m in _latestTrayData.Matches)
+            {
+                if (string.Equals(m.Id, detail.Id, StringComparison.OrdinalIgnoreCase) ||
+                    m.Id.EndsWith($"_{detail.Id}", StringComparison.OrdinalIgnoreCase) ||
+                    detail.Id.EndsWith($"_{m.Id}", StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(detail.LegacyId) && string.Equals(m.LegacyId, detail.LegacyId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    m.State = detail.State;
+                    m.ElapsedMinute = detail.ElapsedMinute;
+                    m.ExtraMinute = detail.ExtraMinute;
+                    if (detail.Score != null)
+                    {
+                        m.Score ??= new ScoreDto();
+                        m.Score.Home = detail.Score.Home;
+                        m.Score.Away = detail.Score.Away;
+                        m.Score.Display = $"{detail.Score.Home} - {detail.Score.Away}";
+                        if (detail.Score.Penalty != null)
+                        {
+                            m.Score.Penalty = detail.Score.Penalty;
+                        }
+                    }
+                    updated = true;
+                }
+            }
+        }
+
+        if (_pinnedMatchSnapshot != null &&
+            (string.Equals(_pinnedMatchSnapshot.Id, detail.Id, StringComparison.OrdinalIgnoreCase) ||
+             (!string.IsNullOrEmpty(detail.LegacyId) && string.Equals(_pinnedMatchSnapshot.LegacyId, detail.LegacyId, StringComparison.OrdinalIgnoreCase))))
+        {
+            _pinnedMatchSnapshot.State = detail.State;
+            _pinnedMatchSnapshot.ElapsedMinute = detail.ElapsedMinute;
+            _pinnedMatchSnapshot.ExtraMinute = detail.ExtraMinute;
+            if (detail.Score != null)
+            {
+                _pinnedMatchSnapshot.Score ??= new ScoreDto();
+                _pinnedMatchSnapshot.Score.Home = detail.Score.Home;
+                _pinnedMatchSnapshot.Score.Away = detail.Score.Away;
+                _pinnedMatchSnapshot.Score.Display = $"{detail.Score.Home} - {detail.Score.Away}";
+                if (detail.Score.Penalty != null)
+                {
+                    _pinnedMatchSnapshot.Score.Penalty = detail.Score.Penalty;
+                }
+            }
+        }
+
+        if (updated)
+        {
+            ApplyCurrentFilter();
         }
     }
 
@@ -2202,7 +2401,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var existingMap = CalendarDays.ToDictionary(d => d.Date.Date);
 
-        var targetDates = new List<(DateTime Date, bool IsToday, bool IsSelected, int MatchCount)>();
+        bool hasFollowPreferences = (prefs?.GetFollowedTeamIdSet()?.Count > 0) || (prefs?.GetFollowedCompetitionIdSet()?.Count > 0);
+
+        var targetDates = new List<(DateTime Date, bool IsToday, bool IsSelected, int RawMatchCount, int FollowedMatchCount)>();
         for (int offset = -1; offset <= 5; offset++)
         {
             var targetDate = today.AddDays(offset).Date;
@@ -2210,10 +2411,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             bool isSelected = targetDate == _selectedCalendarDate.Date;
             string dateKey = targetDate.ToString("yyyy-MM-dd");
 
-            int matchCount = 0;
-
-            // Matches in current in-memory payload matching target date
-            int liveMatchesInPayload = allMatches.Count(m =>
+            int rawMatchesInPayload = allMatches.Count(m =>
             {
                 var localDate = m.KickoffTime.ToLocalTime().Date;
                 var utcDate = m.KickoffTime.UtcDateTime.Date;
@@ -2226,30 +2424,51 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return true;
             });
 
+            int followedMatchesInPayload = hasFollowPreferences
+                ? allMatches.Count(m =>
+                {
+                    var localDate = m.KickoffTime.ToLocalTime().Date;
+                    var utcDate = m.KickoffTime.UtcDateTime.Date;
+                    var rawDate = m.KickoffTime.Date;
+                    bool dateMatches = localDate == targetDate || utcDate == targetDate || rawDate == targetDate || m.KickoffTime.DateTime.Date == targetDate;
+                    if (!dateMatches && !(isToday && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))))
+                    {
+                        return false;
+                    }
+                    return IsMatchFollowed(m, prefs);
+                })
+                : rawMatchesInPayload;
+
+            int rawCount = rawMatchesInPayload;
+            int followedCount = followedMatchesInPayload;
+
             if (targetDate == _selectedCalendarDate.Date)
             {
                 // Authoritative live calculation for currently selected calendar date
-                matchCount = liveMatchesInPayload;
-                _followedCountsByDate[dateKey] = liveMatchesInPayload;
+                _followedCountsByDate[dateKey] = followedCount;
             }
             else
             {
-                if (liveMatchesInPayload > 0)
+                if (followedCount > 0)
                 {
-                    matchCount = liveMatchesInPayload;
-                    _followedCountsByDate[dateKey] = liveMatchesInPayload;
+                    _followedCountsByDate[dateKey] = followedCount;
                 }
                 else if (_followedCountsByDate.TryGetValue(dateKey, out var cachedFollowedCount))
                 {
-                    matchCount = cachedFollowedCount;
+                    followedCount = cachedFollowedCount;
                 }
-                else if (existingMap.TryGetValue(targetDate, out var prevDay) && prevDay.MatchCount > 0)
+                else if (existingMap.TryGetValue(targetDate, out var prevDay) && prevDay.FollowedMatchCount > 0)
                 {
-                    matchCount = prevDay.MatchCount;
+                    followedCount = prevDay.FollowedMatchCount;
+                }
+
+                if (rawCount == 0 && existingMap.TryGetValue(targetDate, out var prevDayRaw) && prevDayRaw.MatchCount > 0)
+                {
+                    rawCount = prevDayRaw.MatchCount;
                 }
             }
 
-            targetDates.Add((targetDate, isToday, isSelected, matchCount));
+            targetDates.Add((targetDate, isToday, isSelected, rawCount, followedCount));
         }
 
         // Fast path: if CalendarDays already matches target 7 days, update in place without .Clear()
@@ -2260,7 +2479,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 var dayVm = CalendarDays[i];
                 var target = targetDates[i];
                 dayVm.IsSelected = target.IsSelected;
-                dayVm.MatchCount = target.MatchCount;
+                dayVm.MatchCount = target.RawMatchCount;
+                dayVm.FollowedMatchCount = target.FollowedMatchCount;
             }
             return;
         }
@@ -2270,7 +2490,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             foreach (var t in targetDates)
             {
-                CalendarDays.Add(new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.MatchCount));
+                CalendarDays.Add(new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.RawMatchCount, t.FollowedMatchCount));
             }
         }
         else
@@ -2283,16 +2503,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     if (CalendarDays[i].Date.Date == t.Date)
                     {
                         CalendarDays[i].IsSelected = t.IsSelected;
-                        CalendarDays[i].MatchCount = t.MatchCount;
+                        CalendarDays[i].MatchCount = t.RawMatchCount;
+                        CalendarDays[i].FollowedMatchCount = t.FollowedMatchCount;
                     }
                     else
                     {
-                        CalendarDays[i] = new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.MatchCount);
+                        CalendarDays[i] = new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.RawMatchCount, t.FollowedMatchCount);
                     }
                 }
                 else
                 {
-                    CalendarDays.Add(new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.MatchCount));
+                    CalendarDays.Add(new CalendarDayItemViewModel(t.Date, t.IsToday, t.IsSelected, t.RawMatchCount, t.FollowedMatchCount));
                 }
             }
 
@@ -2902,7 +3123,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (!string.IsNullOrEmpty(ManualPinnedMatchId))
         {
             ActiveMatchId = ManualPinnedMatchId;
-            var pinnedMatch = allMatches.FirstOrDefault(m => string.Equals(m.Id, ManualPinnedMatchId, StringComparison.Ordinal));
+            var pinnedMatch = allMatches.FirstOrDefault(m => string.Equals(m.Id, ManualPinnedMatchId, StringComparison.Ordinal))
+                ?? _pinnedMatchSnapshot;
             if (pinnedMatch != null)
             {
                 string home = pinnedMatch.HomeTeam?.ShortName ?? pinnedMatch.HomeTeam?.Name ?? "Home";
@@ -2938,49 +3160,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             string time = goalMatch.State == "HT" ? "HT" : (goalMatch.ElapsedMinute > 0 ? $"{goalMatch.ElapsedMinute}'" : goalMatch.State);
             ActiveTickerText = $"⚽ GOAL: {home} {score} {away} ({time})";
         }
-        else if (IsExplicitlyUnpinned)
+        else if (prefs?.EnableTickerCarousel == true)
         {
-            ActiveMatchId = null;
-            ActiveTickerText = prefs?.EnableTickerCarousel == true
-                ? "📌 Auto-Rotate Ticker (Carousel Mode)"
-                : "📌 No pinned matches";
-        }
-        else
-        {
-            var activeMatch = TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
-            ActiveMatchId = activeMatch?.Id;
+            var activeMatch = App.CurrentTickerCoordinator?.State?.CurrentCandidate ?? TrayTickerFormatter.GetActiveMatch(_latestTrayData, prefs);
 
-            if (prefs?.EnableTickerCarousel == true)
+            if (activeMatch != null)
             {
-                if (activeMatch != null)
-                {
-                    string home = activeMatch.HomeTeam?.ShortName ?? activeMatch.HomeTeam?.Name ?? "Home";
-                    string away = activeMatch.AwayTeam?.ShortName ?? activeMatch.AwayTeam?.Name ?? "Away";
-                    string stateNorm = (activeMatch.State ?? string.Empty).Trim().ToUpperInvariant();
-                    bool isPreMatch = stateNorm is "SCHEDULED" or "TIMED" or "NOT_STARTED" or "NS" or "TBD" or "PREMATCH";
-
-                    if (isPreMatch)
-                    {
-                        var timeFormat = (prefs?.Use24HourFormat ?? true) ? "HH:mm" : "h:mm tt";
-                        string time = activeMatch.KickoffTime != default ? activeMatch.KickoffTime.ToLocalTime().ToString(timeFormat) : "Upcoming";
-                        ActiveTickerText = $"{home} vs {away} ({time})";
-                    }
-                    else
-                    {
-                        string score = $"{activeMatch.Score?.Home ?? 0}–{activeMatch.Score?.Away ?? 0}";
-                        string time = activeMatch.State == "HT" ? "HT" : (activeMatch.ElapsedMinute > 0 ? $"{activeMatch.ElapsedMinute}'" : (activeMatch.State ?? "LIVE"));
-                        ActiveTickerText = $"{home} {score} {away} ({time})";
-                    }
-                }
-                else
-                {
-                    ActiveTickerText = "📌 Auto-Rotate Ticker (Carousel Mode)";
-                }
+                ActiveMatchId = activeMatch.Id;
+                ActiveTickerText = $"🔄 Auto-Rotate • {TrayTickerFormatter.FormatMatchTicker(activeMatch, TickerConnectionState.OnlineFresh, prefs)}";
             }
             else
             {
-                ActiveTickerText = "📌 No pinned matches";
+                ActiveMatchId = null;
+                ActiveTickerText = "🔄 Auto-Rotate • No active matches";
             }
+        }
+        else
+        {
+            ActiveMatchId = null;
+            ActiveTickerText = "📌 No Pinned Matches";
         }
 
         // 1. Filter by Selected Calendar Date
@@ -3315,6 +3513,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
+        SyncPinnedStateAcrossItems(ManualPinnedMatchId);
     }
 
     /// <summary>

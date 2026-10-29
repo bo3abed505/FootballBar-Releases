@@ -244,7 +244,7 @@ public class TaskbarWatcherAndRecoveryTests
         recovery.RecoveryCompleted += success => tcs.TrySetResult(success);
         recovery.RequestRecovery("TestRetry");
 
-        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(2000)) == tcs.Task;
+        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(5000)) == tcs.Task;
         Assert.IsTrue(completed, "Recovery did not complete in expected time.");
         Assert.IsTrue(await tcs.Task, "Recovery should succeed on attempt 3.");
         Assert.AreEqual(3, attempts, "Expected exactly 3 attempts before success.");

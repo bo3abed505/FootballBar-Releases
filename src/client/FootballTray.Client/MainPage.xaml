@@ -488,55 +488,76 @@
                         </StackPanel>
                     </Grid>
 
-                    <!-- 7-Day Calendar Navigation Bar -->
-                    <ScrollViewer
-                        x:Name="CalendarScrollViewer"
+                    <!-- 7-Day Calendar Navigation Bar with Date Picker -->
+                    <Grid
                         Grid.Row="1"
                         Visibility="{x:Bind ViewModel.IsCalendarVisible, Mode=OneWay}"
                         HorizontalAlignment="Center"
-                        HorizontalScrollBarVisibility="Auto"
-                        VerticalScrollBarVisibility="Disabled"
-                        HorizontalScrollMode="Enabled"
-                        VerticalScrollMode="Disabled">
-                        <ItemsControl x:Name="CalendarDaysList" HorizontalAlignment="Center">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:CalendarDayItemViewModel">
-                                    <Button
-                                        Click="OnCalendarDayClicked"
-                                        Tag="{x:Bind}"
-                                        Style="{x:Bind ButtonStyle, Mode=OneWay}"
-                                        Padding="8,5,8,5"
-                                        Margin="0,0,2,0"
-                                        CornerRadius="8"
-                                        MinWidth="48"
-                                        HorizontalAlignment="Center"
-                                        HorizontalContentAlignment="Center">
-                                        <StackPanel Spacing="1" HorizontalAlignment="Center">
-                                            <!-- Day Pill Label: Yesterday / Today / Tomorrow / Thu 22 / etc. -->
-                                            <TextBlock
-                                                Text="{x:Bind RelativeLabel, Mode=OneWay}"
-                                                FontSize="12"
-                                                FontWeight="SemiBold"
-                                                HorizontalAlignment="Center" />
+                        ColumnSpacing="8"
+                        Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-                                            <!-- Match Count Text -->
-                                            <TextBlock
-                                                Visibility="{x:Bind HasMatches, Mode=OneWay}"
-                                                Text="{x:Bind MatchCountText, Mode=OneWay}"
-                                                FontSize="9"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                HorizontalAlignment="Center" />
-                                        </StackPanel>
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                        <ScrollViewer
+                            x:Name="CalendarScrollViewer"
+                            Grid.Column="0"
+                            HorizontalAlignment="Center"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            HorizontalScrollMode="Enabled"
+                            VerticalScrollMode="Disabled">
+                            <ItemsControl x:Name="CalendarDaysList" HorizontalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CalendarDayItemViewModel">
+                                        <Button
+                                            Click="OnCalendarDayClicked"
+                                            Tag="{x:Bind}"
+                                            Style="{x:Bind ButtonStyle, Mode=OneWay}"
+                                            Padding="8,5,8,5"
+                                            Margin="0,0,2,0"
+                                            CornerRadius="8"
+                                            MinWidth="48"
+                                            HorizontalAlignment="Center"
+                                            HorizontalContentAlignment="Center">
+                                            <StackPanel Spacing="1" HorizontalAlignment="Center">
+                                                <!-- Day Pill Label: Yesterday / Today / Tomorrow / Thu 22 / etc. -->
+                                                <TextBlock
+                                                    Text="{x:Bind RelativeLabel, Mode=OneWay}"
+                                                    FontSize="12"
+                                                    FontWeight="SemiBold"
+                                                    HorizontalAlignment="Center" />
+
+                                                <!-- Match Count Text -->
+                                                <TextBlock
+                                                    Visibility="{x:Bind HasMatches, Mode=OneWay}"
+                                                    Text="{x:Bind MatchCountText, Mode=OneWay}"
+                                                    FontSize="9"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    HorizontalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <CalendarDatePicker
+                            x:Name="MatchCalendarDatePicker"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Date="{x:Bind ViewModel.SelectedCalendarDateOffset, Mode=TwoWay}"
+                            DateFormat="{}{month.abbreviated} {day.integer}"
+                            PlaceholderText="📅 Jump to date"
+                            CornerRadius="8"
+                            ToolTipService.ToolTip="Select any past or future date" />
+                    </Grid>
 
                     <!-- Match Cards List View -->
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">

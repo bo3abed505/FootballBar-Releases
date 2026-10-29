@@ -48,7 +48,7 @@ public class OtaTelemetryManifestDto
     public string SchemaVersion { get; set; } = "1.0";
 
     [JsonPropertyName("manifestVersion")]
-    public string ManifestVersion { get; set; } = "1.2.1";
+    public string ManifestVersion { get; set; } = "1.2.2";
 
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = "live-telemetry";

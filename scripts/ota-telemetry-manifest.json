@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "manifestVersion": "1.2.1",
+  "manifestVersion": "1.2.2",
   "provider": "live-telemetry",
   "updatedAt": "2026-10-26T00:00:00Z",
   "routingMode": "auto",
@@ -13,7 +13,7 @@
     "matchDetailsFallbackUrlTemplate": "https://www.fotmob.com/api/matchDetails?matchId={matchId}",
     "leagueHubUrlTemplate": "https://www.fotmob.com/api/data/leagues?id={leagueId}",
     "leagueHubFallbackUrlTemplate": "https://www.fotmob.com/api/leagues?id={leagueId}",
-    "searchSuggestUrlTemplate": "https://www.fotmob.com/api/search/suggest?term={term}",
+    "searchSuggestUrlTemplate": "https://www.fotmob.com/api/data/search/suggest?term={term}",
     "teamLogoUrlTemplate": "https://images.fotmob.com/image_resources/logo/teamlogo/{teamId}.png",
     "leagueLogoUrlTemplate": "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{leagueId}.png"
   },

@@ -70,6 +70,8 @@ public class LocalCacheService
                 return null;
             }
 
+            NormalizeConcludedMatches(payload.Envelope.Data?.Matches);
+
             return payload;
         }
         catch (Exception ex)
@@ -189,6 +191,40 @@ public class LocalCacheService
 
     #region Multi-Entity Offline Disk Cache (Tier 3)
 
+    private static void NormalizeConcludedMatches(IEnumerable<TrayMatchDto>? matches)
+    {
+        if (matches == null) return;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var m in matches)
+        {
+            if (m == null) continue;
+            var state = (m.State ?? string.Empty).Trim().ToUpperInvariant();
+            if (state is "FINISHED" or "FT" or "AET" or "PEN" or "FINISHED_AET" or "FINISHED_PEN" or "POSTPONED" or "CANCELLED")
+            {
+                m.ElapsedMinute = 0;
+                m.ExtraMinute = 0;
+                continue;
+            }
+
+            bool hasShootout = m.Score?.Penalty != null;
+            bool isPastDate = m.KickoffTime != default && m.KickoffTime.UtcDateTime.Date < now.Date;
+            bool isOvertimeThreshold = m.KickoffTime != default && (now - m.KickoffTime).TotalMinutes > 150;
+
+            if (hasShootout)
+            {
+                m.State = "FINISHED_PEN";
+                m.ElapsedMinute = 0;
+                m.ExtraMinute = 0;
+            }
+            else if (isPastDate || isOvertimeThreshold)
+            {
+                m.State = "FINISHED";
+                m.ElapsedMinute = 0;
+                m.ExtraMinute = 0;
+            }
+        }
+    }
+
     private static string SanitizeFileNameKey(string rawKey)
     {
         if (string.IsNullOrWhiteSpace(rawKey)) return "unknown";
@@ -232,6 +268,7 @@ public class LocalCacheService
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             var envelope = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeTrayDataDto, cancellationToken);
             if (envelope == null || !TrayPayloadValidator.IsValid(envelope, out _)) return null;
+            NormalizeConcludedMatches(envelope.Data?.Matches);
             return envelope;
         }
         catch

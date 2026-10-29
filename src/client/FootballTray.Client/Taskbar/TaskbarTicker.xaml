@@ -31,8 +31,21 @@
                     Text="Open Match Center"
                     Click="OnOpenMatchCenterClicked" />
                 <MenuFlyoutItem
+                    x:Name="MenuPinMatch"
+                    Text="📌 Pin Match"
+                    Click="OnPinMatchClicked" />
+                <MenuFlyoutItem
+                    x:Name="MenuUnpinMatch"
+                    Text="📌 Unpin Match"
+                    Click="OnUnpinMatchClicked" />
+                <ToggleMenuFlyoutItem
+                    x:Name="MenuAutoRotateToggle"
+                    Text="🔄 Auto-Rotate Ticker"
+                    Click="MenuAutoRotateToggle_Click" />
+                <MenuFlyoutItem
                     x:Name="MenuTogglePin"
                     Text="Toggle Pin"
+                    Visibility="Collapsed"
                     Click="OnTogglePinClicked" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem
@@ -194,15 +207,27 @@
             VerticalAlignment="Center"
             Spacing="5">
 
-            <!-- Fallback TextBlock when no active match is available -->
-            <TextBlock
-                x:Name="FallbackText"
-                Text="FootballTray"
-                FontSize="12"
-                FontWeight="SemiBold"
+            <!-- Fallback Panel when no active match is available -->
+            <StackPanel
+                x:Name="FallbackPanel"
+                Orientation="Horizontal"
+                Spacing="5"
                 VerticalAlignment="Center"
-                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                Visibility="Visible" />
+                Visibility="Visible">
+                <Image
+                    x:Name="FallbackLogo"
+                    Width="14"
+                    Height="14"
+                    VerticalAlignment="Center"
+                    Stretch="Uniform" />
+                <TextBlock
+                    x:Name="FallbackText"
+                    Text="FootballTray"
+                    FontSize="12"
+                    FontWeight="SemiBold"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+            </StackPanel>
 
             <!-- Explicit Ticker Elements: [HomeCrest] [HomeTeamName] [HomeRedCard] [Score] [AwayRedCard] [AwayTeamName] [AwayCrest] [StatusText] -->
             <Image

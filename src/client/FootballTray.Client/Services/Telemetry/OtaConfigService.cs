@@ -114,7 +114,7 @@ public sealed class OtaConfigService : IDisposable
             {
                 Timeout = TimeSpan.FromSeconds(10)
             };
-            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FootballTray-Client/1.2.1");
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FootballTray-Client/1.2.2");
             _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json");
             _disposeClient = true;
         }
@@ -132,7 +132,7 @@ public sealed class OtaConfigService : IDisposable
             _currentManifest = CreateDefaultManifest();
             _currentETag = null;
             _lastCheckedAt = null;
-            AppLogger.Info("OTA", "DefaultLoaded", "No cached OTA telemetry manifest found. Initialized with compiled default manifest v1.2.1.");
+            AppLogger.Info("OTA", "DefaultLoaded", "No cached OTA telemetry manifest found. Initialized with compiled default manifest v1.2.2.");
         }
     }
 
@@ -344,7 +344,7 @@ public sealed class OtaConfigService : IDisposable
         return new OtaTelemetryManifestDto
         {
             SchemaVersion = "1.0",
-            ManifestVersion = "1.2.1",
+            ManifestVersion = "1.2.2",
             UpdatedAt = DateTimeOffset.UtcNow,
             RoutingMode = "auto",
             CloudBaseUrl = null,
