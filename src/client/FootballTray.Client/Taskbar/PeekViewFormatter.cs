@@ -190,7 +190,16 @@ public static class PeekViewFormatter
 
         foreach (var g in goals)
         {
-            var minutes = string.Join(", ", g.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+            var minutes = string.Join(", ", g.Select(e =>
+            {
+                bool isOg = string.Equals(e.Detail, "Own Goal", StringComparison.OrdinalIgnoreCase) ||
+                            e.Type?.Equals("OwnGoal", StringComparison.OrdinalIgnoreCase) == true ||
+                            e.Description?.Contains("Own Goal", StringComparison.OrdinalIgnoreCase) == true ||
+                            e.Description?.Contains("(OG)", StringComparison.OrdinalIgnoreCase) == true ||
+                            e.Detail?.Contains("OG", StringComparison.OrdinalIgnoreCase) == true;
+                string minStr = e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'";
+                return isOg ? $"{minStr} (OG)" : minStr;
+            }));
             lines.Add($"{g.Key} {minutes}");
         }
 

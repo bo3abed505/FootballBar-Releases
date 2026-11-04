@@ -114,25 +114,38 @@ public sealed class OtaConfigService : IDisposable
             {
                 Timeout = TimeSpan.FromSeconds(10)
             };
-            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FootballTray-Client/1.2.2");
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FootballTray-Client/1.3.0");
             _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json");
             _disposeClient = true;
         }
 
         // 0ms Cold Start: load cached manifest or fall back to compiled defaults synchronously
+        var defaultManifest = CreateDefaultManifest();
         if (TryLoadDiskCache(out var cachedRecord) && cachedRecord?.Manifest != null)
         {
-            _currentManifest = cachedRecord.Manifest;
-            _currentETag = cachedRecord.ETag;
-            _lastCheckedAt = cachedRecord.LastCheckedAt;
-            AppLogger.Info("OTA", "CacheLoaded", $"Loaded cached OTA telemetry manifest v{_currentManifest.ManifestVersion} (ETag: {_currentETag ?? "none"}).");
+            if (Version.TryParse(cachedRecord.Manifest.ManifestVersion, out var cachedVer) &&
+                Version.TryParse(defaultManifest.ManifestVersion, out var defaultVer) &&
+                cachedVer < defaultVer)
+            {
+                _currentManifest = defaultManifest;
+                _currentETag = null;
+                _lastCheckedAt = null;
+                AppLogger.Info("OTA", "UpgradeOverridden", $"Cached OTA manifest v{cachedVer} is older than compiled default v{defaultVer}. Using compiled default manifest v{defaultVer}.");
+            }
+            else
+            {
+                _currentManifest = cachedRecord.Manifest;
+                _currentETag = cachedRecord.ETag;
+                _lastCheckedAt = cachedRecord.LastCheckedAt;
+                AppLogger.Info("OTA", "CacheLoaded", $"Loaded cached OTA telemetry manifest v{_currentManifest.ManifestVersion} (ETag: {_currentETag ?? "none"}).");
+            }
         }
         else
         {
-            _currentManifest = CreateDefaultManifest();
+            _currentManifest = defaultManifest;
             _currentETag = null;
             _lastCheckedAt = null;
-            AppLogger.Info("OTA", "DefaultLoaded", "No cached OTA telemetry manifest found. Initialized with compiled default manifest v1.2.2.");
+            AppLogger.Info("OTA", "DefaultLoaded", "No cached OTA telemetry manifest found. Initialized with compiled default manifest v1.3.0.");
         }
     }
 
@@ -344,7 +357,7 @@ public sealed class OtaConfigService : IDisposable
         return new OtaTelemetryManifestDto
         {
             SchemaVersion = "1.0",
-            ManifestVersion = "1.2.2",
+            ManifestVersion = "1.3.0",
             UpdatedAt = DateTimeOffset.UtcNow,
             RoutingMode = "auto",
             CloudBaseUrl = null,
@@ -357,6 +370,8 @@ public sealed class OtaConfigService : IDisposable
                 MatchDetailsFallbackUrlTemplate = "https://www.fotmob.com/api/matchDetails?matchId={matchId}",
                 LeagueHubUrlTemplate = "https://www.fotmob.com/api/data/leagues?id={leagueId}",
                 LeagueHubFallbackUrlTemplate = "https://www.fotmob.com/api/leagues?id={leagueId}",
+                TeamHubUrlTemplate = "https://www.fotmob.com/api/data/teams?id={teamId}",
+                TeamHubFallbackUrlTemplate = "https://www.fotmob.com/api/teams?id={teamId}",
                 SearchSuggestUrlTemplate = "https://www.fotmob.com/api/search/suggest?term={term}",
                 TeamLogoUrlTemplate = "https://images.fotmob.com/image_resources/logo/teamlogo/{teamId}.png",
                 LeagueLogoUrlTemplate = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{leagueId}.png"
@@ -365,18 +380,19 @@ public sealed class OtaConfigService : IDisposable
             {
                 ["ft_comp_01m33dknccnejag93cdagjsr4a"] = 47,
                 ["ft_comp_01m33dknc8ckgmj9z7898ah8ha"] = 87,
-                ["ft_comp_01m33dkncabrryr4k6d9dktp40"] = 525,
+                ["ft_comp_01m33dkncabrryr4k6d9dktp40"] = 519,
+                ["ft_comp_01m33dknc525afcaclweasteast0"] = 525,
                 ["ft_comp_01m33dknc97emtt3fnzr1ytc9e"] = 42,
                 ["ft_comp_01m33dknc7hy1q85dnpb713v5y"] = 73,
                 ["ft_comp_01m33dknc6q5v0q4d89z37f8w8"] = 10216,
                 ["ft_comp_01m33dknc5e4n9q4p4y9a9q2g7"] = 55,
                 ["ft_comp_01m33dknc4d3m8p3n3x8z8p1f6"] = 54,
                 ["ft_comp_01m33dknc3c2l7n2m2w7y7o0e5"] = 53,
-                ["ft_comp_01m33dknc2b1k6m1l1v6x6n9d4"] = 138,
-                ["ft_comp_01m33dknc1a0j5l0k0u5w5m8c3"] = 137,
+                ["ft_comp_01m33dknc2b1k6m1l1v6x6n9d4"] = 132,
+                ["ft_comp_01m33dknc1a0j5l0k0u5w5m8c3"] = 138,
                 ["ft_comp_01m33dknc09zh4kzjztzv4l7b2"] = 536,
                 ["ft_comp_01m33dknbz8yg3jyiysyu3k6a1"] = 130,
-                ["ft_comp_01m33dkncdv0t7deehhz20dmn7"] = 132,
+                ["ft_comp_01m33dkncdv0t7deehhz20dmn7"] = 289,
                 ["ft_comp_01m33dknbzrhdx2en9yqjpsv5q"] = 77,
                 ["ft_comp_01m3y7e15vjygs76sm21gbr1yd"] = 50,
                 ["ft_comp_01m3y7e15z5x08y7s7k0jpage6"] = 9806,
@@ -384,18 +400,27 @@ public sealed class OtaConfigService : IDisposable
                 ["ft_comp_01m467y24drwpkfg9ax4xx88ze"] = 9806,
                 ["comp_39"] = 47,
                 ["comp_140"] = 87,
-                ["comp_233"] = 525,
+                ["comp_233"] = 519,
+                ["comp_191"] = 519,
+                ["comp_10650"] = 519,
+                ["10650"] = 519,
+                ["comp_519"] = 519,
+                ["519"] = 519,
+                ["comp_525"] = 525,
+                ["525"] = 525,
+                ["afc_champions_league"] = 525,
+                ["afc champions league"] = 525,
                 ["comp_2"] = 42,
                 ["comp_3"] = 73,
                 ["comp_848"] = 10216,
                 ["comp_135"] = 55,
                 ["comp_78"] = 54,
                 ["comp_61"] = 53,
-                ["comp_45"] = 138,
-                ["comp_143"] = 137,
+                ["comp_45"] = 132,
+                ["comp_143"] = 138,
                 ["comp_307"] = 536,
                 ["comp_253"] = 130,
-                ["comp_6"] = 132,
+                ["comp_6"] = 289,
                 ["comp_1"] = 77,
                 ["comp_4"] = 50,
                 ["comp_5"] = 9806,
@@ -420,18 +445,18 @@ public sealed class OtaConfigService : IDisposable
                 ["bundesliga"] = 54,
                 ["ligue_1"] = 53,
                 ["ligue 1"] = 53,
-                ["fa_cup"] = 138,
-                ["fa cup"] = 138,
-                ["copa_del_rey"] = 137,
-                ["copa del rey"] = 137,
+                ["fa_cup"] = 132,
+                ["fa cup"] = 132,
+                ["copa_del_rey"] = 138,
+                ["copa del rey"] = 138,
                 ["coppa_italia"] = 141,
                 ["coppa italia"] = 141,
                 ["dfb_pokal"] = 209,
                 ["dfb pokal"] = 209,
-                ["coupe_de_france"] = 142,
-                ["coupe de france"] = 142,
-                ["egyptian_premier_league"] = 525,
-                ["egyptian premier league"] = 525,
+                ["coupe_de_france"] = 134,
+                ["coupe de france"] = 134,
+                ["egyptian_premier_league"] = 519,
+                ["egyptian premier league"] = 519,
                 ["saudi_pro_league"] = 536,
                 ["saudi pro league"] = 536,
                 ["spl"] = 536,
@@ -446,12 +471,19 @@ public sealed class OtaConfigService : IDisposable
                 ["euro"] = 50,
                 ["nations_league"] = 9806,
                 ["copa_america"] = 44,
-                ["africa_cup_of_nations"] = 132,
-                ["afcon"] = 132
+                ["africa_cup_of_nations"] = 289,
+                ["afcon"] = 289
             },
             PriorityLeagueIds = new List<int>
             {
-                47, 42, 87, 55, 54, 53, 73, 10216, 525, 536, 130
+                // Tier 1: Major International & Continental Competitions (INT)
+                77, 42, 50, 289, 44, 78, 74, 73, 10216, 526, 527, 525, 45, 9806,
+                // Tier 2: Egypt & MENA Top Competitions
+                519, 675, 9470, 536, 687, 530, 535, 516, 538, 533,
+                // Tier 3: Europe's "Big 5" Leagues & Domestic Cups
+                47, 87, 55, 54, 53, 132, 133, 138, 141, 209, 134,
+                // Tier 4: Top Global Secondary Leagues
+                61, 57, 71, 268, 112, 130, 48, 40
             }
         };
     }

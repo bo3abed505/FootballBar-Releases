@@ -28,5 +28,8 @@ public sealed record NotificationCandidate
     public string? AwayTeamLegacyId { get; init; }
     public string? EventPlayerName { get; set; }
     public string? EventDescription { get; set; }
+    public string? ScoringTeamName { get; set; }
+    public string? AssistPlayerName { get; set; }
+    public string? EventDetail { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }

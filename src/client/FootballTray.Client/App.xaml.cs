@@ -18,6 +18,7 @@ using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Services.Telemetry;
 using FootballTray.Client.Services.Updates;
 using FootballTray.Client.ViewModels;
+using FootballTray.Core.Dto;
 
 namespace FootballTray.Client;
 
@@ -49,7 +50,7 @@ public partial class App : Application
 
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
-    public static TaskbarTickerCoordinator? CurrentTickerCoordinator { get; private set; }
+    public static TaskbarTickerCoordinator? CurrentTickerCoordinator { get; internal set; }
     public static MainViewModel? CurrentMainViewModel { get; private set; }
     public static IDiagnosticsService? CurrentDiagnosticsService { get; private set; }
     public static PreferencesService? CurrentPreferencesService => _preferencesService;
@@ -628,6 +629,86 @@ public partial class App : Application
         {
             dq.TryEnqueue(RestoreAndNavigate);
         }
+    }
+
+    private static readonly Dictionary<string, Views.TeamHubWindow> _openTeamHubWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    public static void OpenMatchCenter(TrayMatchDto? match)
+    {
+        if (match == null) return;
+        if (Current is not App app || app._window == null) return;
+        var dq = app._window.DispatcherQueue;
+        if (dq != null && !dq.HasThreadAccess)
+        {
+            dq.TryEnqueue(() => OpenMatchCenter(match));
+            return;
+        }
+
+        CurrentTickerCoordinator?.OpenMatchCenter(match);
+    }
+
+    public static void OpenMatchCenter(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+        if (Current is not App app || app._window == null) return;
+        var dq = app._window.DispatcherQueue;
+        if (dq != null && !dq.HasThreadAccess)
+        {
+            dq.TryEnqueue(() => OpenMatchCenter(matchId));
+            return;
+        }
+
+        CurrentTickerCoordinator?.OpenMatchCenter(matchId);
+    }
+
+    public static void OpenTeamHub(string teamId, string? teamName = null, string? logoUrl = null)
+    {
+        if (string.IsNullOrWhiteSpace(teamId)) return;
+        if (Current is not App app || app._window == null) return;
+        var dq = app._window.DispatcherQueue;
+        if (dq != null && !dq.HasThreadAccess)
+        {
+            dq.TryEnqueue(() => OpenTeamHub(teamId, teamName, logoUrl));
+            return;
+        }
+
+        try
+        {
+            if (_openTeamHubWindows.TryGetValue(teamId, out var existingWindow))
+            {
+                existingWindow.Activate();
+                return;
+            }
+
+            var window = new Views.TeamHubWindow(teamId, teamName, logoUrl);
+            _openTeamHubWindows[teamId] = window;
+            window.Closed += (s, e) => _openTeamHubWindows.Remove(teamId);
+            window.Activate();
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppDiagnosticsLogger.LogError("App", "OpenTeamHubFailed", $"Failed to open TeamHubWindow for {teamId}: {ex.Message}", ex);
+        }
+    }
+
+    public static void OpenCompetitionHub(string competitionId, string? competitionName = null, string? logoUrl = null)
+    {
+        OpenCompetitionStandings(competitionId, competitionName, logoUrl);
+    }
+
+    public static void OpenCompetitionStandings(string? competitionId, string? competitionName = null, string? logoUrl = null, string? country = null)
+    {
+        if (string.IsNullOrWhiteSpace(competitionId)) return;
+        if (Current is not App app || app._window == null) return;
+        var dq = app._window.DispatcherQueue;
+        if (dq != null && !dq.HasThreadAccess)
+        {
+            dq.TryEnqueue(() => OpenCompetitionStandings(competitionId, competitionName, logoUrl, country));
+            return;
+        }
+
+        OpenMainWindow();
+        CurrentMainViewModel?.NavigateToCompetitionStandings(competitionId, competitionName, logoUrl, country);
     }
 
     public static async void RestartTaskbarHost()

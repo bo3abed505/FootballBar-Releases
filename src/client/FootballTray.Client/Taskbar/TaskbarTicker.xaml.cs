@@ -29,6 +29,7 @@ public sealed partial class TaskbarTicker : UserControl
     private DispatcherTimer? _clickResolutionTimer;
     private string? _pendingClickMatchId;
     private bool _isUpdatingMenu;
+    private readonly SemaphoreSlim _menuActionLock = new(1, 1);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -102,7 +103,9 @@ public sealed partial class TaskbarTicker : UserControl
     {
         DispatcherQueue?.TryEnqueue(() =>
         {
-            _currentDisplayedMatchId = fixtureId;
+            try
+            {
+                _currentDisplayedMatchId = fixtureId;
             _currentMatch = match;
             _isPinned = isPinned;
 
@@ -248,92 +251,102 @@ public sealed partial class TaskbarTicker : UserControl
 
             // Asynchronously retrieve crests on a background thread without blocking the UI
             _ = LoadLogosAsync(fixtureId, homeLogoUrl, awayLogoUrl);
+            }
+            catch (System.Runtime.InteropServices.COMException comEx) when ((uint)comEx.HResult == 0x8000FFFF)
+            {
+                // Ignored: window or tooltip closing
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.AppLogger.Debug("TaskbarTicker", "UpdateTickerException", ex.Message);
+            }
         });
     }
 
     private void UpdateFlyoutContent(TrayMatchDto? match, string fallbackText, bool isPinned)
     {
-        if (FlyoutCompetitionText == null || FlyoutStatusText == null ||
-            FlyoutHomeTeamText == null || FlyoutAwayTeamText == null ||
-            FlyoutScoreText == null || FlyoutEventsPanel == null ||
-            FlyoutGoalscorersText == null || FlyoutPinHintText == null)
+        try
         {
-            return;
-        }
+            if (FlyoutCompetitionText == null || FlyoutStatusText == null ||
+                FlyoutHomeTeamText == null || FlyoutAwayTeamText == null ||
+                FlyoutScoreText == null || FlyoutEventsPanel == null ||
+                FlyoutGoalscorersText == null || FlyoutPinHintText == null)
+            {
+                return;
+            }
 
-        if (match != null)
-        {
-            FlyoutCompetitionText.Text = !string.IsNullOrWhiteSpace(match.Competition?.Name)
-                ? match.Competition.Name
-                : "FootballTray";
+            if (match != null)
+            {
+                FlyoutCompetitionText.Text = !string.IsNullOrWhiteSpace(match.Competition?.Name)
+                    ? match.Competition.Name
+                    : "FootballTray";
 
-            // Status and timing
-            if (string.Equals(match.State, "LIVE", StringComparison.OrdinalIgnoreCase))
-            {
-                FlyoutStatusText.Text = match.ExtraMinute > 0
-                    ? $"LIVE {match.ElapsedMinute}+{match.ExtraMinute}'"
-                    : $"LIVE {match.ElapsedMinute}'";
-            }
-            else if (string.Equals(match.State, "HALFTIME", StringComparison.OrdinalIgnoreCase))
-            {
-                FlyoutStatusText.Text = "HT";
-            }
-            else if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase))
-            {
-                var use24h = App.CurrentMainViewModel?.PreferencesService?.Current.Use24HourFormat ?? true;
-                FlyoutStatusText.Text = match.KickoffTime.ToLocalTime().ToString(use24h ? "HH:mm" : "h:mm tt");
-            }
-            else if (string.Equals(match.State, "FINISHED", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(match.State, "POSTMATCH", StringComparison.OrdinalIgnoreCase))
-            {
-                FlyoutStatusText.Text = "FT";
+                // Status and timing
+                if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(match.State, "NS", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(match.State, "TIMED", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(match.State, "SCHEDULED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var use24h = App.CurrentMainViewModel?.PreferencesService?.Current.Use24HourFormat ?? true;
+                    FlyoutStatusText.Text = match.KickoffTime != default
+                        ? match.KickoffTime.ToLocalTime().ToString(use24h ? "HH:mm" : "h:mm tt")
+                        : "Upcoming";
+                }
+                else
+                {
+                    FlyoutStatusText.Text = TrayTickerFormatter.FormatPeriodStatus(match.State, match.ElapsedMinute, match.ExtraMinute);
+                }
+
+                var peekData = PeekViewFormatter.Format(match);
+
+                // Red card indicators in score row (e.g. Egypt 🟥 1 - 0)
+                FlyoutHomeTeamText.Text = peekData.HomeScoreDisplay;
+                FlyoutAwayTeamText.Text = peekData.AwayScoreDisplay;
+                FlyoutScoreText.Text = peekData.ScoreDisplay;
+
+                // Team-divided Incidents (Multi-column Grid, excluding missed penalties)
+                if (peekData.HasEvents)
+                {
+                    FlyoutEventsPanel.Visibility = Visibility.Visible;
+                    if (FlyoutHomeEventsHeader != null) FlyoutHomeEventsHeader.Text = peekData.HomeHeader;
+                    if (FlyoutHomeEventsText != null) FlyoutHomeEventsText.Text = peekData.HomeEventsText;
+                    if (FlyoutAwayEventsHeader != null) FlyoutAwayEventsHeader.Text = peekData.AwayHeader;
+                    if (FlyoutAwayEventsText != null) FlyoutAwayEventsText.Text = peekData.AwayEventsText;
+                    if (FlyoutGoalscorersText != null) FlyoutGoalscorersText.Text = peekData.FormattedToolTipText;
+                }
+                else
+                {
+                    FlyoutEventsPanel.Visibility = Visibility.Collapsed;
+                }
+
+                if ((match.Events == null || match.Events.Count == 0 || match.RecentEvents == null || match.RecentEvents.Count == 0) &&
+                    (match.Score?.Home > 0 || match.Score?.Away > 0))
+                {
+                    _ = EnrichFlyoutEventsAsync(match.Id);
+                }
+
+                FlyoutPinHintText.Text = isPinned
+                    ? "📌 Match is pinned (right-click to unpin)"
+                    : "Right-click to pin match or open details";
             }
             else
             {
-                FlyoutStatusText.Text = match.State;
-            }
-
-            var peekData = PeekViewFormatter.Format(match);
-
-            // Red card indicators in score row (e.g. Egypt 🟥 1 - 0)
-            FlyoutHomeTeamText.Text = peekData.HomeScoreDisplay;
-            FlyoutAwayTeamText.Text = peekData.AwayScoreDisplay;
-            FlyoutScoreText.Text = peekData.ScoreDisplay;
-
-            // Team-divided Incidents (Multi-column Grid, excluding missed penalties)
-            if (peekData.HasEvents)
-            {
-                FlyoutEventsPanel.Visibility = Visibility.Visible;
-                if (FlyoutHomeEventsHeader != null) FlyoutHomeEventsHeader.Text = peekData.HomeHeader;
-                if (FlyoutHomeEventsText != null) FlyoutHomeEventsText.Text = peekData.HomeEventsText;
-                if (FlyoutAwayEventsHeader != null) FlyoutAwayEventsHeader.Text = peekData.AwayHeader;
-                if (FlyoutAwayEventsText != null) FlyoutAwayEventsText.Text = peekData.AwayEventsText;
-                if (FlyoutGoalscorersText != null) FlyoutGoalscorersText.Text = peekData.FormattedToolTipText;
-            }
-            else
-            {
+                FlyoutCompetitionText.Text = "FootballTray";
+                FlyoutStatusText.Text = "";
+                FlyoutHomeTeamText.Text = "";
+                FlyoutScoreText.Text = fallbackText;
+                FlyoutAwayTeamText.Text = "";
                 FlyoutEventsPanel.Visibility = Visibility.Collapsed;
+                FlyoutPinHintText.Text = "";
             }
-
-            if ((match.Events == null || match.Events.Count == 0 || match.RecentEvents == null || match.RecentEvents.Count == 0) &&
-                (match.Score?.Home > 0 || match.Score?.Away > 0))
-            {
-                _ = EnrichFlyoutEventsAsync(match.Id);
-            }
-
-            FlyoutPinHintText.Text = isPinned
-                ? "📌 Match is pinned (right-click to unpin)"
-                : "Right-click to pin match or open details";
         }
-        else
+        catch (System.Runtime.InteropServices.COMException comEx) when ((uint)comEx.HResult == 0x8000FFFF)
         {
-            FlyoutCompetitionText.Text = "FootballTray";
-            FlyoutStatusText.Text = "";
-            FlyoutHomeTeamText.Text = "";
-            FlyoutScoreText.Text = fallbackText;
-            FlyoutAwayTeamText.Text = "";
-            FlyoutEventsPanel.Visibility = Visibility.Collapsed;
-            FlyoutPinHintText.Text = "";
+            // Tooltip or window closing
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLogger.Debug("TaskbarTicker", "UpdateFlyoutException", ex.Message);
         }
     }
 
@@ -590,6 +603,41 @@ public sealed partial class TaskbarTicker : UserControl
         RootBorder.Opacity = 1.0;
     }
 
+    private long _lastWheelTicks;
+
+    private void RootBorder_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        var props = e.GetCurrentPoint(RootBorder).Properties;
+        int delta = props.MouseWheelDelta;
+        if (delta == 0) return;
+
+        long now = Environment.TickCount64;
+        if (now - _lastWheelTicks < 40)
+        {
+            e.Handled = true;
+            return;
+        }
+        _lastWheelTicks = now;
+
+        int direction = delta > 0 ? -1 : 1; // Scroll UP = Previous, Scroll DOWN = Next
+        var coordinator = App.CurrentTickerCoordinator;
+        if (coordinator != null && coordinator.StepByUserScroll(direction))
+        {
+            e.Handled = true;
+        }
+    }
+
+    public void OnHostMouseWheel(int delta)
+    {
+        if (delta == 0) return;
+        long now = Environment.TickCount64;
+        if (now - _lastWheelTicks < 40) return;
+        _lastWheelTicks = now;
+
+        int direction = delta > 0 ? -1 : 1; // Scroll UP = Previous, Scroll DOWN = Next
+        App.CurrentTickerCoordinator?.StepByUserScroll(direction);
+    }
+
     public static readonly DependencyProperty ShowDurationProperty =
         DependencyProperty.RegisterAttached(
             "ShowDuration",
@@ -629,6 +677,27 @@ public sealed partial class TaskbarTicker : UserControl
             {
                 var carouselEnabled = App.CurrentMainViewModel?.PreferencesService?.Current.EnableTickerCarousel ?? true;
                 MenuAutoRotateToggle.IsChecked = carouselEnabled;
+                var scope = App.CurrentMainViewModel?.PreferencesService?.Current.TickerRotationScope ?? "FollowedLive";
+                if (MenuModeFollowedLive != null)
+                {
+                    MenuModeFollowedLive.IsChecked = string.Equals(scope, "FollowedLive", StringComparison.OrdinalIgnoreCase);
+                    MenuModeFollowedLive.IsEnabled = carouselEnabled;
+                }
+                if (MenuModeAllFollowed != null)
+                {
+                    MenuModeAllFollowed.IsChecked = string.Equals(scope, "AllFollowed", StringComparison.OrdinalIgnoreCase);
+                    MenuModeAllFollowed.IsEnabled = carouselEnabled;
+                }
+                if (MenuModeAllLive != null)
+                {
+                    MenuModeAllLive.IsChecked = string.Equals(scope, "AllLive", StringComparison.OrdinalIgnoreCase);
+                    MenuModeAllLive.IsEnabled = carouselEnabled;
+                }
+                if (MenuModeCustomQueue != null)
+                {
+                    MenuModeCustomQueue.IsChecked = string.Equals(scope, "CustomQueue", StringComparison.OrdinalIgnoreCase);
+                    MenuModeCustomQueue.IsEnabled = carouselEnabled;
+                }
             }
         }
         catch (Exception ex)
@@ -656,7 +725,33 @@ public sealed partial class TaskbarTicker : UserControl
         }
     }
 
-    private void OnUnpinMatchClicked(object sender, RoutedEventArgs e)
+    private async void OnUnpinMatchClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var prefs = App.CurrentMainViewModel?.PreferencesService?.Current;
+            if (string.Equals(prefs?.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase))
+            {
+                var q = (prefs?.CustomTickerQueueMatchIds ?? new List<string>()).ToList();
+                if (!string.IsNullOrEmpty(_currentDisplayedMatchId) && q.Any(id => string.Equals(id, _currentDisplayedMatchId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    q.RemoveAll(id => string.Equals(id, _currentDisplayedMatchId, StringComparison.OrdinalIgnoreCase));
+                    if (App.CurrentMainViewModel?.PreferencesService != null)
+                    {
+                        await App.CurrentMainViewModel.PreferencesService.SetCustomTickerQueueMatchIdsAsync(q);
+                    }
+                    return;
+                }
+            }
+            App.CurrentMainViewModel?.UnpinMatch(_currentDisplayedMatchId);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("TaskbarTicker", "UnpinMatchFailed", "Failed unpinning match from menu", ex: ex);
+        }
+    }
+
+    private void DummyUnpinOld()
     {
         try
         {
@@ -668,28 +763,65 @@ public sealed partial class TaskbarTicker : UserControl
         }
     }
 
-    private async void MenuAutoRotateToggle_Click(object sender, RoutedEventArgs e)
+    private void MenuAutoRotateToggle_Click(object sender, RoutedEventArgs e)
     {
         if (_isUpdatingMenu) return;
-        try
+        DispatcherQueue?.TryEnqueue(async () =>
         {
-            var prefs = App.CurrentMainViewModel?.PreferencesService;
-            if (prefs == null) return;
-            bool isChecked = MenuAutoRotateToggle?.IsChecked ?? true;
-            await prefs.SetEnableTickerCarouselAsync(isChecked);
-            if (App.CurrentMainViewModel != null)
+            await _menuActionLock.WaitAsync();
+            try
             {
-                await App.CurrentMainViewModel.SetEnableTickerCarouselAsync(isChecked);
+                var prefs = App.CurrentMainViewModel?.PreferencesService;
+                if (prefs == null) return;
+                bool isChecked = MenuAutoRotateToggle?.IsChecked ?? true;
+                await prefs.SetEnableTickerCarouselAsync(isChecked);
+                if (App.CurrentMainViewModel != null)
+                {
+                    await App.CurrentMainViewModel.SetEnableTickerCarouselAsync(isChecked);
+                }
+                else
+                {
+                    App.CurrentTickerCoordinator?.SetCarouselEnabled(isChecked);
+                }
+                UpdatePinAndAutoRotateMenuState();
             }
-            else
+            catch (Exception ex)
             {
-                App.CurrentTickerCoordinator?.SetCarouselEnabled(isChecked);
+                AppLogger.Error("TaskbarTicker", "AutoRotateToggleFailed", "Failed toggling auto-rotate from taskbar menu", ex: ex);
             }
-        }
-        catch (Exception ex)
+            finally
+            {
+                _menuActionLock.Release();
+            }
+        });
+    }
+
+    private void OnAutoRotateModeSelected(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingMenu) return;
+        if (sender is not ToggleMenuFlyoutItem item || item.Tag is not string scope) return;
+
+        DispatcherQueue?.TryEnqueue(async () =>
         {
-            AppLogger.Error("TaskbarTicker", "AutoRotateToggleFailed", "Failed toggling auto-rotate from taskbar menu", ex: ex);
-        }
+            await _menuActionLock.WaitAsync();
+            try
+            {
+                var prefs = App.CurrentMainViewModel?.PreferencesService;
+                if (prefs != null)
+                {
+                    await prefs.SetTickerRotationScopeAsync(scope);
+                    UpdatePinAndAutoRotateMenuState();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("TaskbarTicker", "AutoRotateModeChangeFailed", "Failed setting auto-rotate mode", ex: ex);
+            }
+            finally
+            {
+                _menuActionLock.Release();
+            }
+        });
     }
 
     private void OnTogglePinClicked(object sender, RoutedEventArgs e)
@@ -871,7 +1003,13 @@ public sealed partial class TaskbarTicker : UserControl
 
         foreach (var item in TickerContextMenu.Items)
         {
-            if (item is ToggleMenuFlyoutItem toggleItem && toggleItem != MenuMuteToggle && toggleItem != MenuAutoRotateToggle)
+            if (item is ToggleMenuFlyoutItem toggleItem &&
+                toggleItem != MenuMuteToggle &&
+                toggleItem != MenuAutoRotateToggle &&
+                toggleItem != MenuModeFollowedLive &&
+                toggleItem != MenuModeAllFollowed &&
+                toggleItem != MenuModeAllLive &&
+                toggleItem != MenuModeCustomQueue)
             {
                 string? tag = toggleItem.Tag as string;
                 if (string.IsNullOrEmpty(tag))

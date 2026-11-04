@@ -107,6 +107,7 @@ public class SearchCatalogViewModelTests
 
         // Wait for debounce period (300ms) plus execution
         await WaitForConditionAsync(() => Volatile.Read(ref apiCallCount) == 1, timeoutMs: 5000);
+        await WaitForConditionAsync(() => vm.TeamSearchResults.Count == 1, timeoutMs: 5000);
 
         Assert.AreEqual(1, apiCallCount, "Debounce mechanism should coalesce rapid typing into exactly 1 API call.");
         Assert.AreEqual(1, vm.TeamSearchResults.Count);

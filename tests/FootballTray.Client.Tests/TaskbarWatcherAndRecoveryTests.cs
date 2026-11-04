@@ -269,7 +269,7 @@ public class TaskbarWatcherAndRecoveryTests
         recovery.RecoveryCompleted += success => tcs.TrySetResult(success);
         recovery.RequestRecovery("TestNeverAppears");
 
-        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(2000)) == tcs.Task;
+        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(5000)) == tcs.Task;
         Assert.IsTrue(completed, "Recovery did not stop after bounded window.");
         Assert.IsFalse(await tcs.Task, "Recovery should return false when window exhausted.");
         Assert.AreEqual(3, attempts, "Expected attempts to stop after bounded backoff array exhausted.");

@@ -63,6 +63,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _emptyStateMessage = "Waiting for synchronized football data...";
     private bool _isInitialized;
     private TrayDataDto? _latestTrayData;
+    public TrayDataDto? LatestTrayData => _latestTrayData;
     private DateTime _selectedCalendarDate = DateTime.Today;
     private MatchFilterType? _lastFilterApplied;
     private DateTime? _lastDateApplied;
@@ -115,6 +116,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<MatchItemViewModel> OtherMatches { get; } = new();
     public ObservableCollection<CalendarDayItemViewModel> CalendarDays { get; } = new();
     public ObservableCollection<CompetitionGroupViewModel> CompetitionGroups { get; } = new();
+    public ObservableCollection<FollowingDayGroupViewModel> FollowingDayGroups { get; } = new();
     public ObservableCollection<FollowedTeamItemViewModel> AvailableTeams { get; } = new();
     public ObservableCollection<FollowedCompetitionItemViewModel> AvailableCompetitions { get; } = new();
     public ObservableCollection<NotificationCategoryItemViewModel> NotificationCategories { get; } = new();
@@ -122,6 +124,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<StandingRowItemViewModel> CurrentStandings { get; } = new();
     public ObservableCollection<PlayerStatLeaderItemViewModel> CurrentTopScorers { get; } = new();
     public ObservableCollection<PlayerStatLeaderItemViewModel> CurrentTopAssists { get; } = new();
+    public ObservableCollection<CompetitionFixtureViewModel> CurrentFixtures { get; } = new();
+    public ObservableCollection<KnockoutStageDto> CurrentKnockoutStages { get; } = new();
 
     public bool IsMatchesMode
     {
@@ -163,13 +167,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (SetProperty(ref _standingsSubTabIndex, value))
             {
                 OnPropertyChanged(nameof(IsLeagueTableSelected));
+                OnPropertyChanged(nameof(IsFixturesSelected));
+                OnPropertyChanged(nameof(IsKnockoutBracketSelected));
                 OnPropertyChanged(nameof(IsTopScorersSelected));
                 OnPropertyChanged(nameof(IsTopAssistsSelected));
                 OnPropertyChanged(nameof(HubTableSubTabVisibility));
+                OnPropertyChanged(nameof(HubFixturesSubTabVisibility));
+                OnPropertyChanged(nameof(HubKnockoutBracketSubTabVisibility));
                 OnPropertyChanged(nameof(HubTopScorersSubTabVisibility));
                 OnPropertyChanged(nameof(HubTopAssistsSubTabVisibility));
+                OnPropertyChanged(nameof(HubFixturesSubTabVisibility));
+                OnPropertyChanged(nameof(HubKnockoutBracketSubTabVisibility));
                 OnPropertyChanged(nameof(LeagueTableTabBackgroundHex));
                 OnPropertyChanged(nameof(LeagueTableTabForegroundHex));
+                OnPropertyChanged(nameof(FixturesTabBackgroundHex));
+                OnPropertyChanged(nameof(FixturesTabForegroundHex));
+                OnPropertyChanged(nameof(KnockoutBracketTabBackgroundHex));
+                OnPropertyChanged(nameof(KnockoutBracketTabForegroundHex));
                 OnPropertyChanged(nameof(TopScorersTabBackgroundHex));
                 OnPropertyChanged(nameof(TopScorersTabForegroundHex));
                 OnPropertyChanged(nameof(TopAssistsTabBackgroundHex));
@@ -179,15 +193,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public bool IsLeagueTableSelected => _standingsSubTabIndex == 0;
-    public bool IsTopScorersSelected => _standingsSubTabIndex == 1;
-    public bool IsTopAssistsSelected => _standingsSubTabIndex == 2;
+    public bool IsFixturesSelected => _standingsSubTabIndex == 1;
+    public bool IsKnockoutBracketSelected => _standingsSubTabIndex == 2;
+    public bool IsTopScorersSelected => _standingsSubTabIndex == 3;
+    public bool IsTopAssistsSelected => _standingsSubTabIndex == 4;
 
     public string LeagueTableTabBackgroundHex => _standingsSubTabIndex == 0 ? "#2538BDF8" : "Transparent";
     public string LeagueTableTabForegroundHex => _standingsSubTabIndex == 0 ? "#38BDF8" : "#94A3B8";
-    public string TopScorersTabBackgroundHex => _standingsSubTabIndex == 1 ? "#2538BDF8" : "Transparent";
-    public string TopScorersTabForegroundHex => _standingsSubTabIndex == 1 ? "#38BDF8" : "#94A3B8";
-    public string TopAssistsTabBackgroundHex => _standingsSubTabIndex == 2 ? "#2538BDF8" : "Transparent";
-    public string TopAssistsTabForegroundHex => _standingsSubTabIndex == 2 ? "#38BDF8" : "#94A3B8";
+    public string FixturesTabBackgroundHex => _standingsSubTabIndex == 1 ? "#2538BDF8" : "Transparent";
+    public string FixturesTabForegroundHex => _standingsSubTabIndex == 1 ? "#38BDF8" : "#94A3B8";
+    public string KnockoutBracketTabBackgroundHex => _standingsSubTabIndex == 2 ? "#2538BDF8" : "Transparent";
+    public string KnockoutBracketTabForegroundHex => _standingsSubTabIndex == 2 ? "#38BDF8" : "#94A3B8";
+    public string TopScorersTabBackgroundHex => _standingsSubTabIndex == 3 ? "#2538BDF8" : "Transparent";
+    public string TopScorersTabForegroundHex => _standingsSubTabIndex == 3 ? "#38BDF8" : "#94A3B8";
+    public string TopAssistsTabBackgroundHex => _standingsSubTabIndex == 4 ? "#2538BDF8" : "Transparent";
+    public string TopAssistsTabForegroundHex => _standingsSubTabIndex == 4 ? "#38BDF8" : "#94A3B8";
 
     public HubCompetitionItemViewModel? SelectedHubCompetition
     {
@@ -235,6 +255,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(HubTableSubTabVisibility));
                 OnPropertyChanged(nameof(HubTopScorersSubTabVisibility));
                 OnPropertyChanged(nameof(HubTopAssistsSubTabVisibility));
+                OnPropertyChanged(nameof(HubFixturesSubTabVisibility));
+                OnPropertyChanged(nameof(HubKnockoutBracketSubTabVisibility));
             }
         }
     }
@@ -249,6 +271,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public Visibility HubErrorVisibility => (HasHubError && !IsLoadingHub) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility HubContentVisibility => (!IsLoadingHub && !HasHubError) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility HubTableSubTabVisibility => (!IsLoadingHub && !HasHubError && IsLeagueTableSelected) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubFixturesSubTabVisibility => (!IsLoadingHub && !HasHubError && IsFixturesSelected) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubKnockoutBracketSubTabVisibility => (!IsLoadingHub && !HasHubError && IsKnockoutBracketSelected) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility HubTopScorersSubTabVisibility => (!IsLoadingHub && !HasHubError && IsTopScorersSelected) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility HubTopAssistsSubTabVisibility => (!IsLoadingHub && !HasHubError && IsTopAssistsSelected) ? Visibility.Visible : Visibility.Collapsed;
 
@@ -265,6 +289,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(HubTableSubTabVisibility));
                 OnPropertyChanged(nameof(HubTopScorersSubTabVisibility));
                 OnPropertyChanged(nameof(HubTopAssistsSubTabVisibility));
+                OnPropertyChanged(nameof(HubFixturesSubTabVisibility));
+                OnPropertyChanged(nameof(HubKnockoutBracketSubTabVisibility));
             }
         }
     }
@@ -318,6 +344,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HasStandings => CurrentStandings.Count > 0;
     public bool HasTopScorers => CurrentTopScorers.Count > 0;
     public bool HasTopAssists => CurrentTopAssists.Count > 0;
+    public bool HasFixtures => CurrentFixtures.Count > 0;
+    public bool HasKnockoutStages => CurrentKnockoutStages.Count > 0;
+    public bool HasNoKnockoutBracket => !HasKnockoutStages;
+    public Visibility HubNoKnockoutVisibility => (!HasKnockoutStages && !IsLoadingHub && !HasHubError) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HubNoFixturesVisibility => (!HasFixtures && !IsLoadingHub && !HasHubError) ? Visibility.Visible : Visibility.Collapsed;
 
     public void SwitchToMatchesMode() => IsMatchesMode = true;
     public void SwitchToStandingsMode()
@@ -406,6 +437,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _isHandlingTickerRotation = true;
         try
         {
+            if (enableCarousel)
+            {
+                ManualPinnedMatchId = null;
+                IsExplicitlyUnpinned = false;
+                _pinnedMatchSnapshot = null;
+                App.CurrentTickerCoordinator?.UnpinMatch();
+            }
             await _preferencesService.SetEnableTickerCarouselAsync(enableCarousel);
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EnableTickerCarousel)));
             App.CurrentTickerCoordinator?.SetCarouselEnabled(enableCarousel);
@@ -617,23 +655,77 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string CurrentVersionText => $"v{_updateDiscoveryService?.CurrentVersion?.ToString() ?? AppVersionInfo.Version}";
 
+    private DateTime _allTabSelectedDate = DateTime.Today;
+
     public MatchFilterType ActiveFilter
     {
         get => _activeFilter;
         set
         {
-            if (SetProperty(ref _activeFilter, value))
+            if (_activeFilter != value)
             {
+                var previousFilter = _activeFilter;
+                SetProperty(ref _activeFilter, value);
+
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCalendarVisible)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCalendarStripVisible)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDatePickerVisible)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFollowingTabActive)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StandardScheduleVisibility)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FollowingScheduleVisibility)));
+
                 if (value == MatchFilterType.Upcoming)
                 {
                     _syncService?.TriggerImmediateSync();
                 }
-                ApplyCurrentFilter();
+
+                if (value == MatchFilterType.Live)
+                {
+                    if (previousFilter == MatchFilterType.All)
+                    {
+                        _allTabSelectedDate = _selectedCalendarDate;
+                    }
+                    if (_selectedCalendarDate.Date != DateTime.Today)
+                    {
+                        _selectedCalendarDate = DateTime.Today;
+                        UpdateCalendarSelection();
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateOffset)));
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateDisplay)));
+                    }
+                    _syncService?.TriggerImmediateSync();
+                    ApplyCurrentFilter();
+                }
+                else if (value == MatchFilterType.All)
+                {
+                    if (_selectedCalendarDate.Date != _allTabSelectedDate.Date)
+                    {
+                        _selectedCalendarDate = _allTabSelectedDate.Date;
+                        UpdateCalendarSelection();
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateOffset)));
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateDisplay)));
+                    }
+                    ApplyCurrentFilter();
+                }
+                else if (value == MatchFilterType.Following)
+                {
+                    ApplyCurrentFilter();
+                    _ = LoadFollowingMultiDayAsync(_selectedCalendarDate);
+                }
+                else
+                {
+                    ApplyCurrentFilter();
+                }
             }
         }
     }
 
+    public bool IsFollowingTabActive => _activeFilter == MatchFilterType.Following;
+    public Visibility StandardScheduleVisibility => IsFollowingTabActive ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility FollowingScheduleVisibility => IsFollowingTabActive ? Visibility.Visible : Visibility.Collapsed;
+    public bool IsCalendarStripVisible => _activeFilter == MatchFilterType.All;
+    public bool IsDatePickerVisible => _activeFilter is MatchFilterType.All or MatchFilterType.Following;
     public bool IsCalendarVisible => _activeFilter is MatchFilterType.All or MatchFilterType.Following;
 
     public string ConnectionStatusText
@@ -782,6 +874,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (_selectedCalendarDate.Date != target)
             {
                 _selectedCalendarDate = target;
+                if (_activeFilter == MatchFilterType.All)
+                {
+                    _allTabSelectedDate = target;
+                }
+                else if (_activeFilter == MatchFilterType.Following)
+                {
+                    _ = LoadFollowingMultiDayAsync(target);
+                }
                 bool hasCached = (_syncService?.HasCachedDataForDate(target) ?? false) ||
                                  (_latestTrayData?.Matches?.Any(m => m.KickoffTime.ToLocalTime().Date == target || m.KickoffTime.UtcDateTime.Date == target) ?? false);
 
@@ -1127,7 +1227,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             }
 
-            // 3. The 6 Default Leagues (always ensure top leagues are available with crisp FotMob logos)
+            // 3. The Default Leagues (always ensure top leagues are available with crisp FotMob logos)
             var defaultTopLeagues = new[]
             {
                 new { Id = "87", Name = "LaLiga", Country = "Spain", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/87.png" },
@@ -1136,6 +1236,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 new { Id = "55", Name = "Serie A", Country = "Italy", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/55.png" },
                 new { Id = "54", Name = "Bundesliga", Country = "Germany", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/54.png" },
                 new { Id = "53", Name = "Ligue 1", Country = "France", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/53.png" },
+                new { Id = "519", Name = "Egyptian Premier League", Country = "Egypt", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/519.png" },
             };
 
             foreach (var dl in defaultTopLeagues)
@@ -1218,28 +1319,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return null;
     }
 
-    private HubCompetitionItemViewModel? FindMatchingHubCompetition(string? id, string? name, string? logoUrl)
+    private HubCompetitionItemViewModel? FindMatchingHubCompetition(string? id, string? name, string? logoUrl, string? country = null)
     {
         if (HubCompetitions.Count == 0) return null;
 
         var numericFromLogo = ExtractFotmobLeagueIdFromLogoUrl(logoUrl);
         var numericFromId = ExtractNumericDigits(id);
 
+        int? targetResolvedId = ResolveFotmobLeagueId(id, name, logoUrl, country);
+
         return HubCompetitions.FirstOrDefault(c =>
         {
             if (!string.IsNullOrWhiteSpace(id) && c.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                var normTarget = NormalizeCompetitionSearchKey(name);
-                var normChip = NormalizeCompetitionSearchKey(c.Name);
-                if (normTarget.Equals(normChip, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-
             var chipNumericLogo = ExtractFotmobLeagueIdFromLogoUrl(c.LogoUrl);
             var chipNumericId = ExtractNumericDigits(c.Id);
+
+            int? chipResolvedId = ResolveFotmobLeagueId(c.Id, c.Name, c.LogoUrl);
+
+            // If both have resolved numeric IDs, they MUST match
+            if (targetResolvedId.HasValue && chipResolvedId.HasValue)
+            {
+                return targetResolvedId.Value == chipResolvedId.Value;
+            }
 
             if (!string.IsNullOrEmpty(numericFromLogo))
             {
@@ -1251,6 +1354,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if ((int.TryParse(chipNumericId, out int cNum) && targetNum == cNum) ||
                     (int.TryParse(chipNumericLogo, out int cLogoNum) && targetNum == cLogoNum))
                     return true;
+            }
+
+            // Only match by name if numeric IDs are not conflicting
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var normTarget = NormalizeCompetitionSearchKey(name);
+                var normChip = NormalizeCompetitionSearchKey(c.Name);
+                if (normTarget.Equals(normChip, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrEmpty(numericFromId) && !string.IsNullOrEmpty(chipNumericId) && numericFromId != chipNumericId)
+                        return false;
+                    return true;
+                }
             }
 
             return false;
@@ -1340,61 +1456,65 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (digits == "55" || lower.Contains("serie_a") || lower.Contains("serie a")) return "Serie A";
         if (digits == "54" || lower.Contains("bundesliga")) return "Bundesliga";
         if (digits == "53" || lower.Contains("ligue_1") || lower.Contains("ligue 1")) return "Ligue 1";
-        if (digits == "525" || lower.Contains("egypt") || lower == CanonicalEntityIds.EgyptianPremierLeague.ToLowerInvariant()) return "Egyptian Premier League";
+        if (digits == "519" || digits == "191" || digits == "10650" || lower.Contains("egypt") || lower == CanonicalEntityIds.EgyptianPremierLeague.ToLowerInvariant()) return "Egyptian Premier League";
+        if (digits == "525" || lower.Contains("afc champions") || lower.Contains("acl elite") || lower == CanonicalEntityIds.AfcChampionsLeague.ToLowerInvariant()) return "AFC Champions League Elite";
         if (digits == "536" || lower.Contains("saudi") || lower.Contains("spl")) return "Saudi Pro League";
         if (digits == "130" || lower.Contains("mls")) return "Major League Soccer";
         if (digits == "57" || lower.Contains("eredivisie")) return "Eredivisie";
         if (digits == "61" || lower.Contains("primeira") || lower.Contains("portugal")) return "Liga Portugal";
         if (digits == "48" || lower.Contains("championship")) return "Championship";
         if (digits == "77" || lower.Contains("world_cup") || lower.Contains("world cup")) return "World Cup";
-        if (digits == "132" || lower.Contains("afcon") || lower.Contains("africa_cup")) return "Africa Cup of Nations";
+        if (digits == "289" || digits == "132" || lower.Contains("afcon") || lower.Contains("africa_cup")) return "Africa Cup of Nations";
 
         return !string.IsNullOrWhiteSpace(name) ? name : "Competition";
     }
 
-    public static int? ResolveFotmobLeagueId(string? id, string? name, string? logoUrl = null)
+    public static int? ResolveFotmobLeagueId(string? id, string? name, string? logoUrl = null, string? country = null)
     {
         var logoDigits = ExtractFotmobLeagueIdFromLogoUrl(logoUrl);
         if (int.TryParse(logoDigits, out int logoNum) && logoNum > 0)
         {
+            if (logoNum == 10650 || logoNum == 191) return 519;
             return logoNum;
         }
 
         var digits = ExtractNumericDigits(id);
         if (int.TryParse(digits, out int numeric) && numeric > 0)
         {
+            if (numeric == 10650 || numeric == 191) return 519;
             return numeric;
         }
 
-        var combined = $"{id} {name}".ToLowerInvariant();
+        var combined = $"{id} {name} {country}".ToLowerInvariant();
 
         if (!string.IsNullOrWhiteSpace(id))
         {
             var idLower = id.ToLowerInvariant();
             if (idLower == CanonicalEntityIds.PremierLeague.ToLowerInvariant()) return 47;
             if (idLower == CanonicalEntityIds.LaLiga.ToLowerInvariant()) return 87;
-            if (idLower == CanonicalEntityIds.EgyptianPremierLeague.ToLowerInvariant()) return 525;
+            if (idLower == CanonicalEntityIds.EgyptianPremierLeague.ToLowerInvariant() || idLower == "519" || idLower == "comp_519" || idLower == "10650" || idLower == "comp_10650" || idLower == "191" || idLower == "comp_191") return 519;
             if (idLower == CanonicalEntityIds.ChampionsLeague.ToLowerInvariant()) return 42;
-            if (idLower == CanonicalEntityIds.AfricaCupOfNations.ToLowerInvariant()) return 132;
+            if (idLower == CanonicalEntityIds.AfricaCupOfNations.ToLowerInvariant()) return 289;
             if (idLower == CanonicalEntityIds.WorldCup.ToLowerInvariant()) return 77;
         }
 
+        if (combined.Contains("egypt") || combined.Contains("519") || combined.Contains("10650") || combined.Contains("191") || combined.Contains("egy")) return 519;
         if (combined.Contains("conference") || combined.Contains("uecl")) return 10216;
         if (combined.Contains("europa") || combined.Contains("uel")) return 73;
-        if (combined.Contains("premier") && combined.Contains("league") && !combined.Contains("egy")) return 47;
-        if (combined.Contains("laliga") || combined.Contains("la liga") || combined.Contains("la_liga")) return 87;
+        if (combined.Contains("laliga 2") || combined.Contains("laliga2") || combined.Contains("segunda") || combined.Contains("hypermotion")) return 140;
+        if ((combined.Contains("laliga") || combined.Contains("la liga") || combined.Contains("la_liga")) && !combined.Contains("2") && !combined.Contains("segunda") && !combined.Contains("hypermotion")) return 87;
+        if ((combined.Contains("english premier league") || combined.Contains("premier league") || (combined.Contains("premier") && combined.Contains("league"))) && !combined.Contains("egy") && !combined.Contains("519") && !combined.Contains("10650") && !combined.Contains("191") && !combined.Contains("frauen") && !combined.Contains("women") && (combined.Contains("eng") || combined.Contains("gb-eng") || combined.Contains("england") || (!combined.Contains("ger") && !combined.Contains("deu") && !combined.Contains("fra") && !combined.Contains("ita") && !combined.Contains("esp") && !combined.Contains("rus") && !combined.Contains("scot") && !combined.Contains("welsh") && !combined.Contains("irish")))) return 47;
         if (combined.Contains("champions") || combined.Contains("ucl")) return 42;
         if (combined.Contains("serie a") || combined.Contains("serie_a")) return 55;
         if (combined.Contains("bundesliga")) return 54;
         if (combined.Contains("ligue 1") || combined.Contains("ligue_1")) return 53;
-        if (combined.Contains("egypt")) return 525;
         if (combined.Contains("saudi") || combined.Contains("spl")) return 536;
         if (combined.Contains("mls") || combined.Contains("major league")) return 130;
         if (combined.Contains("eredivisie")) return 57;
         if (combined.Contains("primeira") || combined.Contains("portugal")) return 61;
         if (combined.Contains("championship")) return 48;
         if (combined.Contains("world cup")) return 77;
-        if (combined.Contains("afcon") || combined.Contains("africa cup")) return 132;
+        if (combined.Contains("afcon") || combined.Contains("africa cup")) return 289;
 
         return null;
     }
@@ -1487,9 +1607,45 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         CurrentTopAssists.Add(new PlayerStatLeaderItemViewModel(a, isAssistLeader: true));
                     }
 
+                    CurrentFixtures.Clear();
+                    foreach (var f in hub.Fixtures)
+                    {
+                        bool isHome = followedTeamIds.Contains(f.HomeTeamId) || followedNames.Contains(f.HomeTeamName);
+                        bool isAway = followedTeamIds.Contains(f.AwayTeamId) || followedNames.Contains(f.AwayTeamName);
+                        CurrentFixtures.Add(new CompetitionFixtureViewModel(f, id => App.OpenMatchCenter(id), isHome, isAway));
+                    }
+
+                    CurrentKnockoutStages.Clear();
+                    foreach (var ks in hub.KnockoutStages)
+                    {
+                        CurrentKnockoutStages.Add(ks);
+                    }
+
+                    // Auto-select Knockout Bracket or Fixtures if pure knockout tournament (e.g. cup or tournament with no league table rows)
+                    if (hub.Standings.Count == 0)
+                    {
+                        if (hub.KnockoutStages.Count > 0)
+                        {
+                            StandingsSubTabIndex = 2; // Knockout Bracket
+                        }
+                        else if (hub.Fixtures.Count > 0)
+                        {
+                            StandingsSubTabIndex = 1; // Fixtures
+                        }
+                    }
+                    else if (StandingsSubTabIndex == 2 && hub.KnockoutStages.Count == 0)
+                    {
+                        StandingsSubTabIndex = 0; // Table
+                    }
+
                     OnPropertyChanged(nameof(HasStandings));
                     OnPropertyChanged(nameof(HasTopScorers));
                     OnPropertyChanged(nameof(HasTopAssists));
+                    OnPropertyChanged(nameof(HasFixtures));
+                    OnPropertyChanged(nameof(HasKnockoutStages));
+                    OnPropertyChanged(nameof(HasNoKnockoutBracket));
+                    OnPropertyChanged(nameof(HubNoKnockoutVisibility));
+                    OnPropertyChanged(nameof(HubNoFixturesVisibility));
                 }, nameof(LoadCompetitionHubAsync));
             }
             else
@@ -1542,54 +1698,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             RebuildHubCompetitions();
         }
 
-        var match = FindMatchingHubCompetition(group.CompetitionId, group.CompetitionName, group.LogoUrl);
+        var match = FindMatchingHubCompetition(group.CompetitionId, group.CompetitionName, group.LogoUrl, group.Country);
         var resolvedLogo = ResolveCompetitionLogoUrl(group.CompetitionId, group.CompetitionName, group.LogoUrl);
         var resolvedName = !string.IsNullOrWhiteSpace(group.CompetitionName) && !group.CompetitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !group.CompetitionName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase)
             ? group.CompetitionName
             : ResolveCompetitionFriendlyName(group.CompetitionId, group.CompetitionName);
 
-        if (match != null)
+        if (match == null)
         {
-            _isTransientJumpActive = false;
-            SelectedHubCompetition = match;
-            CurrentCompetitionName = match.Name;
-            CurrentCompetitionLogoUrl = match.LogoUrl;
-            _isMatchesMode = false;
-            OnPropertyChanged(nameof(IsMatchesMode));
-            OnPropertyChanged(nameof(IsStandingsMode));
-            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
-            OnPropertyChanged(nameof(MatchesTabForegroundHex));
-            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
-            OnPropertyChanged(nameof(StandingsTabForegroundHex));
-            _ = LoadCompetitionHubAsync(match.Id, match.Name, match.LogoUrl);
-        }
-        else
-        {
-            // Case B: No match in HubCompetitions — Transient Click-to-Jump League
-            _isTransientJumpActive = true;
-            _selectedHubCompetitionId = group.CompetitionId;
-            _selectedHubCompetition = null;
-            OnPropertyChanged(nameof(SelectedHubCompetition));
-
-            foreach (var c in HubCompetitions)
+            int? numericFotmobId = ResolveFotmobLeagueId(group.CompetitionId, resolvedName, resolvedLogo, group.Country);
+            string chipId = numericFotmobId.HasValue ? numericFotmobId.Value.ToString() : group.CompetitionId;
+            var newChip = new HubCompetitionItemViewModel
             {
-                c.IsSelected = false;
-            }
-
-            CurrentCompetitionName = resolvedName;
-            CurrentCompetitionLogoUrl = resolvedLogo;
-
-            _isMatchesMode = false;
-            OnPropertyChanged(nameof(IsMatchesMode));
-            OnPropertyChanged(nameof(IsStandingsMode));
-            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
-            OnPropertyChanged(nameof(MatchesTabForegroundHex));
-            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
-            OnPropertyChanged(nameof(StandingsTabForegroundHex));
-
-            _ = LoadCompetitionHubAsync(group.CompetitionId, resolvedName, resolvedLogo);
+                Id = chipId,
+                Name = resolvedName,
+                LogoUrl = resolvedLogo
+            };
+            HubCompetitions.Add(newChip);
+            match = newChip;
         }
+
+        _isTransientJumpActive = false;
+        SelectedHubCompetition = match;
+        CurrentCompetitionName = match.Name;
+        CurrentCompetitionLogoUrl = match.LogoUrl;
+        _isMatchesMode = false;
+        OnPropertyChanged(nameof(IsMatchesMode));
+        OnPropertyChanged(nameof(IsStandingsMode));
+        OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+        OnPropertyChanged(nameof(MatchesTabForegroundHex));
+        OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+        OnPropertyChanged(nameof(StandingsTabForegroundHex));
+        _ = LoadCompetitionHubAsync(match.Id, match.Name, match.LogoUrl);
     }
+
+    public void NavigateToCompetition(string competitionId, string? competitionName = null, string? logoUrl = null, string? country = null) =>
+        NavigateToCompetitionStandings(competitionId, competitionName, logoUrl, country);
 
     public void NavigateToCompetitionStandings(string competitionId, string? competitionName = null, string? logoUrl = null, string? country = null)
     {
@@ -1600,53 +1744,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             RebuildHubCompetitions();
         }
 
-        var match = FindMatchingHubCompetition(competitionId, competitionName, logoUrl);
+        var match = FindMatchingHubCompetition(competitionId, competitionName, logoUrl, country);
         var resolvedLogo = ResolveCompetitionLogoUrl(competitionId, competitionName, logoUrl);
         var resolvedName = !string.IsNullOrWhiteSpace(competitionName) && !competitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !competitionName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase)
             ? competitionName
             : ResolveCompetitionFriendlyName(competitionId, competitionName);
 
-        if (match != null)
+        if (match == null)
         {
-            _isTransientJumpActive = false;
-            SelectedHubCompetition = match;
-            CurrentCompetitionName = match.Name;
-            CurrentCompetitionLogoUrl = match.LogoUrl;
-            _isMatchesMode = false;
-            OnPropertyChanged(nameof(IsMatchesMode));
-            OnPropertyChanged(nameof(IsStandingsMode));
-            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
-            OnPropertyChanged(nameof(MatchesTabForegroundHex));
-            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
-            OnPropertyChanged(nameof(StandingsTabForegroundHex));
-            _ = LoadCompetitionHubAsync(match.Id, match.Name, match.LogoUrl);
-        }
-        else
-        {
-            // Case B: No match in HubCompetitions — Transient Click-to-Jump League
-            _isTransientJumpActive = true;
-            _selectedHubCompetitionId = competitionId;
-            _selectedHubCompetition = null;
-            OnPropertyChanged(nameof(SelectedHubCompetition));
-
-            foreach (var c in HubCompetitions)
+            int? numericFotmobId = ResolveFotmobLeagueId(competitionId, resolvedName, resolvedLogo, country);
+            string chipId = numericFotmobId.HasValue ? numericFotmobId.Value.ToString() : competitionId;
+            var newChip = new HubCompetitionItemViewModel
             {
-                c.IsSelected = false;
-            }
-
-            CurrentCompetitionName = resolvedName;
-            CurrentCompetitionLogoUrl = resolvedLogo;
-
-            _isMatchesMode = false;
-            OnPropertyChanged(nameof(IsMatchesMode));
-            OnPropertyChanged(nameof(IsStandingsMode));
-            OnPropertyChanged(nameof(MatchesTabBackgroundHex));
-            OnPropertyChanged(nameof(MatchesTabForegroundHex));
-            OnPropertyChanged(nameof(StandingsTabBackgroundHex));
-            OnPropertyChanged(nameof(StandingsTabForegroundHex));
-
-            _ = LoadCompetitionHubAsync(competitionId, resolvedName, resolvedLogo);
+                Id = chipId,
+                Name = resolvedName,
+                LogoUrl = resolvedLogo
+            };
+            HubCompetitions.Add(newChip);
+            match = newChip;
         }
+
+        _isTransientJumpActive = false;
+        SelectedHubCompetition = match;
+        CurrentCompetitionName = match.Name;
+        CurrentCompetitionLogoUrl = match.LogoUrl;
+        _isMatchesMode = false;
+        OnPropertyChanged(nameof(IsMatchesMode));
+        OnPropertyChanged(nameof(IsStandingsMode));
+        OnPropertyChanged(nameof(MatchesTabBackgroundHex));
+        OnPropertyChanged(nameof(MatchesTabForegroundHex));
+        OnPropertyChanged(nameof(StandingsTabBackgroundHex));
+        OnPropertyChanged(nameof(StandingsTabForegroundHex));
+        _ = LoadCompetitionHubAsync(match.Id, match.Name, match.LogoUrl);
     }
 
     public async Task ToggleTeamFollowAsync(string teamId, string? teamName = null, string? logoUrl = null)
@@ -1697,17 +1826,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task ToggleCompetitionFollowAsync(string compId, string? compName = null, string? compCode = null, string? logoUrl = null, string? country = null)
     {
-        if (string.IsNullOrWhiteSpace(compId)) return;
+        if (string.IsNullOrWhiteSpace(compId) && string.IsNullOrWhiteSpace(compName)) return;
 
-        var prefs = _preferencesService.GetPreferences();
-        bool isCurrentlyFollowed = prefs.GetFollowedCompetitionIdSet().Contains(compId);
+        bool isCurrentlyFollowed = _preferencesService.IsCompetitionFollowed(compId, compName, country);
 
         try
         {
             if (isCurrentlyFollowed)
             {
-                await _preferencesService.UnfollowCompetitionAsync(compId);
-                var existing = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase));
+                await _preferencesService.UnfollowCompetitionAsync(compId, compName, country);
+                var existing = AvailableCompetitions.FirstOrDefault(c => 
+                    (!string.IsNullOrWhiteSpace(compId) && c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(compName) && string.Equals(c.Name?.Trim(), compName.Trim(), StringComparison.OrdinalIgnoreCase)));
                 if (existing != null) existing.IsFollowed = false;
             }
             else
@@ -1848,6 +1978,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 action();
             }
+            catch (System.Runtime.InteropServices.COMException comEx) when ((uint)comEx.HResult == 0x8000FFFF)
+            {
+                Diagnostics.AppLogger.Debug("UI", "DispatchWindowClosed", $"Ignored 0x8000FFFF COMException on '{actionName}' (window or tooltip closing).");
+            }
             catch (Exception ex)
             {
                 Diagnostics.AppLogger.Error("UI", "DispatchExecutionError", $"Failed executing UI action '{actionName}': [{ex.GetType().Name}] {ex.Message}", ex: ex);
@@ -1860,6 +1994,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             try
             {
                 action();
+            }
+            catch (System.Runtime.InteropServices.COMException comEx) when ((uint)comEx.HResult == 0x8000FFFF)
+            {
+                Diagnostics.AppLogger.Debug("UI", "FallbackWindowClosed", $"Ignored 0x8000FFFF COMException on fallback '{actionName}' (window or tooltip closing).");
             }
             catch (Exception ex)
             {
@@ -1942,8 +2080,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         RunOnUiSafe(() =>
         {
+            if (prefs.EnableTickerCarousel || string.Equals(prefs.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase))
+            {
+                ManualPinnedMatchId = null;
+                IsExplicitlyUnpinned = false;
+                _pinnedMatchSnapshot = null;
+                App.CurrentTickerCoordinator?.UnpinMatch();
+            }
+            else if (!string.IsNullOrEmpty(prefs.ManualPinnedMatchId) && prefs.EnableTickerCarousel == false)
+            {
+                ManualPinnedMatchId = prefs.ManualPinnedMatchId;
+                var pinnedMatch = GetMatchDtoById(prefs.ManualPinnedMatchId);
+                if (pinnedMatch != null)
+                {
+                    _pinnedMatchSnapshot = pinnedMatch;
+                    App.CurrentTickerCoordinator?.CacheQueueMatchSnapshot(pinnedMatch);
+                }
+                App.CurrentTickerCoordinator?.PinMatch(prefs.ManualPinnedMatchId);
+            }
+            else if (string.IsNullOrEmpty(prefs.ManualPinnedMatchId))
+            {
+                ManualPinnedMatchId = null;
+                _pinnedMatchSnapshot = null;
+            }
+
+            // Refresh 12h/24h time formatting across CurrentFixtures
+            bool use24 = prefs.Use24HourFormat;
+            foreach (var fix in CurrentFixtures)
+            {
+                fix.Use24HourTime = use24;
+            }
+
             PopulatePreferenceCollections(prefs);
             ReapplyRelevanceAndFilters();
+            SyncPinnedStateAcrossItems(ManualPinnedMatchId);
         }, nameof(OnPreferencesChanged));
     }
 
@@ -2075,6 +2245,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         pinnedMatchId ??= ManualPinnedMatchId;
         var prefs = _preferencesService?.GetPreferences();
+        bool isCustomQueue = string.Equals(prefs?.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase);
+        var queueSet = isCustomQueue
+            ? (prefs?.CustomTickerQueueMatchIds?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>())
+            : null;
+
         bool isCarousel = prefs?.EnableTickerCarousel == true;
         string? activeTickerId = isCarousel
             ? (App.CurrentTickerCoordinator?.CurrentMatchId ?? ActiveMatchId)
@@ -2083,6 +2258,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         bool IsMatchActive(string matchId)
         {
             if (string.IsNullOrEmpty(matchId)) return false;
+            if (isCustomQueue && queueSet != null) return queueSet.Contains(matchId);
             if (!string.IsNullOrEmpty(pinnedMatchId) && string.Equals(matchId, pinnedMatchId, StringComparison.Ordinal)) return true;
             if (isCarousel && !string.IsNullOrEmpty(activeTickerId) && string.Equals(matchId, activeTickerId, StringComparison.Ordinal)) return true;
             return false;
@@ -2128,25 +2304,218 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 else
                 {
                     ActiveMatchId = null;
-                    ActiveTickerText = "🔄 Auto-Rotate • No active matches";
+                    ActiveTickerText = GetAutoRotateIdleText(prefs);
                 }
                 SyncPinnedStateAcrossItems(null);
             }
         }, nameof(OnTickerRotated));
     }
 
+    private static string GetAutoRotateIdleText(UserPreferences? prefs)
+    {
+        var scope = prefs?.TickerRotationScope?.Trim();
+        return scope switch
+        {
+            "FollowedLive" => "🔄 Auto-Rotate • No live followed matches",
+            "AllLive" => "🔄 Auto-Rotate • No live matches",
+            "CustomQueue" => "🔄 Auto-Rotate • Custom queue empty",
+            _ => "🔄 Auto-Rotate • No followed matches today"
+        };
+    }
+
+    public string? SavedAutoRotateModeBeforePin { get; set; }
+
+    public TrayMatchDto? GetMatchDtoById(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return null;
+        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+
+        bool IsMatchTarget(TrayMatchDto? m) =>
+            m != null && (
+                string.Equals(m.Id, matchId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.LegacyId, matchId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+
+        var found = _latestTrayData?.Matches?.FirstOrDefault(IsMatchTarget)
+            ?? FilteredMatches?.FirstOrDefault(vm => IsMatchTarget(vm.RawDto))?.RawDto
+            ?? FollowedMatches?.FirstOrDefault(vm => IsMatchTarget(vm.RawDto))?.RawDto
+            ?? OtherMatches?.FirstOrDefault(vm => IsMatchTarget(vm.RawDto))?.RawDto
+            ?? (_pinnedMatchSnapshot != null && IsMatchTarget(_pinnedMatchSnapshot) ? _pinnedMatchSnapshot : null);
+
+        if (found != null) return found;
+
+        return App.CurrentTickerCoordinator?.GetQueuedMatchSnapshot(matchId);
+    }
+
     public void TogglePinMatch(string matchId)
     {
-        if (string.IsNullOrWhiteSpace(matchId)) return;
+        _ = HandleMatchPinToggleAsync(matchId);
+    }
 
-        if (string.Equals(ManualPinnedMatchId, matchId, StringComparison.Ordinal))
+    public async Task HandleMatchPinToggleAsync(
+        string matchId,
+        Func<Task<ContentDialogChoice>>? promptReplaceOrQueue = null,
+        Func<PinPromptContext, Task<ContentDialogChoice>>? promptWithContext = null)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+        promptWithContext ??= (promptReplaceOrQueue != null ? (_ => promptReplaceOrQueue()) : null);
+
+        var prefs = _preferencesService?.GetPreferences();
+        bool isCustomQueue = prefs?.EnableTickerCarousel == true &&
+                             string.Equals(prefs?.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase);
+
+        var clickedMatch = GetMatchDtoById(matchId);
+        if (clickedMatch != null) App.CurrentTickerCoordinator?.CacheQueueMatchSnapshot(clickedMatch);
+        string clickedMatchTickerText = clickedMatch != null
+            ? $"{clickedMatch.HomeTeam?.ShortName ?? clickedMatch.HomeTeam?.Name ?? "Home"} vs {clickedMatch.AwayTeam?.ShortName ?? clickedMatch.AwayTeam?.Name ?? "Away"}"
+            : matchId;
+
+        // Case D: Custom Queue mode
+        if (isCustomQueue)
+        {
+            var queue = (prefs?.CustomTickerQueueMatchIds ?? new List<string>()).ToList();
+            bool inQueue = queue.Any(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase));
+            if (inQueue)
+            {
+                queue.RemoveAll(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase));
+                if (_preferencesService != null)
+                {
+                    await _preferencesService.SetCustomTickerQueueMatchIdsAsync(queue);
+                    App.CurrentTickerCoordinator?.ApplyPreferences(_preferencesService.Current);
+                }
+                SyncPinnedStateAcrossItems(null);
+                return;
+            }
+
+            // Pinning an unpinned 3rd match while Custom Queue is active
+            ContentDialogChoice choice = ContentDialogChoice.AddToQueue;
+            if (promptWithContext != null)
+            {
+                var ctx = new PinPromptContext
+                {
+                    Title = "Pin Match or Add to Custom Queue?",
+                    Content = $"A Custom Queue ({queue.Count} matches) is currently active on your ticker.\n\nWould you like to pin \"{clickedMatchTickerText}\" exclusively (turning off Auto-Rotate), or add it to your Custom Queue?",
+                    PrimaryButtonText = "📌 Pin Match",
+                    SecondaryButtonText = "📋 Add to Queue",
+                    CloseButtonText = "Cancel"
+                };
+                choice = await promptWithContext(ctx);
+            }
+
+            if (choice == ContentDialogChoice.Cancel) return;
+
+            if (choice == ContentDialogChoice.AddToQueue)
+            {
+                if (!queue.Any(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    queue.Add(matchId);
+                }
+                if (_preferencesService != null)
+                {
+                    await _preferencesService.ActivateCustomQueueAsync(queue);
+                    App.CurrentTickerCoordinator?.ApplyPreferences(_preferencesService.Current);
+                }
+                SyncPinnedStateAcrossItems(null);
+                return;
+            }
+
+            // "📌 Pin Match Only": turn off Auto-Rotate and pin matchId exclusively
+            if (_preferencesService != null)
+            {
+                await _preferencesService.SetEnableTickerCarouselAsync(false);
+                await SetEnableTickerCarouselAsync(false);
+            }
+            PinMatch(matchId);
+            return;
+        }
+
+        // Non-CustomQueue mode
+        bool isAlreadyPinned = !string.IsNullOrEmpty(ManualPinnedMatchId) && string.Equals(ManualPinnedMatchId, matchId, StringComparison.Ordinal);
+
+        // Case B: Unpinning a manually pinned match turns Auto-Rotate back ON and restores the saved mode
+        if (isAlreadyPinned)
         {
             UnpinMatch(matchId);
+            if (_preferencesService != null)
+            {
+                await _preferencesService.SetEnableTickerCarouselAsync(true);
+                await SetEnableTickerCarouselAsync(true);
+                if (!string.IsNullOrEmpty(SavedAutoRotateModeBeforePin))
+                {
+                    await _preferencesService.SetTickerRotationScopeAsync(SavedAutoRotateModeBeforePin);
+                    SavedAutoRotateModeBeforePin = null;
+                }
+            }
+            return;
         }
-        else
+
+        // Case C: Pinning Match B when Match A is already pinned shows a dialog
+        if (!string.IsNullOrEmpty(ManualPinnedMatchId) && !string.Equals(ManualPinnedMatchId, matchId, StringComparison.Ordinal))
         {
-            PinMatch(matchId);
+            var currentPinned = GetMatchDtoById(ManualPinnedMatchId);
+            if (currentPinned != null) App.CurrentTickerCoordinator?.CacheQueueMatchSnapshot(currentPinned);
+            string currentPinnedTickerText = currentPinned != null
+                ? $"{currentPinned.HomeTeam?.ShortName ?? currentPinned.HomeTeam?.Name ?? "Home"} vs {currentPinned.AwayTeam?.ShortName ?? currentPinned.AwayTeam?.Name ?? "Away"}"
+                : ManualPinnedMatchId;
+
+            ContentDialogChoice choice = ContentDialogChoice.Replace;
+            if (promptWithContext != null)
+            {
+                var ctx = new PinPromptContext
+                {
+                    Title = "Pin Match or Add to Custom Queue?",
+                    Content = $"\"{currentPinnedTickerText}\" is currently pinned on your taskbar.\n\nWould you like to replace it with \"{clickedMatchTickerText}\", or add both matches to your Custom Queue?",
+                    PrimaryButtonText = "📌 Pin Match",
+                    SecondaryButtonText = "📋 Add to Queue",
+                    CloseButtonText = "Cancel"
+                };
+                choice = await promptWithContext(ctx);
+            }
+
+            if (choice == ContentDialogChoice.Cancel) return;
+
+            if (choice == ContentDialogChoice.AddToQueue)
+            {
+                await AddMatchesToCustomQueueAsync(ManualPinnedMatchId, matchId);
+                return;
+            }
+
+            // Replace: proceed to PinMatch
         }
+
+        // Case A: Pinning when Auto-Rotate is ON in non-CustomQueue modes saves current mode, turns OFF Auto-Rotate, and pins match
+        if (prefs?.EnableTickerCarousel == true)
+        {
+            SavedAutoRotateModeBeforePin = prefs.TickerRotationScope ?? "FollowedLive";
+            if (_preferencesService != null)
+            {
+                await _preferencesService.SetEnableTickerCarouselAsync(false);
+                await SetEnableTickerCarouselAsync(false);
+            }
+        }
+
+        PinMatch(matchId);
+    }
+
+    public async Task AddMatchesToCustomQueueAsync(string matchA, string matchB)
+    {
+        var snapA = GetMatchDtoById(matchA);
+        if (snapA != null) App.CurrentTickerCoordinator?.CacheQueueMatchSnapshot(snapA);
+        var snapB = GetMatchDtoById(matchB);
+        if (snapB != null) App.CurrentTickerCoordinator?.CacheQueueMatchSnapshot(snapB);
+
+        var list = new List<string>();
+        if (!string.IsNullOrWhiteSpace(matchA)) list.Add(matchA);
+        if (!string.IsNullOrWhiteSpace(matchB)) list.Add(matchB);
+
+        if (_preferencesService != null)
+        {
+            await _preferencesService.ActivateCustomQueueAsync(list);
+            App.CurrentTickerCoordinator?.ApplyPreferences(_preferencesService.Current);
+        }
+
+        UnpinMatch(null);
+        SyncPinnedStateAcrossItems(null);
     }
 
     public void PinMatch(string matchId)
@@ -2216,7 +2585,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 ActiveMatchId = null;
-                ActiveTickerText = "🔄 Auto-Rotate • No active matches";
+                ActiveTickerText = GetAutoRotateIdleText(prefs);
             }
         }
         else
@@ -2281,7 +2650,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 else
                 {
                     ActiveMatchId = null;
-                    ActiveTickerText = "🔄 Auto-Rotate • No active matches";
+                    ActiveTickerText = GetAutoRotateIdleText(prefs);
                 }
             }
             else
@@ -3172,7 +3541,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 ActiveMatchId = null;
-                ActiveTickerText = "🔄 Auto-Rotate • No active matches";
+                ActiveTickerText = GetAutoRotateIdleText(prefs);
             }
         }
         else
@@ -3188,6 +3557,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (!IsCalendarVisible)
             {
                 // On Live, Upcoming, and Finished tabs, calendar date filtering does not constrain the query
+                return true;
+            }
+
+            if (_activeFilter == MatchFilterType.Live && FixtureRelevanceEngine.IsLive(m))
+            {
                 return true;
             }
 
@@ -3209,19 +3583,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var relevance = FixtureRelevanceEngine.EvaluateRelevance(match, prefs);
             bool isExplicitlyPinned = !string.IsNullOrEmpty(ManualPinnedMatchId) &&
                 string.Equals(match.Id, ManualPinnedMatchId, StringComparison.Ordinal);
-            bool homeFollowed = (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id))
-                || (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId))
-                || (!string.IsNullOrEmpty(match.HomeTeam?.Name) && followedTeamIds.Contains(match.HomeTeam.Name))
-                || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.Id, out var hCanon) && followedTeamIds.Contains(hCanon))
-                || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.LegacyId, out var hLegCanon) && followedTeamIds.Contains(hLegCanon))
-                || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), match.HomeTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+            string? hName = match.HomeTeam?.Name;
+            bool homeFollowed = (!string.IsNullOrEmpty(match.HomeTeam?.Id) && followedTeamIds.Contains(match.HomeTeam.Id) && FixtureRelevanceEngine.IsValidCanonicalTeam(match.HomeTeam.Id, hName))
+                || (!string.IsNullOrEmpty(match.HomeTeam?.LegacyId) && followedTeamIds.Contains(match.HomeTeam.LegacyId) && FixtureRelevanceEngine.IsValidCanonicalTeam(match.HomeTeam.LegacyId, hName))
+                || (!string.IsNullOrEmpty(hName) && followedTeamIds.Contains(hName))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.Id, out var hCanon) && followedTeamIds.Contains(hCanon) && FixtureRelevanceEngine.IsValidCanonicalTeam(hCanon, hName))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.HomeTeam?.LegacyId, out var hLegCanon) && followedTeamIds.Contains(hLegCanon) && FixtureRelevanceEngine.IsValidCanonicalTeam(hLegCanon, hName))
+                || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), hName?.Trim(), StringComparison.OrdinalIgnoreCase) && FixtureRelevanceEngine.IsValidCanonicalTeam(t.Id, hName)) == true);
 
-            bool awayFollowed = (!string.IsNullOrEmpty(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id))
-                || (!string.IsNullOrEmpty(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId))
-                || (!string.IsNullOrEmpty(match.AwayTeam?.Name) && followedTeamIds.Contains(match.AwayTeam.Name))
-                || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.Id, out var aCanon) && followedTeamIds.Contains(aCanon))
-                || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.LegacyId, out var aLegCanon) && followedTeamIds.Contains(aLegCanon))
-                || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), match.AwayTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+            string? aName = match.AwayTeam?.Name;
+            bool awayFollowed = (!string.IsNullOrEmpty(match.AwayTeam?.Id) && followedTeamIds.Contains(match.AwayTeam.Id) && FixtureRelevanceEngine.IsValidCanonicalTeam(match.AwayTeam.Id, aName))
+                || (!string.IsNullOrEmpty(match.AwayTeam?.LegacyId) && followedTeamIds.Contains(match.AwayTeam.LegacyId) && FixtureRelevanceEngine.IsValidCanonicalTeam(match.AwayTeam.LegacyId, aName))
+                || (!string.IsNullOrEmpty(aName) && followedTeamIds.Contains(aName))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.Id, out var aCanon) && followedTeamIds.Contains(aCanon) && FixtureRelevanceEngine.IsValidCanonicalTeam(aCanon, aName))
+                || (CanonicalEntityIds.TryTranslateLegacyId(match.AwayTeam?.LegacyId, out var aLegCanon) && followedTeamIds.Contains(aLegCanon) && FixtureRelevanceEngine.IsValidCanonicalTeam(aLegCanon, aName))
+                || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), aName?.Trim(), StringComparison.OrdinalIgnoreCase) && FixtureRelevanceEngine.IsValidCanonicalTeam(t.Id, aName)) == true);
 
             bool compFollowed = relevance.FollowedByCompetition
                 || (!string.IsNullOrEmpty(match.Competition?.Id) && followedCompIds.Contains(match.Competition.Id))
@@ -3514,6 +3890,163 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SyncStatusText)));
         SyncPinnedStateAcrossItems(ManualPinnedMatchId);
+    }
+
+    private CancellationTokenSource? _followingMultiDayCts;
+
+    public async Task LoadFollowingMultiDayAsync(DateTime baseDate)
+    {
+        _followingMultiDayCts?.Cancel();
+        _followingMultiDayCts = new CancellationTokenSource();
+        var token = _followingMultiDayCts.Token;
+
+        var targetCenter = baseDate.Date;
+        var dayGroups = FollowingDayGroupViewModel.Create7DayWindow(targetCenter);
+
+        RunOnUiSafe(() =>
+        {
+            FollowingDayGroups.Clear();
+            foreach (var dg in dayGroups)
+            {
+                FollowingDayGroups.Add(dg);
+            }
+        }, "PrePopulateFollowingDayGroups");
+
+        var prefs = _preferencesService?.Current;
+        var followedTeams = prefs?.GetFollowedTeamIdSet() ?? new HashSet<string>();
+        var followedComps = prefs?.GetFollowedCompetitionIdSet() ?? new HashSet<string>();
+
+        var fetchTasks = dayGroups.Select(async dayGroup =>
+        {
+            var d = dayGroup.Date;
+            TrayDataDto? trayData = null;
+
+            if (_syncService?.HasCachedDataForDate(d) == true)
+            {
+                trayData = _syncService.GetCachedDataForDate(d);
+            }
+            else if (_latestTrayData?.Matches?.Any(m => m.KickoffTime.ToLocalTime().Date == d || m.KickoffTime.UtcDateTime.Date == d) == true)
+            {
+                trayData = _latestTrayData;
+            }
+
+            if (trayData == null && _apiClient != null)
+            {
+                try
+                {
+                    var res = await _apiClient.GetTrayAsync(ifNoneMatch: null, date: d, cancellationToken: token);
+                    if (res.IsSuccess && res.Envelope?.Data != null)
+                    {
+                        trayData = res.Envelope.Data;
+                    }
+                }
+                catch
+                {
+                    // best effort
+                }
+            }
+
+            return (dayGroup, trayData);
+        }).ToList();
+
+        (FollowingDayGroupViewModel dayGroup, TrayDataDto? data)[] results = await Task.WhenAll(fetchTasks);
+        if (token.IsCancellationRequested) return;
+
+        int totalFollowedMatches = 0;
+
+        foreach (var (dayGroup, data) in results)
+        {
+            var allMatches = data?.Matches ?? new List<TrayMatchDto>();
+            var followedMatchesForDay = new List<MatchItemViewModel>();
+
+            foreach (var m in allMatches)
+            {
+                var rel = FixtureRelevanceEngine.EvaluateRelevance(m, prefs);
+                bool homeFollowed = (!string.IsNullOrEmpty(m.HomeTeam?.Id) && followedTeams.Contains(m.HomeTeam.Id))
+                    || (!string.IsNullOrEmpty(m.HomeTeam?.LegacyId) && followedTeams.Contains(m.HomeTeam.LegacyId))
+                    || (!string.IsNullOrEmpty(m.HomeTeam?.Name) && followedTeams.Contains(m.HomeTeam.Name))
+                    || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), m.HomeTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+
+                bool awayFollowed = (!string.IsNullOrEmpty(m.AwayTeam?.Id) && followedTeams.Contains(m.AwayTeam.Id))
+                    || (!string.IsNullOrEmpty(m.AwayTeam?.LegacyId) && followedTeams.Contains(m.AwayTeam.LegacyId))
+                    || (!string.IsNullOrEmpty(m.AwayTeam?.Name) && followedTeams.Contains(m.AwayTeam.Name))
+                    || (prefs?.FollowedTeams.Any(t => string.Equals(t.Name?.Trim(), m.AwayTeam?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+
+                bool compFollowed = rel.FollowedByCompetition
+                    || (!string.IsNullOrEmpty(m.Competition?.Id) && followedComps.Contains(m.Competition.Id))
+                    || (!string.IsNullOrEmpty(m.Competition?.LegacyId) && followedComps.Contains(m.Competition.LegacyId))
+                    || (prefs?.FollowedCompetitions.Any(c => string.Equals(c.Name?.Trim(), m.Competition?.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
+
+                if (rel.IsRelevant || homeFollowed || awayFollowed || compFollowed)
+                {
+                    followedMatchesForDay.Add(MatchItemViewModel.FromDto(
+                        m,
+                        rel,
+                        false,
+                        prefs?.Use24HourFormat ?? true,
+                        homeFollowed,
+                        awayFollowed,
+                        compFollowed));
+                }
+            }
+
+            totalFollowedMatches += followedMatchesForDay.Count;
+
+            var compGroups = followedMatchesForDay
+                .GroupBy(m => !string.IsNullOrWhiteSpace(m.CompetitionId) ? m.CompetitionId : m.CompetitionName)
+                .Select(g =>
+                {
+                    var first = g.First();
+                    string cId = first.CompetitionId;
+                    string cName = first.CompetitionName;
+                    string? country = first.CompetitionCountry ?? first.CompetitionCode;
+                    string? logoUrl = first.CompetitionLogoUrl;
+                    bool hasTeams = g.Any(m => m.FollowedByTeam);
+                    bool isComp = g.Any(m => m.FollowedByCompetition);
+
+                    var groupVm = new CompetitionGroupViewModel(cId, cName, country, logoUrl, hasTeams, isComp)
+                    {
+                        IsExpanded = true
+                    };
+                    foreach (var m in g.OrderBy(m => m.StartTimeUtc).ThenBy(m => m.HomeTeamName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        groupVm.AddMatch(m);
+                    }
+                    return groupVm;
+                })
+                .OrderBy(g => g.CompetitionName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            RunOnUiSafe(() =>
+            {
+                dayGroup.CompetitionGroups.Clear();
+                foreach (var cg in compGroups)
+                {
+                    dayGroup.CompetitionGroups.Add(cg);
+                }
+                dayGroup.RefreshCounts();
+            }, "PopulateFollowingDayGroup");
+        }
+
+        RunOnUiSafe(() =>
+        {
+            if (totalFollowedMatches == 0)
+            {
+                IsEmpty = true;
+                HasMatches = false;
+                EmptyStateTitle = "No Followed Matches";
+                EmptyStateMessage = "None of the synchronized matches in this 7-day window involve your followed teams or competitions. Follow teams or competitions from preferences to see them here.";
+            }
+            else
+            {
+                IsEmpty = false;
+                HasMatches = true;
+            }
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEmpty)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasMatches)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyStateTitle)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(EmptyStateMessage)));
+        }, "FinalizeFollowingMultiDayState");
     }
 
     /// <summary>
@@ -4169,4 +4702,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
+}
+
+public enum ContentDialogChoice
+{
+    Replace,
+    AddToQueue,
+    Cancel
+}
+
+public sealed class PinPromptContext
+{
+    public string Title { get; set; } = "Pin Match or Add to Custom Queue?";
+    public string Content { get; set; } = "";
+    public string PrimaryButtonText { get; set; } = "📌 Pin Match Only";
+    public string SecondaryButtonText { get; set; } = "📋 Add to Custom Queue";
+    public string CloseButtonText { get; set; } = "Cancel";
 }

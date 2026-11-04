@@ -175,6 +175,35 @@ public sealed class TickerRotationState
         return CurrentCandidate;
     }
 
+    public TrayMatchDto? Step(int direction)
+    {
+        if (_candidates.Count == 0)
+        {
+            CurrentCandidate = null;
+            CurrentIndex = -1;
+            return null;
+        }
+
+        if (_candidates.Count == 1)
+        {
+            CurrentIndex = 0;
+            CurrentCandidate = _candidates[0];
+            return CurrentCandidate;
+        }
+
+        if (direction > 0)
+        {
+            CurrentIndex = (CurrentIndex + 1) % _candidates.Count;
+        }
+        else if (direction < 0)
+        {
+            CurrentIndex = (CurrentIndex - 1 + _candidates.Count) % _candidates.Count;
+        }
+
+        CurrentCandidate = _candidates[CurrentIndex];
+        return CurrentCandidate;
+    }
+
     public TickerDisplayState GetDisplayState(TickerConnectionState connectionState, bool isPinned = false, UserPreferences? preferences = null)
     {
         var text = TrayTickerFormatter.FormatMatchTicker(CurrentCandidate, connectionState, preferences);
@@ -218,6 +247,68 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     public string? PinnedMatchId => _pinnedMatchId;
     public bool IsPinned => !string.IsNullOrEmpty(_pinnedMatchId);
     private readonly Dictionary<string, (int Home, int Away)> _previousScores = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (int Home, int Away, int HomeRed, int AwayRed)> _previousMatchState = new(StringComparer.OrdinalIgnoreCase);
+    private DateTimeOffset _preemptionUntil = DateTimeOffset.MinValue;
+    private string? _preemptionSummary;
+    private TrayMatchDto? _preemptedMatch;
+
+    public bool IsPreempted => DateTimeOffset.UtcNow < _preemptionUntil;
+    public string? PreemptionSummary => IsPreempted ? _preemptionSummary : null;
+    public TrayMatchDto? PreemptedMatch => IsPreempted ? _preemptedMatch : null;
+    private readonly Dictionary<string, TrayMatchDto> _customQueueMatchSnapshots = new(StringComparer.OrdinalIgnoreCase);
+
+    public TrayMatchDto? GetQueuedMatchSnapshot(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return null;
+        if (_customQueueMatchSnapshots.TryGetValue(matchId, out var direct)) return direct;
+        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        if (_customQueueMatchSnapshots.TryGetValue(norm, out var byNorm)) return byNorm;
+        return _customQueueMatchSnapshots.Values.FirstOrDefault(m =>
+            string.Equals(m.Id, matchId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(m.LegacyId, matchId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(m.Id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public TrayMatchDto? GetActiveMatch() => _state.CurrentCandidate;
+
+    public TrayMatchDto? Advance()
+    {
+        var next = _state.Advance();
+        EmitCurrentDisplay();
+        return next;
+    }
+
+    public void CacheQueueMatchSnapshot(TrayMatchDto match)
+    {
+        if (match != null && !string.IsNullOrWhiteSpace(match.Id))
+        {
+            _customQueueMatchSnapshots[match.Id] = match;
+            if (!string.IsNullOrWhiteSpace(match.LegacyId))
+            {
+                _customQueueMatchSnapshots[match.LegacyId] = match;
+            }
+            string norm = match.Id.Replace("fotmob_", "").Replace("match_", "");
+            _customQueueMatchSnapshots[norm] = match;
+        }
+    }
+
+    public void ApplyPreferences(UserPreferences? preferences)
+    {
+        if (preferences == null) return;
+        _currentPreferences = preferences;
+        _isCarouselEnabled = preferences.EnableTickerCarousel;
+        if (preferences.EnableTickerCarousel || string.Equals(preferences.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase))
+        {
+            _pinnedMatchId = null;
+            _pinnedMatch = null;
+            _isPinnedFromSnapshot = false;
+        }
+        else if (!string.IsNullOrEmpty(preferences.ManualPinnedMatchId))
+        {
+            PinMatch(preferences.ManualPinnedMatchId);
+        }
+        ApplySnapshot(_latestTrayData, _currentConnectionState, preferences);
+    }
     public string? LastGoalJumpMatchId { get; private set; }
 
     public TaskbarTickerCoordinator(
@@ -251,14 +342,51 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         ticker.MatchCenterRequested += (sender, matchId) => OpenMatchCenter(matchId);
     }
 
-    public async void OpenMatchCenter(string matchId)
+    public void OpenMatchCenter(TrayMatchDto? match) => OpenMatchCenter(match?.Id ?? string.Empty, match);
+
+    public async void OpenMatchCenter(string matchId, TrayMatchDto? fallbackMatch = null)
     {
-        if (string.IsNullOrWhiteSpace(matchId) || _isDisposed) return;
+        if (string.IsNullOrWhiteSpace(matchId) && fallbackMatch == null) return;
+        if (_isDisposed) return;
+
+        string targetId = !string.IsNullOrWhiteSpace(matchId) ? matchId : fallbackMatch?.Id ?? string.Empty;
+
+        // Fallback match from parameter or local collections
+        var candidateMatch = fallbackMatch 
+            ?? _state.Candidates.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.OrdinalIgnoreCase) || string.Equals(m.LegacyId, targetId, StringComparison.OrdinalIgnoreCase))
+            ?? _latestTrayData?.Matches.FirstOrDefault(m => string.Equals(m.Id, targetId, StringComparison.OrdinalIgnoreCase) || string.Equals(m.LegacyId, targetId, StringComparison.OrdinalIgnoreCase))
+            ?? App.CurrentMainViewModel?.GetMatchDtoById(targetId);
+
+        if (_matchCenterWindow == null)
+        {
+            _matchCenterWindow = new MatchCenterWindow();
+            _matchCenterWindow.Closed += (s, args) => _matchCenterWindow = null;
+        }
+
+        if (candidateMatch != null)
+        {
+            var fallbackDetail = new MatchDetailDto
+            {
+                Id = candidateMatch.Id,
+                LegacyId = candidateMatch.LegacyId,
+                Competition = candidateMatch.Competition ?? new CompetitionSummaryDto(),
+                HomeTeam = candidateMatch.HomeTeam ?? new TeamDto(),
+                AwayTeam = candidateMatch.AwayTeam ?? new TeamDto(),
+                Score = candidateMatch.Score ?? new ScoreDto(),
+                State = candidateMatch.State,
+                ElapsedMinute = candidateMatch.ElapsedMinute,
+                ExtraMinute = candidateMatch.ExtraMinute,
+                KickoffTime = candidateMatch.KickoffTime,
+                Trust = candidateMatch.Trust
+            };
+            _matchCenterWindow.Populate(fallbackDetail);
+            _matchCenterWindow.Activate();
+        }
 
         try
         {
             using var apiClient = new FootballApiClient();
-            var response = await apiClient.GetMatchDetailsAsync(matchId);
+            var response = await apiClient.GetMatchDetailsAsync(targetId);
 
             if (response.IsSuccess && response.Envelope?.Data != null)
             {
@@ -274,9 +402,9 @@ public sealed class TaskbarTickerCoordinator : IDisposable
                 App.CurrentMainViewModel?.UpdateMatchFromDetails(detail);
                 UpdateMatchFromDetails(detail);
             }
-            else
+            else if (candidateMatch == null)
             {
-                AppDiagnosticsLogger.Log($"[ERROR][MatchCenter][OpenFailed] Failed to open MatchCenterWindow from ticker: API returned unsuccessful response for match {matchId} (Error: {response.ErrorMessage ?? "null payload"})");
+                AppDiagnosticsLogger.Log($"[ERROR][MatchCenter][OpenFailed] Failed to open MatchCenterWindow from ticker: API returned unsuccessful response for match {targetId} (Error: {response.ErrorMessage ?? "null payload"})");
             }
         }
         catch (Exception ex)
@@ -477,6 +605,57 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             return Array.Empty<TrayMatchDto>();
         }
 
+        string scope = preferences?.TickerRotationScope ?? "FollowedLive";
+
+        if (string.Equals(scope, "CustomQueue", StringComparison.OrdinalIgnoreCase))
+        {
+            var queueIds = preferences?.CustomTickerQueueMatchIds ?? _currentPreferences?.CustomTickerQueueMatchIds ?? new List<string>();
+            if (queueIds.Count == 0) return Array.Empty<TrayMatchDto>();
+
+            var matches = new List<TrayMatchDto>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var qId in queueIds)
+            {
+                if (string.IsNullOrWhiteSpace(qId)) continue;
+                string norm = qId.Replace("fotmob_", "").Replace("match_", "");
+
+                TrayMatchDto? found = trayData?.Matches?.FirstOrDefault(m =>
+                    string.Equals(m.Id, qId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.LegacyId, qId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+
+                found ??= GetQueuedMatchSnapshot(qId);
+
+                if (found != null)
+                {
+                    if (seen.Add(found.Id))
+                    {
+                        _customQueueMatchSnapshots[found.Id] = found;
+                        _customQueueMatchSnapshots[qId] = found;
+                        matches.Add(found);
+                    }
+                }
+                else if (seen.Add(qId))
+                {
+                    var fallback = new TrayMatchDto
+                    {
+                        Id = qId,
+                        State = "PREMATCH",
+                        HomeTeam = new TeamSummaryDto { Name = $"Match {qId}" },
+                        AwayTeam = new TeamSummaryDto { Name = "" }
+                    };
+                    matches.Add(fallback);
+                }
+            }
+            return matches;
+        }
+
+        if (trayData?.Matches == null || trayData.Matches.Count == 0)
+        {
+            return Array.Empty<TrayMatchDto>();
+        }
+
         bool carouselEnabled = preferences != null ? preferences.EnableTickerCarousel : _isCarouselEnabled;
         if (!carouselEnabled)
         {
@@ -490,6 +669,16 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             return TrayTickerFormatter.GetTickerCandidates(trayData, null);
         }
 
+        if (string.Equals(scope, "AllLive", StringComparison.OrdinalIgnoreCase))
+        {
+            var allLive = trayData.Matches.Where(FixtureRelevanceEngine.IsLive).ToList();
+            if (allLive.Count > 0)
+            {
+                return FixtureRelevanceEngine.PrioritizeMatches(allLive, preferences);
+            }
+            return Array.Empty<TrayMatchDto>();
+        }
+
         var teamIds = preferences.GetFollowedTeamIdSet();
         var compIds = preferences.GetFollowedCompetitionIdSet();
         bool hasFollowed = teamIds.Count > 0 || compIds.Count > 0;
@@ -499,29 +688,29 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             return Array.Empty<TrayMatchDto>();
         }
 
-        var followedMatches = trayData?.Matches?
+        var followedMatches = trayData.Matches
             .Where(m => (m.KickoffTime.ToLocalTime().Date == DateTime.Today || FixtureRelevanceEngine.IsLive(m)) &&
                         FixtureRelevanceEngine.EvaluateRelevance(m, teamIds, compIds).IsRelevant)
-            .ToList() ?? new List<TrayMatchDto>();
+            .ToList();
 
         if (followedMatches.Count == 0)
         {
             return Array.Empty<TrayMatchDto>();
         }
 
+        if (string.Equals(scope, "AllFollowed", StringComparison.OrdinalIgnoreCase))
+        {
+            return FixtureRelevanceEngine.PrioritizeMatches(followedMatches, preferences);
+        }
+
+        // Default: "FollowedLive"
         var live = FixtureRelevanceEngine.PrioritizeMatches(followedMatches.Where(FixtureRelevanceEngine.IsLive), preferences);
         if (live.Count > 0)
         {
             return live;
         }
 
-        var upcoming = FixtureRelevanceEngine.PrioritizeMatches(followedMatches.Where(FixtureRelevanceEngine.IsPrematch), preferences);
-        if (upcoming.Count > 0)
-        {
-            return upcoming;
-        }
-
-        return FixtureRelevanceEngine.PrioritizeMatches(followedMatches, preferences);
+        return Array.Empty<TrayMatchDto>();
     }
 
     public void ApplySnapshot(TrayDataDto? trayData, TickerConnectionState connectionState, UserPreferences? preferences = null)
@@ -533,6 +722,12 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         if (preferences != null)
         {
             _isCarouselEnabled = preferences.EnableTickerCarousel;
+            if (string.Equals(preferences.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase))
+            {
+                _pinnedMatchId = null;
+                _pinnedMatch = null;
+                _isPinnedFromSnapshot = false;
+            }
         }
         _latestTrayData = trayData;
 
@@ -549,26 +744,46 @@ public sealed class TaskbarTickerCoordinator : IDisposable
                 int currentHome = match.Score?.Home ?? 0;
                 int currentAway = match.Score?.Away ?? 0;
 
-                if (_previousScores.TryGetValue(match.Id, out var prevScore))
+                int currentHomeRed = match.HomeTeam?.RedCards ?? 0;
+                int currentAwayRed = match.AwayTeam?.RedCards ?? 0;
+
+                if (_previousMatchState.TryGetValue(match.Id, out var prevState))
                 {
                     bool isLive = FixtureRelevanceEngine.IsLive(match);
                     bool isFollowed = FixtureRelevanceEngine.EvaluateRelevance(match, teamIds, compIds).IsRelevant;
                     bool isPinned = !string.IsNullOrWhiteSpace(_pinnedMatchId) && (string.Equals(match.Id, _pinnedMatchId, StringComparison.OrdinalIgnoreCase) || match.Id.EndsWith($"_{_pinnedMatchId}") || _pinnedMatchId.EndsWith($"_{match.Id}"));
+                    bool isInCustomQueue = preferences?.CustomTickerQueueMatchIds?.Contains(match.Id) == true;
+                    string scope = preferences?.TickerRotationScope ?? _currentPreferences?.TickerRotationScope ?? "FollowedLive";
+                    bool isAllLiveScope = string.Equals(scope, "AllLive", StringComparison.OrdinalIgnoreCase);
 
-                    if (isLive && (isFollowed || isPinned) && (currentHome != prevScore.Home || currentAway != prevScore.Away))
+                    bool isEligibleForPreemption = isFollowed || isPinned || isInCustomQueue || isAllLiveScope;
+
+                    if (isLive && isEligibleForPreemption)
                     {
-                        goalJumpMatchId ??= match.Id;
+                        bool isGoal = currentHome > prevState.Home || currentAway > prevState.Away;
+                        bool isRedCard = currentHomeRed > prevState.HomeRed || currentAwayRed > prevState.AwayRed;
+
+                        if (isGoal || isRedCard)
+                        {
+                            bool eventJumpEnabled = preferences?.EnableTickerEventPreemption ?? _currentPreferences?.EnableTickerEventPreemption ?? true;
+                            if (eventJumpEnabled)
+                            {
+                                goalJumpMatchId ??= match.Id;
+                            }
+                        }
                     }
                 }
 
                 _previousScores[match.Id] = (currentHome, currentAway);
+                _previousMatchState[match.Id] = (currentHome, currentAway, currentHomeRed, currentAwayRed);
             }
         }
 
         IReadOnlyList<TrayMatchDto> candidates = ComputeCandidates(trayData, preferences ?? _currentPreferences, connectionState);
 
+        bool isCustomQueue = string.Equals(preferences?.TickerRotationScope ?? _currentPreferences?.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase);
         // If a match was explicitly pinned, guarantee it is present in candidates even if unfollowed or date changed
-        if (!string.IsNullOrEmpty(_pinnedMatchId))
+        if (!isCustomQueue && !string.IsNullOrEmpty(_pinnedMatchId))
         {
             var pinnedInTray = trayData?.Matches?.FirstOrDefault(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
             if (pinnedInTray != null)
@@ -645,7 +860,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         }
 
         // If a match was pinned, retain it if still in candidates
-        if (!string.IsNullOrEmpty(_pinnedMatchId))
+        if (!isCustomQueue && !string.IsNullOrEmpty(_pinnedMatchId))
         {
             bool matchStillPresent = _state.Candidates.Any(m => string.Equals(m.Id, _pinnedMatchId, StringComparison.Ordinal));
             if (matchStillPresent)
@@ -673,9 +888,81 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         EmitCurrentDisplay();
     }
 
+    public void PreemptForMajorEvent(TrayMatchDto match, string eventSummary, TimeSpan? duration = null)
+    {
+        if (match == null || string.IsNullOrWhiteSpace(match.Id) || _isDisposed) return;
+
+        _preemptionUntil = DateTimeOffset.UtcNow.Add(duration ?? TimeSpan.FromSeconds(45));
+        _preemptionSummary = eventSummary;
+        _preemptedMatch = match;
+        LastGoalJumpMatchId = match.Id;
+
+        if (!_state.Candidates.Any(m => string.Equals(m.Id, match.Id, StringComparison.Ordinal)))
+        {
+            var combined = new List<TrayMatchDto>(_state.Candidates);
+            combined.Insert(0, match);
+            _state.ApplyCandidates(combined);
+            SmartMergeTickerMatches(combined);
+        }
+        else
+        {
+            _state.PromoteToTop(match.Id);
+        }
+
+        _state.SetCurrentMatch(match.Id);
+
+        if (_timer.IsRunning)
+        {
+            _timer.Stop();
+            _timer.Start();
+        }
+        else if (_state.CanCycle)
+        {
+            _timer.Start();
+        }
+
+        EmitCurrentDisplay();
+    }
+
+    public bool StepByUserScroll(int direction)
+    {
+        if (_isDisposed) return false;
+
+        // Cancel any active preemption lock when user manually scrolls
+        _preemptionUntil = DateTimeOffset.MinValue;
+        _preemptedMatch = null;
+        _preemptionSummary = null;
+
+        if (_state.Candidates.Count <= 1)
+        {
+            return false;
+        }
+
+        _state.Step(direction);
+
+        // Reset timer interval so user gets full duration to read the scrolled match
+        if (_timer.IsRunning)
+        {
+            _timer.Stop();
+            _timer.Start();
+        }
+
+        EmitCurrentDisplay();
+        return true;
+    }
+
     private void OnTimerTick(object? sender, EventArgs e)
     {
         if (_isDisposed) return;
+
+        if (DateTimeOffset.UtcNow < _preemptionUntil)
+        {
+            // Major event preemption lock active (hold match on ticker)
+            return;
+        }
+
+        _preemptedMatch = null;
+        _preemptionSummary = null;
 
         if (!_state.CanCycle)
         {
@@ -683,7 +970,8 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             return;
         }
 
-        if (!string.IsNullOrEmpty(_pinnedMatchId))
+        bool isCustomQueueScope = string.Equals(_currentPreferences?.TickerRotationScope, "CustomQueue", StringComparison.OrdinalIgnoreCase);
+        if (!isCustomQueueScope && !string.IsNullOrEmpty(_pinnedMatchId))
         {
             // Carousel rotation is paused while a match is pinned
             return;
@@ -724,9 +1012,19 @@ public sealed class TaskbarTickerCoordinator : IDisposable
         }
 
         _isCarouselEnabled = enabled;
+        if (enabled)
+        {
+            _pinnedMatchId = null;
+            _pinnedMatch = null;
+            _isPinnedFromSnapshot = false;
+        }
         if (_currentPreferences != null)
         {
-            _currentPreferences = _currentPreferences with { EnableTickerCarousel = enabled };
+            _currentPreferences = _currentPreferences with 
+            { 
+                EnableTickerCarousel = enabled,
+                ManualPinnedMatchId = enabled ? null : _currentPreferences.ManualPinnedMatchId
+            };
         }
 
         if (!enabled)

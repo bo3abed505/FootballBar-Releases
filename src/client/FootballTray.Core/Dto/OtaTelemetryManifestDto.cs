@@ -28,6 +28,12 @@ public class OtaTelemetryEndpointsDto
     [JsonPropertyName("leagueHubFallbackUrlTemplate")]
     public string LeagueHubFallbackUrlTemplate { get; set; } = "https://www.fotmob.com/api/leagues?id={leagueId}";
 
+    [JsonPropertyName("teamHubUrlTemplate")]
+    public string TeamHubUrlTemplate { get; set; } = "https://www.fotmob.com/api/data/teams?id={teamId}";
+
+    [JsonPropertyName("teamHubFallbackUrlTemplate")]
+    public string TeamHubFallbackUrlTemplate { get; set; } = "https://www.fotmob.com/api/teams?id={teamId}";
+
     [JsonPropertyName("searchSuggestUrlTemplate")]
     public string SearchSuggestUrlTemplate { get; set; } = "https://www.fotmob.com/api/search/suggest?term={term}";
 
@@ -48,7 +54,7 @@ public class OtaTelemetryManifestDto
     public string SchemaVersion { get; set; } = "1.0";
 
     [JsonPropertyName("manifestVersion")]
-    public string ManifestVersion { get; set; } = "1.2.2";
+    public string ManifestVersion { get; set; } = "1.3.0";
 
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = "live-telemetry";

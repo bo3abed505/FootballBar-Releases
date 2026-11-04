@@ -42,6 +42,8 @@ public sealed partial class SettingsPage : Page
         {
             ViewModel.PropertyChanged += OnViewModelPropertyChanged;
             ViewModel.RefreshFollowedLists();
+            ViewModel.RefreshCustomQueueMatches();
+            ViewModel.RefreshFollowedEntityAlerts();
         }
 
         SyncUiFromViewModel();
@@ -72,6 +74,8 @@ public sealed partial class SettingsPage : Page
         {
             // 1. Display
             TickerCarouselToggle.IsOn = ViewModel.EnableTickerCarousel;
+            SelectRotationScope(ViewModel.TickerRotationScope);
+            TickerRotationScopeCombo.IsEnabled = ViewModel.EnableTickerCarousel;
             TimeFormat24HourToggle.IsOn = ViewModel.Use24HourFormat;
 
             // 2. Notifications
@@ -178,6 +182,17 @@ public sealed partial class SettingsPage : Page
             FollowedCompetitionsListView.ItemsSource = null;
             FollowedCompetitionsListView.ItemsSource = ViewModel.FollowedCompetitions;
             NoFollowedCompetitionsText.Visibility = ViewModel.HasFollowedCompetitions ? Visibility.Collapsed : Visibility.Visible;
+
+            // Custom Queue & Entity Alerts
+            if (CustomQueueMatchesItemsControl.ItemsSource != ViewModel.CustomQueueMatches)
+            {
+                CustomQueueMatchesItemsControl.ItemsSource = ViewModel.CustomQueueMatches;
+            }
+            NoCustomQueueMatchesText.Visibility = ViewModel.CustomQueueMatches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            EntityAlertOverridesListView.ItemsSource = null;
+            EntityAlertOverridesListView.ItemsSource = ViewModel.FollowedEntityAlerts;
+            NoFollowedEntityAlertsText.Visibility = ViewModel.FollowedEntityAlerts.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         finally
         {
@@ -230,9 +245,33 @@ public sealed partial class SettingsPage : Page
         }
     }
 
+    private void SelectRotationScope(string scope)
+    {
+        if (TickerRotationScopeCombo == null) return;
+        foreach (var item in TickerRotationScopeCombo.Items)
+        {
+            if (item is ComboBoxItem cbi && string.Equals(cbi.Tag as string, scope, StringComparison.OrdinalIgnoreCase))
+            {
+                TickerRotationScopeCombo.SelectedItem = cbi;
+                return;
+            }
+        }
+        TickerRotationScopeCombo.SelectedIndex = 0;
+    }
+
+    private async void OnTickerRotationScopeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializing || ViewModel == null) return;
+        if (TickerRotationScopeCombo.SelectedItem is ComboBoxItem selected && selected.Tag is string scope)
+        {
+            await ViewModel.SetTickerRotationScopeAsync(scope);
+        }
+    }
+
     private async void OnTickerCarouselToggled(object sender, RoutedEventArgs e)
     {
         if (_isInitializing || ViewModel == null) return;
+        TickerRotationScopeCombo.IsEnabled = TickerCarouselToggle.IsOn;
         await ViewModel.SetEnableTickerCarouselAsync(TickerCarouselToggle.IsOn);
     }
 
@@ -522,6 +561,74 @@ public sealed partial class SettingsPage : Page
         if (sender is Button btn && btn.Tag is string compId && ViewModel != null)
         {
             await ViewModel.UnfollowCompetitionAsync(compId);
+        }
+    }
+
+    private static string? GetMatchIdFromSender(object sender)
+    {
+        if (sender is FrameworkElement fe)
+        {
+            if (fe.Tag is string tag && !string.IsNullOrWhiteSpace(tag)) return tag;
+            if (fe.DataContext is CustomQueueMatchItemViewModel vm && !string.IsNullOrWhiteSpace(vm.MatchId)) return vm.MatchId;
+        }
+        return null;
+    }
+
+    private async void OnMoveQueueMatchUpClicked(object sender, RoutedEventArgs e)
+    {
+        string? matchId = GetMatchIdFromSender(sender);
+        if (!string.IsNullOrWhiteSpace(matchId) && ViewModel != null)
+        {
+            await ViewModel.MoveQueueMatchUpAsync(matchId);
+            NoCustomQueueMatchesText.Visibility = ViewModel.CustomQueueMatches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private async void OnMoveQueueMatchDownClicked(object sender, RoutedEventArgs e)
+    {
+        string? matchId = GetMatchIdFromSender(sender);
+        if (!string.IsNullOrWhiteSpace(matchId) && ViewModel != null)
+        {
+            await ViewModel.MoveQueueMatchDownAsync(matchId);
+            NoCustomQueueMatchesText.Visibility = ViewModel.CustomQueueMatches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private async void OnRemoveQueueMatchClicked(object sender, RoutedEventArgs e)
+    {
+        string? matchId = GetMatchIdFromSender(sender);
+        if (!string.IsNullOrWhiteSpace(matchId) && ViewModel != null)
+        {
+            await ViewModel.RemoveQueueMatchAsync(matchId);
+            NoCustomQueueMatchesText.Visibility = ViewModel.CustomQueueMatches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private async void OnClearCustomQueueClicked(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel != null)
+        {
+            await ViewModel.ClearCustomQueueAsync();
+            NoCustomQueueMatchesText.Visibility = ViewModel.CustomQueueMatches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void OnConfigureEntityAlertsClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is FollowedEntityAlertItemViewModel item)
+        {
+            Controls.EntityAlertFlyoutHelper.ShowEntityAlertFlyout(fe, item.Id, item.Name, item.IsTeam, ViewModel?.PreferencesService, onSaved: () =>
+            {
+                ViewModel?.RefreshFollowedEntityAlerts();
+            });
+        }
+    }
+
+    private async void OnResetEntityAlertClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is FollowedEntityAlertItemViewModel item && ViewModel != null)
+        {
+            await ViewModel.ResetEntityAlertProfileAsync(item);
         }
     }
 }

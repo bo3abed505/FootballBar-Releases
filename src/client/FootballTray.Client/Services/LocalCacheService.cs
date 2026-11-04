@@ -207,7 +207,7 @@ public class LocalCacheService
             }
 
             bool hasShootout = m.Score?.Penalty != null;
-            bool isPastDate = m.KickoffTime != default && m.KickoffTime.UtcDateTime.Date < now.Date;
+            bool isPastDate = m.KickoffTime != default && (now - m.KickoffTime).TotalHours > 12;
             bool isOvertimeThreshold = m.KickoffTime != default && (now - m.KickoffTime).TotalMinutes > 150;
 
             if (hasShootout)
@@ -340,6 +340,42 @@ public class LocalCacheService
 
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             var envelope = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeCompetitionHubDto, cancellationToken);
+            if (envelope?.Data == null) return null;
+            return envelope;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Persists team hub information (team_{teamKey}.json) for offline viewing.
+    /// </summary>
+    public async Task<bool> SaveTeamHubCacheAsync(string teamKey, ApiResponseEnvelope<TeamHubDto> envelope, CancellationToken cancellationToken = default)
+    {
+        if (envelope?.Data == null) return false;
+        string safeKey = SanitizeFileNameKey(teamKey);
+        string path = Path.Combine(_entitiesCacheDirectory, $"team_{safeKey}.json");
+        return await WriteAtomicEntityFileAsync(path, async stream =>
+        {
+            await JsonSerializer.SerializeAsync(stream, envelope, FootballJsonSerializerContext.Default.ApiResponseEnvelopeTeamHubDto, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Loads team hub information from disk if present.
+    /// </summary>
+    public async Task<ApiResponseEnvelope<TeamHubDto>?> LoadTeamHubCacheAsync(string teamKey, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            string safeKey = SanitizeFileNameKey(teamKey);
+            string path = Path.Combine(_entitiesCacheDirectory, $"team_{safeKey}.json");
+            if (!File.Exists(path)) return null;
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var envelope = await JsonSerializer.DeserializeAsync(stream, FootballJsonSerializerContext.Default.ApiResponseEnvelopeTeamHubDto, cancellationToken);
             if (envelope?.Data == null) return null;
             return envelope;
         }

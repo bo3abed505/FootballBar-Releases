@@ -114,22 +114,91 @@ public sealed class NotificationService
                     || pinnedMatchId.EndsWith($"_{candidate.FixtureId}", StringComparison.OrdinalIgnoreCase);
             }
 
-            // 1. Check Global Enablement
-            if (preferences != null && !preferences.Notifications.GlobalEnabled)
+            bool isInCustomQueue = preferences?.CustomTickerQueueMatchIds != null
+                && !string.IsNullOrWhiteSpace(candidate.FixtureId)
+                && preferences.CustomTickerQueueMatchIds.Contains(candidate.FixtureId);
+
+            bool isDirectlyTargeted = isPinnedMatch || isInCustomQueue;
+
+            // 1. Check Entity Alert Profiles (Muted / Custom / InheritGlobal)
+            bool isEntityMuted = false;
+            bool isEntityCustom = false;
+            bool isEntityCustomAllowed = false;
+            string? soundOverride = null;
+
+            if (preferences != null)
             {
-                AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Notifications globally disabled.");
+                var matchingProfiles = new List<FootballTray.Core.Dto.EntityAlertProfileDto>();
+                if (preferences.TeamAlertProfiles != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(candidate.HomeTeamId) && preferences.TeamAlertProfiles.TryGetValue(candidate.HomeTeamId, out var hp)) matchingProfiles.Add(hp);
+                    else if (!string.IsNullOrWhiteSpace(candidate.HomeTeamLegacyId) && preferences.TeamAlertProfiles.TryGetValue(candidate.HomeTeamLegacyId, out var hlp)) matchingProfiles.Add(hlp);
+
+                    if (!string.IsNullOrWhiteSpace(candidate.AwayTeamId) && preferences.TeamAlertProfiles.TryGetValue(candidate.AwayTeamId, out var ap)) matchingProfiles.Add(ap);
+                    else if (!string.IsNullOrWhiteSpace(candidate.AwayTeamLegacyId) && preferences.TeamAlertProfiles.TryGetValue(candidate.AwayTeamLegacyId, out var alp)) matchingProfiles.Add(alp);
+                }
+
+                if (preferences.CompetitionAlertProfiles != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(candidate.CompetitionId) && preferences.CompetitionAlertProfiles.TryGetValue(candidate.CompetitionId, out var cp)) matchingProfiles.Add(cp);
+                    else if (!string.IsNullOrWhiteSpace(candidate.CompetitionLegacyId) && preferences.CompetitionAlertProfiles.TryGetValue(candidate.CompetitionLegacyId, out var clp)) matchingProfiles.Add(clp);
+                }
+
+                if (matchingProfiles.Count > 0)
+                {
+                    if (matchingProfiles.All(p => string.Equals(p.Mode, "Muted", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        isEntityMuted = true;
+                    }
+                    else
+                    {
+                        var customProfiles = matchingProfiles.Where(p => string.Equals(p.Mode, "Custom", StringComparison.OrdinalIgnoreCase)).ToList();
+                        if (customProfiles.Count > 0)
+                        {
+                            isEntityCustom = true;
+                            isEntityCustomAllowed = customProfiles.Any(p => p.IsTypeEnabled(candidate.Type.ToString()));
+                        }
+                    }
+
+                    var profileWithSound = matchingProfiles.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.SoundOverride) && !string.Equals(p.SoundOverride, "InheritGlobal", StringComparison.OrdinalIgnoreCase));
+                    if (profileWithSound != null)
+                    {
+                        soundOverride = profileWithSound.SoundOverride;
+                    }
+                }
+            }
+
+            if (isEntityMuted)
+            {
+                AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Muted by entity alert profile.");
                 continue;
             }
 
-            // 2. Check Category / Type Enablement
-            if (preferences != null && !preferences.Notifications.IsTypeEnabled(candidate.Type))
+            if (isEntityCustom && !isEntityCustomAllowed)
             {
-                AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Category '{candidate.Type}' disabled.");
+                AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Custom entity profile disabled category '{candidate.Type}'.");
                 continue;
             }
 
-            // 3. Check Following Relevance (unconditionally eligible if pinned match)
-            if (!isPinnedMatch && preferences != null)
+            if (!isEntityCustom)
+            {
+                // Check Global Enablement
+                if (preferences != null && !preferences.Notifications.GlobalEnabled)
+                {
+                    AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Notifications globally disabled.");
+                    continue;
+                }
+
+                // Check Category / Type Enablement
+                if (preferences != null && !preferences.Notifications.IsTypeEnabled(candidate.Type))
+                {
+                    AppLogger.Debug("Notifications", "CandidateFiltered", $"Candidate '{candidate.DeduplicationKey}' suppressed: Category '{candidate.Type}' disabled.");
+                    continue;
+                }
+            }
+
+            // 3. Check Following Relevance (unconditionally eligible if pinned match or in custom queue)
+            if (!isDirectlyTargeted && preferences != null)
             {
                 bool hasFollowPreferences = (followedTeamIds != null && followedTeamIds.Count > 0) ||
                                             (followedCompIds != null && followedCompIds.Count > 0);
@@ -185,20 +254,37 @@ public sealed class NotificationService
                             .OrderByDescending(e => e.Minute + (e.ExtraMinute > 0 ? e.ExtraMinute : 0))
                             .FirstOrDefault();
 
-                        if (latestGoal != null && !string.IsNullOrWhiteSpace(latestGoal.PlayerName))
+                        if (latestGoal != null)
                         {
-                            candidate.EventPlayerName = latestGoal.PlayerName;
+                            if (!string.IsNullOrWhiteSpace(latestGoal.PlayerName))
+                            {
+                                candidate.EventPlayerName = latestGoal.PlayerName;
+                            }
+                            if (!string.IsNullOrWhiteSpace(latestGoal.AssistPlayerName))
+                            {
+                                candidate.AssistPlayerName = latestGoal.AssistPlayerName;
+                            }
+                            if (!string.IsNullOrWhiteSpace(latestGoal.Detail))
+                            {
+                                candidate.EventDetail = latestGoal.Detail;
+                            }
+                            if (string.IsNullOrWhiteSpace(candidate.ScoringTeamName) && !string.IsNullOrWhiteSpace(latestGoal.TeamId))
+                            {
+                                if (string.Equals(latestGoal.TeamId, candidate.HomeTeamId, StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(latestGoal.TeamId, candidate.HomeTeamLegacyId, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    candidate.ScoringTeamName = candidate.HomeTeamName;
+                                }
+                                else if (string.Equals(latestGoal.TeamId, candidate.AwayTeamId, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(latestGoal.TeamId, candidate.AwayTeamLegacyId, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    candidate.ScoringTeamName = candidate.AwayTeamName;
+                                }
+                            }
                             if (latestGoal.Minute > 0)
                             {
                                 candidate.ElapsedMinute = latestGoal.Minute;
                                 candidate.ExtraMinute = latestGoal.ExtraMinute;
-                            }
-
-                            // If the latest goal actually occurred > 4 minutes before the current match clock, suppress the stale toast
-                            if (clockMinute > 0 && latestGoal.Minute > 0 && (clockMinute - latestGoal.Minute > 4))
-                            {
-                                AppLogger.Debug("Notifications", "StaleGoalSuppressed", $"Suppressed stale goal alert for {candidate.FixtureId}: Goal occurred at {latestGoal.Minute}' while match is at {clockMinute}'.");
-                                continue;
                             }
                         }
                     }
@@ -222,7 +308,7 @@ public sealed class NotificationService
                 AppLogger.Error("Notifications", "NotificationRenderError", $"Failed to render notification for '{candidate.DeduplicationKey}': {ex.Message}", ex: ex);
             }
 
-            if (_audioService != null)
+            if (_audioService != null && !string.Equals(soundOverride, "Mute", StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {

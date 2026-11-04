@@ -229,6 +229,33 @@ public static class TrayTickerFormatter
         };
     }
 
+    /// <summary>
+    /// Formats raw match state / period into a clean, human-readable status string.
+    /// E.g. "1st Half • 38'", "Half-Time", "2nd Half • 75'", "Full-Time".
+    /// </summary>
+    public static string FormatPeriodStatus(string? rawState, int elapsedMinute = 0, int extraMinute = 0)
+    {
+        string state = (rawState ?? string.Empty).Trim().ToUpperInvariant();
+        string minuteStr = elapsedMinute > 0
+            ? (extraMinute > 0 ? $"{elapsedMinute}+{extraMinute}'" : $"{elapsedMinute}'")
+            : string.Empty;
+
+        return state switch
+        {
+            "FIRST_HALF" or "1H" => !string.IsNullOrEmpty(minuteStr) ? $"1st Half • {minuteStr}" : "1st Half",
+            "SECOND_HALF" or "2H" => !string.IsNullOrEmpty(minuteStr) ? $"2nd Half • {minuteStr}" : "2nd Half",
+            "HALF_TIME" or "HT" or "HALFTIME" => "Half-Time",
+            "FINISHED" or "FT" or "AET" or "PEN" or "FULL_TIME" => "Full-Time",
+            "EXTRA_TIME" or "ET" => !string.IsNullOrEmpty(minuteStr) ? $"Extra Time • {minuteStr}" : "Extra Time",
+            "PENALTIES" or "PSO" or "PENALTY_SHOOTOUT" => "Penalties",
+            "LIVE" or "IN_PLAY" => !string.IsNullOrEmpty(minuteStr) ? $"Live • {minuteStr}" : "Live",
+            "PREMATCH" or "NS" or "TBD" or "SCHEDULED" or "TIMED" or "NOT_STARTED" => "Upcoming",
+            "POSTPONED" or "PST" => "Postponed",
+            "CANCELLED" or "CANC" or "ABANDONED" or "ABD" => "Cancelled",
+            _ => !string.IsNullOrEmpty(minuteStr) ? $"{rawState} • {minuteStr}" : (rawState ?? "–")
+        };
+    }
+
     private static string GetTeamCode(TeamSummaryDto team)
     {
         if (!string.IsNullOrWhiteSpace(team.ShortName))

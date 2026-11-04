@@ -16,6 +16,7 @@ using FootballTray.Client.Services.Preferences;
 using FootballTray.Client.Services.Startup;
 using FootballTray.Client.Services.Telemetry;
 using FootballTray.Client.Services.Updates;
+using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.ViewModels;
 
@@ -35,6 +36,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public ObservableCollection<FollowedTeam> FollowedTeams { get; } = new();
     public ObservableCollection<FollowedCompetition> FollowedCompetitions { get; } = new();
+    public ObservableCollection<CustomQueueMatchItemViewModel> CustomQueueMatches { get; } = new();
+    public bool HasCustomQueueMatches => CustomQueueMatches.Count > 0;
+    public ObservableCollection<FollowedEntityAlertItemViewModel> FollowedEntityAlerts { get; } = new();
+    public bool HasFollowedEntityAlerts => FollowedEntityAlerts.Count > 0;
+    public IPreferencesService PreferencesService => _preferencesService;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -83,6 +89,42 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             await _mainViewModel.SetEnableTickerCarouselAsync(enable);
         }
+    }
+
+    public string TickerRotationScope
+    {
+        get => _preferencesService.Current.TickerRotationScope;
+        set
+        {
+            if (!string.Equals(_preferencesService.Current.TickerRotationScope, value, StringComparison.OrdinalIgnoreCase))
+            {
+                _ = SetTickerRotationScopeAsync(value);
+            }
+        }
+    }
+
+    public async Task SetTickerRotationScopeAsync(string scope)
+    {
+        await _preferencesService.SetTickerRotationScopeAsync(scope);
+        OnPropertyChanged(nameof(TickerRotationScope));
+    }
+
+    public bool EnableTickerEventPreemption
+    {
+        get => _preferencesService.Current.EnableTickerEventPreemption;
+        set
+        {
+            if (_preferencesService.Current.EnableTickerEventPreemption != value)
+            {
+                _ = SetEnableTickerEventPreemptionAsync(value);
+            }
+        }
+    }
+
+    public async Task SetEnableTickerEventPreemptionAsync(bool enable)
+    {
+        await _preferencesService.SetEnableTickerEventPreemptionAsync(enable);
+        OnPropertyChanged(nameof(EnableTickerEventPreemption));
     }
 
     public bool Use24HourFormat
@@ -502,6 +544,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
             OnPropertyChanged(nameof(HasFollowedTeams));
             OnPropertyChanged(nameof(HasFollowedCompetitions));
+            RefreshFollowedEntityAlerts();
+            RefreshCustomQueueMatches();
         });
     }
 
@@ -551,6 +595,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(IsRunAtStartupEnabled));
             OnPropertyChanged(nameof(IsDebugLoggingEnabled));
             RefreshFollowedLists();
+            RefreshCustomQueueMatches();
             RefreshDiagnosticsReadout();
         });
     }
@@ -621,6 +666,245 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
+    #region Custom Queue Management
+
+    public void RefreshCustomQueueMatches()
+    {
+        RunOnUi(() =>
+        {
+            var prefs = _preferencesService.GetPreferences();
+            var queueIds = prefs.CustomTickerQueueMatchIds ?? new List<string>();
+            CustomQueueMatches.Clear();
+
+            int idx = 1;
+            foreach (var qId in queueIds)
+            {
+                var match = _mainViewModel?.GetMatchDtoById(qId)
+                    ?? App.CurrentMainViewModel?.GetMatchDtoById(qId)
+                    ?? App.CurrentTickerCoordinator?.GetQueuedMatchSnapshot(qId)
+                    ?? App.CurrentTickerCoordinator?.State?.Candidates?.FirstOrDefault(m => string.Equals(m.Id, qId, StringComparison.OrdinalIgnoreCase))
+                    ?? _mainViewModel?.LatestTrayData?.Matches?.FirstOrDefault(m => 
+                        string.Equals(m.Id, qId, StringComparison.OrdinalIgnoreCase) ||
+                        m.Id.EndsWith($"_{qId}", StringComparison.OrdinalIgnoreCase) ||
+                        qId.EndsWith($"_{m.Id}", StringComparison.OrdinalIgnoreCase))
+                    ?? App.CurrentMainViewModel?.LatestTrayData?.Matches?.FirstOrDefault(m => 
+                        string.Equals(m.Id, qId, StringComparison.OrdinalIgnoreCase) ||
+                        m.Id.EndsWith($"_{qId}", StringComparison.OrdinalIgnoreCase) ||
+                        qId.EndsWith($"_{m.Id}", StringComparison.OrdinalIgnoreCase));
+
+                string title = match != null 
+                    ? $"{match.HomeTeam?.ShortName ?? match.HomeTeam?.Name ?? "Home"} vs {match.AwayTeam?.ShortName ?? match.AwayTeam?.Name ?? "Away"}"
+                    : $"Match {qId}";
+
+                string comp = match?.Competition?.Name ?? "Custom Queue";
+                string status = match != null
+                    ? (match.Score != null && (match.Score.Home > 0 || match.Score.Away > 0 || match.State == "LIVE" || match.State == "FT" || match.State == "HT")
+                        ? $"{match.Score.Home}–{match.Score.Away} ({match.State})"
+                        : (match.KickoffTime != default ? match.KickoffTime.ToLocalTime().ToString(prefs.Use24HourFormat ? "HH:mm" : "h:mm tt") : match.State ?? ""))
+                    : "Queued";
+
+                CustomQueueMatches.Add(new CustomQueueMatchItemViewModel
+                {
+                    MatchId = qId,
+                    DisplayIndex = idx++,
+                    MatchTitle = title,
+                    CompetitionName = comp,
+                    StatusText = status
+                });
+            }
+
+            OnPropertyChanged(nameof(HasCustomQueueMatches));
+        });
+    }
+
+    public async Task MoveQueueMatchUpAsync(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        var prefs = _preferencesService.GetPreferences();
+        var list = (prefs.CustomTickerQueueMatchIds ?? new List<string>()).ToList();
+        int idx = list.FindIndex(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+        if (idx > 0)
+        {
+            (list[idx - 1], list[idx]) = (list[idx], list[idx - 1]);
+            await _preferencesService.SetCustomTickerQueueMatchIdsAsync(list);
+            var updatedPrefs = _preferencesService.GetPreferences();
+            App.CurrentTickerCoordinator?.ApplyPreferences(updatedPrefs);
+            RunOnUi(() => RefreshCustomQueueMatches());
+        }
+    }
+
+    public async Task MoveQueueMatchDownAsync(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        var prefs = _preferencesService.GetPreferences();
+        var list = (prefs.CustomTickerQueueMatchIds ?? new List<string>()).ToList();
+        int idx = list.FindIndex(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0 && idx < list.Count - 1)
+        {
+            (list[idx + 1], list[idx]) = (list[idx], list[idx + 1]);
+            await _preferencesService.SetCustomTickerQueueMatchIdsAsync(list);
+            var updatedPrefs = _preferencesService.GetPreferences();
+            App.CurrentTickerCoordinator?.ApplyPreferences(updatedPrefs);
+            RunOnUi(() => RefreshCustomQueueMatches());
+        }
+    }
+
+    public async Task RemoveQueueMatchAsync(string matchId)
+    {
+        if (string.IsNullOrWhiteSpace(matchId)) return;
+        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        var prefs = _preferencesService.GetPreferences();
+        var list = (prefs.CustomTickerQueueMatchIds ?? new List<string>())
+            .Where(id => !string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase) &&
+                         !string.Equals(id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        await _preferencesService.SetCustomTickerQueueMatchIdsAsync(list);
+        var updatedPrefs = _preferencesService.GetPreferences();
+        App.CurrentTickerCoordinator?.ApplyPreferences(updatedPrefs);
+        _mainViewModel?.SyncPinnedStateAcrossItems(null);
+        App.CurrentMainViewModel?.SyncPinnedStateAcrossItems(null);
+        RunOnUi(() => RefreshCustomQueueMatches());
+    }
+
+    public async Task ClearCustomQueueAsync()
+    {
+        await _preferencesService.SetCustomTickerQueueMatchIdsAsync(new List<string>());
+        var updatedPrefs = _preferencesService.GetPreferences();
+        App.CurrentTickerCoordinator?.ApplyPreferences(updatedPrefs);
+        _mainViewModel?.SyncPinnedStateAcrossItems(null);
+        App.CurrentMainViewModel?.SyncPinnedStateAcrossItems(null);
+        RunOnUi(() => RefreshCustomQueueMatches());
+    }
+
+    public async Task ReorderCustomQueueAsync(IEnumerable<string> orderedMatchIds)
+    {
+        if (orderedMatchIds == null) return;
+        var list = orderedMatchIds.ToList();
+        await _preferencesService.SetCustomTickerQueueMatchIdsAsync(list);
+        var updatedPrefs = _preferencesService.GetPreferences();
+        App.CurrentTickerCoordinator?.ApplyPreferences(updatedPrefs);
+        RunOnUi(() => RefreshCustomQueueMatches());
+    }
+
+    #endregion
+
+    #region Entity Alert Overrides Management
+
+    public void RefreshFollowedEntityAlerts()
+    {
+        RunOnUi(() =>
+        {
+            var prefs = _preferencesService.Current;
+            FollowedEntityAlerts.Clear();
+
+            if (prefs.FollowedTeams != null)
+            {
+                foreach (var t in prefs.FollowedTeams)
+                {
+                    EntityAlertProfileDto? profile = null;
+                    string canon = CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var cId) ? cId : t.Id;
+                    if (prefs.TeamAlertProfiles != null)
+                    {
+                        if (!prefs.TeamAlertProfiles.TryGetValue(t.Id, out profile))
+                        {
+                            prefs.TeamAlertProfiles.TryGetValue(canon, out profile);
+                        }
+                    }
+
+                    var (badge, canReset) = ComputeAlertStatusBadge(profile);
+                    FollowedEntityAlerts.Add(new FollowedEntityAlertItemViewModel
+                    {
+                        Id = t.Id,
+                        Name = t.Name,
+                        IsTeam = true,
+                        StatusBadge = badge,
+                        CanReset = canReset
+                    });
+                }
+            }
+
+            if (prefs.FollowedCompetitions != null)
+            {
+                foreach (var c in prefs.FollowedCompetitions)
+                {
+                    EntityAlertProfileDto? profile = null;
+                    string canon = CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var cId) ? cId : c.Id;
+                    if (prefs.CompetitionAlertProfiles != null)
+                    {
+                        if (!prefs.CompetitionAlertProfiles.TryGetValue(c.Id, out profile))
+                        {
+                            prefs.CompetitionAlertProfiles.TryGetValue(canon, out profile);
+                        }
+                    }
+
+                    var (badge, canReset) = ComputeAlertStatusBadge(profile);
+                    FollowedEntityAlerts.Add(new FollowedEntityAlertItemViewModel
+                    {
+                        Id = c.Id,
+                        Name = c.DisplayName,
+                        IsTeam = false,
+                        StatusBadge = badge,
+                        CanReset = canReset
+                    });
+                }
+            }
+
+            OnPropertyChanged(nameof(HasFollowedEntityAlerts));
+        });
+    }
+
+    public static (string badge, bool canReset) ComputeAlertStatusBadge(EntityAlertProfileDto? profile)
+    {
+        if (profile == null || string.IsNullOrWhiteSpace(profile.Mode) || string.Equals(profile.Mode, "InheritGlobal", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("🌐 Global Default", false);
+        }
+
+        if (string.Equals(profile.Mode, "Muted", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("🔕 Muted", true);
+        }
+
+        var parts = new List<string>();
+        if (profile.EnableGoals) parts.Add("Goals");
+        if (profile.EnableRedCards) parts.Add("Cards");
+        if (profile.EnableKickoff) parts.Add("Kickoff");
+        if (profile.EnableHalfTime) parts.Add("HT");
+        if (profile.EnableFullTime) parts.Add("FT");
+        if (profile.EnableKickoffReminder) parts.Add("Remind");
+        if (profile.EnablePostponed) parts.Add("Postponed");
+        if (profile.EnableCancelled) parts.Add("Cancelled");
+
+        string summary = parts.Count > 0 ? string.Join(", ", parts) : "None";
+        if (!string.IsNullOrWhiteSpace(profile.SoundOverride) && !string.Equals(profile.SoundOverride, "InheritGlobal", StringComparison.OrdinalIgnoreCase))
+        {
+            summary += $" • 🔊 {profile.SoundOverride}";
+        }
+
+        return ($"⚙️ Custom ({summary})", true);
+    }
+
+    public async Task ResetEntityAlertProfileAsync(FollowedEntityAlertItemViewModel item)
+    {
+        if (item == null || string.IsNullOrWhiteSpace(item.Id)) return;
+        var defaultProfile = new EntityAlertProfileDto { Mode = "InheritGlobal" };
+        if (item.IsTeam)
+        {
+            await _preferencesService.SetTeamAlertProfileAsync(item.Id, defaultProfile);
+        }
+        else
+        {
+            await _preferencesService.SetCompetitionAlertProfileAsync(item.Id, defaultProfile);
+        }
+        RefreshFollowedEntityAlerts();
+    }
+
+    #endregion
+
     public void Dispose()
     {
         if (!_disposed)
@@ -633,4 +917,69 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             }
         }
     }
+}
+
+public class CustomQueueMatchItemViewModel : INotifyPropertyChanged
+{
+    public string MatchId { get; init; } = string.Empty;
+    
+    private int _displayIndex;
+    public int DisplayIndex
+    {
+        get => _displayIndex;
+        set
+        {
+            if (_displayIndex != value)
+            {
+                _displayIndex = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayIndex)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IndexBadge)));
+            }
+        }
+    }
+    
+    public string IndexBadge => $"#{DisplayIndex}";
+    public string MatchTitle { get; init; } = string.Empty;
+    public string CompetitionName { get; init; } = string.Empty;
+    public string StatusText { get; init; } = string.Empty;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+public class FollowedEntityAlertItemViewModel : INotifyPropertyChanged
+{
+    public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public bool IsTeam { get; init; }
+    public string TypeBadge => IsTeam ? "🛡️ Club" : "🏆 Competition";
+    
+    private string _statusBadge = "🌐 Global Default";
+    public string StatusBadge
+    {
+        get => _statusBadge;
+        set
+        {
+            if (_statusBadge != value)
+            {
+                _statusBadge = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusBadge)));
+            }
+        }
+    }
+
+    private bool _canReset;
+    public bool CanReset
+    {
+        get => _canReset;
+        set
+        {
+            if (_canReset != value)
+            {
+                _canReset = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanReset)));
+            }
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

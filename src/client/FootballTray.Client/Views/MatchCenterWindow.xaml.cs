@@ -30,6 +30,7 @@ public sealed partial class MatchCenterWindow : Window
         RootGrid.DataContext = ViewModel;
         KeyEventsList.ItemsSource = ViewModel.KeyEvents;
         CommentaryList.ItemsSource = ViewModel.CommentaryItems;
+        ViewModel.OnNavigateToMatch = async (targetId) => await NavigateToMatchAsync(targetId);
 
         try
         {
@@ -46,6 +47,24 @@ public sealed partial class MatchCenterWindow : Window
         UpdateRightTabStyles();
     }
 
+
+    public async Task NavigateToMatchAsync(string matchId)
+    {
+        try
+        {
+            var response = await _apiClient.GetMatchDetailsAsync(matchId);
+            if (response.IsSuccess && response.Envelope?.Data != null)
+            {
+                Populate(response.Envelope.Data);
+                App.CurrentMainViewModel?.UpdateMatchFromDetails(response.Envelope.Data);
+                App.CurrentTickerCoordinator?.UpdateMatchFromDetails(response.Envelope.Data);
+            }
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppDiagnosticsLogger.LogError("MatchCenterWindow", "NavigateFailed", ex.Message, ex);
+        }
+    }
 
     public void Populate(MatchDetailDto match)
     {
@@ -352,6 +371,44 @@ public sealed partial class MatchCenterWindow : Window
     {
         _activeRightTab = RightPaneTab.Standings;
         UpdateRightTabStyles();
+    }
+
+    private void OnCompetitionHeaderClicked(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(ViewModel.CompetitionId))
+        {
+            App.OpenCompetitionStandings(ViewModel.CompetitionId, ViewModel.CompetitionName);
+        }
+        else
+        {
+            _activeRightTab = RightPaneTab.Standings;
+            UpdateRightTabStyles();
+            ViewModel.SelectLeagueTableSubTabCommand?.Execute(null);
+        }
+    }
+
+    private void OnHomeTeamHeaderClicked(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(ViewModel.HomeTeamId))
+        {
+            App.OpenTeamHub(ViewModel.HomeTeamId, ViewModel.HomeTeamName, ViewModel.HomeTeamLogoUrl);
+        }
+    }
+
+    private void OnAwayTeamHeaderClicked(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(ViewModel.AwayTeamId))
+        {
+            App.OpenTeamHub(ViewModel.AwayTeamId, ViewModel.AwayTeamName, ViewModel.AwayTeamLogoUrl);
+        }
+    }
+
+    private void OnStandingsClubClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is StandingRowItemViewModel row)
+        {
+            App.OpenTeamHub(row.TeamId, row.DisplayName, row.TeamLogoUrl);
+        }
     }
 
     private void UpdateRightTabStyles()

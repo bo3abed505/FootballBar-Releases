@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:FootballTray.Client.ViewModels"
+    xmlns:dto="using:FootballTray.Core.Dto"
     mc:Ignorable="d">
 
     <Page.Resources>
@@ -151,13 +152,22 @@
                                     Foreground="{ThemeResource SystemFillColorAttentionBrush}"
                                     Opacity="{x:Bind HomeStarOpacity, Mode=OneWay}" />
                             </Button>
-                            <TextBlock
-                                Text="{x:Bind HomeTeamName}"
-                                FontSize="15"
-                                FontWeight="Bold"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                TextTrimming="CharacterEllipsis" />
+                            <Button
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="4,2"
+                                CornerRadius="4"
+                                Tag="{x:Bind}"
+                                Click="OnScheduleHomeTeamClicked"
+                                ToolTipService.ToolTip="Open Team Hub">
+                                <TextBlock
+                                    Text="{x:Bind HomeTeamName}"
+                                    FontSize="15"
+                                    FontWeight="Bold"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    TextTrimming="CharacterEllipsis" />
+                            </Button>
                         </StackPanel>
 
                         <!-- Score -->
@@ -176,13 +186,22 @@
 
                         <!-- Away Team with Follow Star -->
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <TextBlock
-                                Text="{x:Bind AwayTeamName}"
-                                FontSize="15"
-                                FontWeight="Bold"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center"
-                                TextTrimming="CharacterEllipsis" />
+                            <Button
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="4,2"
+                                CornerRadius="4"
+                                Tag="{x:Bind}"
+                                Click="OnScheduleAwayTeamClicked"
+                                ToolTipService.ToolTip="Open Team Hub">
+                                <TextBlock
+                                    Text="{x:Bind AwayTeamName}"
+                                    FontSize="15"
+                                    FontWeight="Bold"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    TextTrimming="CharacterEllipsis" />
+                            </Button>
                             <Button
                                 x:Name="FollowAwayTeamButton"
                                 Background="Transparent"
@@ -314,6 +333,71 @@
                         ItemsSource="{x:Bind Matches}"
                         ItemTemplate="{StaticResource MatchCardTemplate}"
                         Padding="10,0,10,6" />
+                </Expander.Content>
+            </Expander>
+        </DataTemplate>
+
+        <!-- Multi-Day Following Day Accordion Card Template -->
+        <DataTemplate x:Key="FollowingDayAccordionTemplate" x:DataType="vm:FollowingDayGroupViewModel">
+            <Expander
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                Margin="0,0,0,10">
+                <Expander.Header>
+                    <Grid ColumnSpacing="12" HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Day Title & Indicator -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock
+                                Text="📅"
+                                FontSize="14"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                Text="{x:Bind HeaderTitle, Mode=OneWay}"
+                                FontSize="14"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- Match Count Badge -->
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <Border
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="8,2"
+                                VerticalAlignment="Center">
+                                <TextBlock
+                                    Text="{x:Bind MatchCountBadge, Mode=OneWay}"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <StackPanel Spacing="8" Padding="10,8,10,6">
+                        <ItemsControl
+                            ItemsSource="{x:Bind CompetitionGroups}"
+                            ItemTemplate="{StaticResource CompetitionAccordionTemplate}" />
+                        <TextBlock
+                            Text="No followed matches on this date"
+                            FontSize="12"
+                            FontStyle="Italic"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            HorizontalAlignment="Center"
+                            Margin="0,6,0,6"
+                            Visibility="{x:Bind EmptyDayVisibility, Mode=OneWay}" />
+                    </StackPanel>
                 </Expander.Content>
             </Expander>
         </DataTemplate>
@@ -503,6 +587,7 @@
                         <ScrollViewer
                             x:Name="CalendarScrollViewer"
                             Grid.Column="0"
+                            Visibility="{x:Bind ViewModel.IsCalendarStripVisible, Mode=OneWay}"
                             HorizontalAlignment="Center"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Disabled"
@@ -551,12 +636,23 @@
                         <CalendarDatePicker
                             x:Name="MatchCalendarDatePicker"
                             Grid.Column="1"
+                            Visibility="{x:Bind ViewModel.IsDatePickerVisible, Mode=OneWay}"
                             VerticalAlignment="Center"
                             Date="{x:Bind ViewModel.SelectedCalendarDateOffset, Mode=TwoWay}"
                             DateFormat="{}{month.abbreviated} {day.integer}"
                             PlaceholderText="📅 Jump to date"
                             CornerRadius="8"
-                            ToolTipService.ToolTip="Select any past or future date" />
+                            ToolTipService.ToolTip="Select any past or future date">
+                            <CalendarDatePicker.Resources>
+                                <SolidColorBrush x:Key="CalendarDatePickerBorderBrushFocused" Color="{ThemeResource SystemAccentColor}" />
+                                <SolidColorBrush x:Key="CalendarDatePickerBorderBrushPointerOver" Color="{ThemeResource SystemAccentColor}" />
+                                <SolidColorBrush x:Key="CalendarViewSelectedDayBackground" Color="{ThemeResource SystemAccentColor}" />
+                                <SolidColorBrush x:Key="CalendarViewSelectedDayBackgroundFocused" Color="{ThemeResource SystemAccentColor}" />
+                                <SolidColorBrush x:Key="CalendarViewSelectedDayBackgroundPointerOver" Color="{ThemeResource SystemAccentColor}" />
+                                <SolidColorBrush x:Key="CalendarViewTodayBackground" Color="{ThemeResource SystemAccentColor}" />
+                                <SolidColorBrush x:Key="CalendarViewDayItemSelectionIndicatorBackground" Color="{ThemeResource SystemAccentColor}" />
+                            </CalendarDatePicker.Resources>
+                        </CalendarDatePicker>
                     </Grid>
 
                     <!-- Match Cards List View -->
@@ -565,7 +661,15 @@
                             <!-- Expandable Competition Accordion Groups -->
                             <ItemsControl
                                 x:Name="CompetitionGroupsList"
+                                Visibility="{x:Bind ViewModel.StandardScheduleVisibility, Mode=OneWay}"
                                 ItemTemplate="{StaticResource CompetitionAccordionTemplate}" />
+
+                            <!-- Multi-Day Following Accordion Groups (Following Tab) -->
+                            <ItemsControl
+                                x:Name="FollowingDayGroupsList"
+                                ItemsSource="{x:Bind ViewModel.FollowingDayGroups, Mode=OneWay}"
+                                Visibility="{x:Bind ViewModel.FollowingScheduleVisibility, Mode=OneWay}"
+                                ItemTemplate="{StaticResource FollowingDayAccordionTemplate}" />
 
                             <!-- Empty State Card -->
                             <Border
@@ -780,41 +884,67 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
                                 <Button
                                     x:Name="LeagueTableTabButton"
                                     Grid.Column="0"
-                                    Content="📊 League Table"
+                                    Content="📊 Table"
                                     HorizontalAlignment="Stretch"
                                     Click="OnLeagueTableTabClicked"
-                                    Padding="10,4"
+                                    Padding="6,4"
                                     CornerRadius="6"
-                                    FontSize="12"
+                                    FontSize="11"
                                     FontWeight="SemiBold"
                                     Style="{ThemeResource AccentButtonStyle}" />
 
                                 <Button
-                                    x:Name="TopScorersTabButton"
+                                    x:Name="FixturesTabButton"
                                     Grid.Column="1"
-                                    Content="🥅 Top Scorers"
+                                    Content="📅 Fixtures"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnFixturesTabClicked"
+                                    Padding="6,4"
+                                    CornerRadius="6"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Style="{ThemeResource DefaultButtonStyle}" />
+
+                                <Button
+                                    x:Name="KnockoutBracketTabButton"
+                                    Grid.Column="2"
+                                    Content="🏆 Brackets"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnKnockoutBracketTabClicked"
+                                    Padding="6,4"
+                                    CornerRadius="6"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Style="{ThemeResource DefaultButtonStyle}" />
+
+                                <Button
+                                    x:Name="TopScorersTabButton"
+                                    Grid.Column="3"
+                                    Content="🥅 Scorers"
                                     HorizontalAlignment="Stretch"
                                     Click="OnTopScorersTabClicked"
-                                    Padding="10,4"
+                                    Padding="6,4"
                                     CornerRadius="6"
-                                    FontSize="12"
+                                    FontSize="11"
                                     FontWeight="SemiBold"
                                     Style="{ThemeResource DefaultButtonStyle}" />
 
                                 <Button
                                     x:Name="TopAssistsTabButton"
-                                    Grid.Column="2"
-                                    Content="🎯 Top Assists"
+                                    Grid.Column="4"
+                                    Content="🎯 Assists"
                                     HorizontalAlignment="Stretch"
                                     Click="OnTopAssistsTabClicked"
-                                    Padding="10,4"
+                                    Padding="6,4"
                                     CornerRadius="6"
-                                    FontSize="12"
+                                    FontSize="11"
                                     FontWeight="SemiBold"
                                     Style="{ThemeResource DefaultButtonStyle}" />
                             </Grid>
@@ -926,28 +1056,37 @@
                                                             HorizontalAlignment="Center"
                                                             VerticalAlignment="Center" />
 
-                                                        <!-- Team Logo + Name + Badges -->
-                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                            <Border
-                                                                Width="18"
-                                                                Height="18"
-                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
-                                                                VerticalAlignment="Center">
-                                                                <Image Source="{x:Bind TeamLogoSource, Mode=OneWay}" Width="18" Height="18" Stretch="Uniform" />
-                                                            </Border>
-                                                            <TextBlock
-                                                                Text="{x:Bind DisplayName}"
-                                                                FontSize="12"
-                                                                FontWeight="SemiBold"
-                                                                TextTrimming="CharacterEllipsis"
-                                                                VerticalAlignment="Center" />
-                                                            <!-- Followed Team Star -->
-                                                            <TextBlock
-                                                                Text="⭐"
-                                                                FontSize="10"
-                                                                Visibility="{x:Bind FollowedStarVisibility, Mode=OneWay}"
-                                                                VerticalAlignment="Center" />
-                                                        </StackPanel>
+                                                        <!-- Team Logo + Name + Badges (Clickable to open Team Hub) -->
+                                                        <Button
+                                                            Grid.Column="1"
+                                                            Click="OnStandingTeamClicked"
+                                                            Tag="{x:Bind}"
+                                                            Style="{ThemeResource SubtleButtonStyle}"
+                                                            Padding="4,2"
+                                                            HorizontalAlignment="Left"
+                                                            VerticalAlignment="Center">
+                                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                                <Border
+                                                                    Width="18"
+                                                                    Height="18"
+                                                                    Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                                    VerticalAlignment="Center">
+                                                                    <Image Source="{x:Bind TeamLogoSource, Mode=OneWay}" Width="18" Height="18" Stretch="Uniform" />
+                                                                </Border>
+                                                                <TextBlock
+                                                                    Text="{x:Bind DisplayName}"
+                                                                    FontSize="12"
+                                                                    FontWeight="SemiBold"
+                                                                    TextTrimming="CharacterEllipsis"
+                                                                    VerticalAlignment="Center" />
+                                                                <!-- Followed Team Star -->
+                                                                <TextBlock
+                                                                    Text="⭐"
+                                                                    FontSize="10"
+                                                                    Visibility="{x:Bind FollowedStarVisibility, Mode=OneWay}"
+                                                                    VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </Button>
 
                                                         <!-- P, W, D, L -->
                                                         <TextBlock Grid.Column="2" Text="{x:Bind Played}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -995,7 +1134,212 @@
                                 </ScrollViewer>
                             </Grid>
 
-                            <!-- SUB-TAB 1: TOP SCORERS -->
+                            <!-- SUB-TAB 1: FIXTURES -->
+                            <Grid
+                                x:Name="FixturesContainer"
+                                Visibility="{x:Bind ViewModel.HubFixturesSubTabVisibility, Mode=OneWay}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Spacing="6" Margin="0,0,0,10">
+                                        <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentFixtures, Mode=OneWay}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:CompetitionFixtureViewModel">
+                                                    <Border
+                                                        HorizontalAlignment="Stretch"
+                                                        Background="{x:Bind RowBackgroundBrush}"
+                                                        BorderBrush="{x:Bind RowBorderBrush}"
+                                                        BorderThickness="{x:Bind RowBorderThickness}"
+                                                        Padding="8,6"
+                                                        Margin="0,0,0,3"
+                                                        CornerRadius="6"
+                                                        Tag="{x:Bind}"
+                                                        Tapped="OnFixtureCardTapped">
+                                                        <Grid ColumnSpacing="8">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="65" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <Border
+                                                                Grid.Column="0"
+                                                                Background="#1E293B"
+                                                                BorderBrush="#334155"
+                                                                BorderThickness="1"
+                                                                CornerRadius="4"
+                                                                Padding="4,2"
+                                                                VerticalAlignment="Center">
+                                                                <TextBlock
+                                                                    Text="{x:Bind RoundName}"
+                                                                    FontSize="9"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="#94A3B8"
+                                                                    TextTrimming="CharacterEllipsis"
+                                                                    HorizontalAlignment="Center" />
+                                                            </Border>
+
+                                                            <Button
+                                                                Grid.Column="1"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Padding="0"
+                                                                Tag="{x:Bind}"
+                                                                Click="OnFixtureHomeTeamClicked"
+                                                                HorizontalAlignment="Right"
+                                                                VerticalAlignment="Center"
+                                                                ToolTipService.ToolTip="Open Team Hub">
+                                                                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                                    <TextBlock Text="{x:Bind HomeTeamName}" FontSize="11" FontWeight="SemiBold" Foreground="{x:Bind HomeTeamForegroundBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                    <Border Width="16" Height="16" VerticalAlignment="Center">
+                                                                        <Image Source="{x:Bind HomeTeamLogo}" Width="16" Height="16" Stretch="Uniform" />
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </Button>
+
+                                                            <Button
+                                                                Grid.Column="2"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Padding="0"
+                                                                Tag="{x:Bind}"
+                                                                Click="OnFixtureItemClicked"
+                                                                VerticalAlignment="Center"
+                                                                ToolTipService.ToolTip="Open Match Center">
+                                                                <Border
+                                                                    Background="#0F172A"
+                                                                    BorderBrush="#1E293B"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="4"
+                                                                    Padding="6,2"
+                                                                    MinWidth="55"
+                                                                    VerticalAlignment="Center">
+                                                                    <TextBlock Text="{x:Bind ScoreOrTimeDisplay}" FontSize="10" FontWeight="Bold" Foreground="{x:Bind StatusBrush}" HorizontalAlignment="Center" />
+                                                                </Border>
+                                                            </Button>
+
+                                                            <Button
+                                                                Grid.Column="3"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Padding="0"
+                                                                Tag="{x:Bind}"
+                                                                Click="OnFixtureAwayTeamClicked"
+                                                                HorizontalAlignment="Left"
+                                                                VerticalAlignment="Center"
+                                                                ToolTipService.ToolTip="Open Team Hub">
+                                                                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                                    <Border Width="16" Height="16" VerticalAlignment="Center">
+                                                                        <Image Source="{x:Bind AwayTeamLogo}" Width="16" Height="16" Stretch="Uniform" />
+                                                                    </Border>
+                                                                    <TextBlock Text="{x:Bind AwayTeamName}" FontSize="11" FontWeight="SemiBold" Foreground="{x:Bind AwayTeamForegroundBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                </StackPanel>
+                                                            </Button>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <Border
+                                            Visibility="{x:Bind ViewModel.HubNoFixturesVisibility, Mode=OneWay}"
+                                            Background="#0F172A"
+                                            CornerRadius="6"
+                                            Padding="20"
+                                            HorizontalAlignment="Stretch">
+                                            <StackPanel Spacing="6" HorizontalAlignment="Center">
+                                                <TextBlock Text="📅" FontSize="22" HorizontalAlignment="Center" />
+                                                <TextBlock Text="No Fixtures Available" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" />
+                                                <TextBlock Text="No upcoming or recent fixtures found for this competition." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+
+                            <!-- SUB-TAB 2: KNOCKOUT BRACKET -->
+                            <Grid
+                                x:Name="KnockoutBracketContainer"
+                                Visibility="{x:Bind ViewModel.HubKnockoutBracketSubTabVisibility, Mode=OneWay}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Spacing="10" Margin="0,0,0,10">
+                                        <ItemsControl ItemsSource="{x:Bind ViewModel.CurrentKnockoutStages, Mode=OneWay}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="dto:KnockoutStageDto">
+                                                    <StackPanel Spacing="6" Margin="0,0,0,10">
+                                                        <TextBlock
+                                                            Text="{x:Bind StageName}"
+                                                            FontSize="11"
+                                                            FontWeight="Bold"
+                                                            Foreground="#38BDF8"
+                                                            CharacterSpacing="40" />
+
+                                                        <ItemsControl ItemsSource="{x:Bind Ties}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="dto:KnockoutTieDto">
+                                                                    <Border
+                                                                        Background="#0F172A"
+                                                                        BorderBrush="#1E293B"
+                                                                        BorderThickness="1"
+                                                                        CornerRadius="6"
+                                                                        Padding="8,5"
+                                                                        Margin="0,0,0,4">
+                                                                        <Grid ColumnSpacing="8">
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                                <ColumnDefinition Width="*" />
+                                                                            </Grid.ColumnDefinitions>
+
+                                                                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                                                <TextBlock Text="{x:Bind HomeTeamName}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                                <Border Width="16" Height="16" VerticalAlignment="Center">
+                                                                                    <Image Source="{x:Bind HomeTeamLogo}" Width="16" Height="16" Stretch="Uniform" />
+                                                                                </Border>
+                                                                            </StackPanel>
+
+                                                                            <Border
+                                                                                Grid.Column="1"
+                                                                                Background="#1E293B"
+                                                                                CornerRadius="4"
+                                                                                Padding="8,2"
+                                                                                MinWidth="48"
+                                                                                VerticalAlignment="Center">
+                                                                                <TextBlock Text="{x:Bind ScoreOrStatus}" FontSize="10" FontWeight="Bold" Foreground="#F8FAFC" HorizontalAlignment="Center" />
+                                                                            </Border>
+
+                                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                                                <Border Width="16" Height="16" VerticalAlignment="Center">
+                                                                                    <Image Source="{x:Bind AwayTeamLogo}" Width="16" Height="16" Stretch="Uniform" />
+                                                                                </Border>
+                                                                                <TextBlock Text="{x:Bind AwayTeamName}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                            </StackPanel>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <Border
+                                            Visibility="{x:Bind ViewModel.HubNoKnockoutVisibility, Mode=OneWay}"
+                                            Background="#0F172A"
+                                            CornerRadius="6"
+                                            Padding="20"
+                                            HorizontalAlignment="Stretch">
+                                            <StackPanel Spacing="6" HorizontalAlignment="Center">
+                                                <TextBlock Text="🏆" FontSize="22" HorizontalAlignment="Center" />
+                                                <TextBlock Text="No Knockout Bracket" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" />
+                                                <TextBlock Text="This competition does not feature a knockout tournament bracket (standard round-robin league format)." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+
+                            <!-- SUB-TAB 3: TOP SCORERS -->
                             <Grid
                                 x:Name="TopScorersContainer"
                                 Visibility="{x:Bind ViewModel.HubTopScorersSubTabVisibility, Mode=OneWay}">
@@ -1258,30 +1602,46 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
-                                                    <Image
-                                                        Width="24"
-                                                        Height="24"
-                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
-                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
-                                                        Stretch="Uniform" />
-                                                    <TextBlock
-                                                        Text="🛡️"
-                                                        FontSize="14"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
-                                                </Grid>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock
-                                                        Text="{x:Bind Name}"
-                                                        FontWeight="SemiBold"
-                                                        FontSize="13" />
-                                                    <TextBlock
-                                                        Text="{x:Bind Country}"
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="0"
+                                                    Grid.ColumnSpan="2"
+                                                    Click="OnSearchTeamClicked"
+                                                    Tag="{x:Bind}"
+                                                    Style="{ThemeResource SubtleButtonStyle}"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Padding="4,2">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="24" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                            <Image
+                                                                Width="24"
+                                                                Height="24"
+                                                                Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                                Stretch="Uniform" />
+                                                            <TextBlock
+                                                                Text="🛡️"
+                                                                FontSize="14"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center"
+                                                                Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind Name}"
+                                                                FontWeight="SemiBold"
+                                                                FontSize="13" />
+                                                            <TextBlock
+                                                                Text="{x:Bind Country}"
+                                                                FontSize="11"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Button>
                                                 <Button
                                                     Grid.Column="2"
                                                     Content="{x:Bind FollowButtonText, Mode=OneWay}"
@@ -1311,30 +1671,46 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
-                                                    <Image
-                                                        Width="24"
-                                                        Height="24"
-                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
-                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
-                                                        Stretch="Uniform" />
-                                                    <TextBlock
-                                                        Text="🏆"
-                                                        FontSize="14"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
-                                                </Grid>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock
-                                                        Text="{x:Bind Name}"
-                                                        FontWeight="SemiBold"
-                                                        FontSize="13" />
-                                                    <TextBlock
-                                                        Text="{x:Bind Country}"
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="0"
+                                                    Grid.ColumnSpan="2"
+                                                    Click="OnSearchCompetitionClicked"
+                                                    Tag="{x:Bind}"
+                                                    Style="{ThemeResource SubtleButtonStyle}"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Padding="4,2">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="24" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                            <Image
+                                                                Width="24"
+                                                                Height="24"
+                                                                Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                                Stretch="Uniform" />
+                                                            <TextBlock
+                                                                Text="🏆"
+                                                                FontSize="14"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center"
+                                                                Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind Name}"
+                                                                FontWeight="SemiBold"
+                                                                FontSize="13" />
+                                                            <TextBlock
+                                                                Text="{x:Bind Country}"
+                                                                FontSize="11"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Button>
                                                 <Button
                                                     Grid.Column="2"
                                                     Content="{x:Bind FollowButtonText, Mode=OneWay}"
@@ -1388,33 +1764,59 @@
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
-                                                    <Image
-                                                        Width="24"
-                                                        Height="24"
-                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
-                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
-                                                        Stretch="Uniform" />
-                                                    <TextBlock
-                                                        Text="🛡️"
-                                                        FontSize="14"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
-                                                </Grid>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock
-                                                        Text="{x:Bind Name}"
-                                                        FontWeight="SemiBold"
-                                                        FontSize="13" />
-                                                    <TextBlock
-                                                        Text="{x:Bind Country}"
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="0"
+                                                    Grid.ColumnSpan="2"
+                                                    Click="OnFollowedTeamClicked"
+                                                    Tag="{x:Bind}"
+                                                    Style="{ThemeResource SubtleButtonStyle}"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Padding="4,2">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="24" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                            <Image
+                                                                Width="24"
+                                                                Height="24"
+                                                                Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                                Stretch="Uniform" />
+                                                            <TextBlock
+                                                                Text="🛡️"
+                                                                FontSize="14"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center"
+                                                                Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind Name}"
+                                                                FontWeight="SemiBold"
+                                                                FontSize="13" />
+                                                            <TextBlock
+                                                                Text="{x:Bind Country}"
+                                                                FontSize="11"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Button>
                                                 <Button
                                                     Grid.Column="2"
+                                                    Content="🔔"
+                                                    ToolTipService.ToolTip="Configure Alert Profile"
+                                                    Tag="{x:Bind}"
+                                                    Click="OnEntityAlertsClicked"
+                                                    Style="{ThemeResource SubtleButtonStyle}"
+                                                    Padding="6,4"
+                                                    Margin="2,0" />
+                                                <Button
+                                                    Grid.Column="3"
                                                     Content="Remove"
                                                     Tag="{x:Bind Id}"
                                                     Click="OnRemoveTeamClicked"
@@ -1465,33 +1867,59 @@
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
-                                                    <Image
-                                                        Width="24"
-                                                        Height="24"
-                                                        Source="{x:Bind LogoSource, Mode=OneWay}"
-                                                        Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
-                                                        Stretch="Uniform" />
-                                                    <TextBlock
-                                                        Text="🏆"
-                                                        FontSize="14"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
-                                                </Grid>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock
-                                                        Text="{x:Bind Name}"
-                                                        FontWeight="SemiBold"
-                                                        FontSize="13" />
-                                                    <TextBlock
-                                                        Text="{x:Bind Country}"
-                                                        FontSize="11"
-                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="0"
+                                                    Grid.ColumnSpan="2"
+                                                    Click="OnFollowedCompetitionClicked"
+                                                    Tag="{x:Bind}"
+                                                    Style="{ThemeResource SubtleButtonStyle}"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Padding="4,2">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="24" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
+                                                            <Image
+                                                                Width="24"
+                                                                Height="24"
+                                                                Source="{x:Bind LogoSource, Mode=OneWay}"
+                                                                Visibility="{x:Bind LogoVisibility, Mode=OneWay}"
+                                                                Stretch="Uniform" />
+                                                            <TextBlock
+                                                                Text="🏆"
+                                                                FontSize="14"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center"
+                                                                Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <TextBlock
+                                                                Text="{x:Bind Name}"
+                                                                FontWeight="SemiBold"
+                                                                FontSize="13" />
+                                                            <TextBlock
+                                                                Text="{x:Bind Country}"
+                                                                FontSize="11"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Button>
                                                 <Button
                                                     Grid.Column="2"
+                                                    Content="🔔"
+                                                    ToolTipService.ToolTip="Configure Alert Profile"
+                                                    Tag="{x:Bind}"
+                                                    Click="OnEntityAlertsClicked"
+                                                    Style="{ThemeResource SubtleButtonStyle}"
+                                                    Padding="6,4"
+                                                    Margin="2,0" />
+                                                <Button
+                                                    Grid.Column="3"
                                                     Content="Remove"
                                                     Tag="{x:Bind Id}"
                                                     Click="OnRemoveCompetitionClicked"

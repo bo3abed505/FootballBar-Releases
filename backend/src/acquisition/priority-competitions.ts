@@ -30,7 +30,8 @@ export const FOTMOB_COMPETITION_MAP: Record<number, number> = {
   2: 42,        // UEFA Champions League
   3: 73,        // UEFA Europa League
   848: 10216,   // UEFA Conference League
-  233: 525,     // Egyptian Premier League
+  233: 519,     // Egyptian Premier League
+  525: 525,     // AFC Champions League Elite
   1: 77,        // FIFA World Cup
   4: 50,        // European Championship
   5: 9806,      // UEFA Nations League
@@ -266,9 +267,12 @@ export const COMPETITION_SLUG_TO_FOTMOB_ID: Record<string, number> = {
   'copa_america': 44,
 
   // Middle East & Africa
-  'ft_comp_egy_premier_league': 525,
-  'ft_comp_egyptian_premier_league': 525,
-  'egyptian_premier_league': 525,
+  'ft_comp_egy_premier_league': 519,
+  'ft_comp_egyptian_premier_league': 519,
+  'egyptian_premier_league': 519,
+  'ft_comp_afc_champions_league': 525,
+  'afc_champions_league': 525,
+  'afc-champions-league': 525,
   'ft_comp_ksa_saudi_pro_league': 536,
   'ft_comp_saudi_pro_league': 536,
   'saudi_pro_league': 536,

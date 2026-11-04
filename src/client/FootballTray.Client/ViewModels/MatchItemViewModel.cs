@@ -44,6 +44,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
     public string AwayTeamShortName { get; init; } = string.Empty;
     public string? HomeTeamLogoUrl { get; init; }
     public string? AwayTeamLogoUrl { get; init; }
+    public TrayMatchDto? RawDto { get; private init; }
 
     public int? HomeScore
     {
@@ -446,6 +447,7 @@ public sealed class MatchItemViewModel : INotifyPropertyChanged
 
         var vm = new MatchItemViewModel
         {
+            RawDto = match,
             Id = match.Id,
             HomeTeamId = match.HomeTeam?.Id ?? string.Empty,
             AwayTeamId = match.AwayTeam?.Id ?? string.Empty,

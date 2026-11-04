@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace FootballTray.Core.Dto;
@@ -26,6 +27,9 @@ public class ApiResponseEnvelope<T>
 
     [JsonPropertyName("dataAgeSeconds")]
     public int DataAgeSeconds { get; set; }
+
+    [JsonPropertyName("etag")]
+    public string? ETag { get; set; }
 
     [JsonPropertyName("data")]
     public T? Data { get; set; }
@@ -65,6 +69,9 @@ public class TrayDataDto
 
     [JsonPropertyName("isNotModified")]
     public bool IsNotModified { get; set; }
+
+    [JsonPropertyName("etag")]
+    public string? ETag { get; set; }
 
     [JsonPropertyName("syncState")]
     public string? SyncState { get; set; }
@@ -181,6 +188,9 @@ public class TeamSummaryDto
 
     [JsonPropertyName("logoUrl")]
     public string? LogoUrl { get; set; }
+
+    [JsonPropertyName("redCards")]
+    public int RedCards { get; set; }
 }
 
 public class CompetitionSummaryDto
@@ -433,6 +443,12 @@ public class MatchDetailDto
     [JsonPropertyName("topAssists")]
     public List<PlayerStatLeaderDto>? TopAssists { get; set; }
 
+    [JsonPropertyName("fixtures")]
+    public List<CompetitionFixtureDto>? Fixtures { get; set; }
+
+    [JsonPropertyName("knockoutStages")]
+    public List<KnockoutStageDto>? KnockoutStages { get; set; }
+
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }
 }
@@ -581,6 +597,12 @@ public class H2HMeetingDto
 
     [JsonPropertyName("awayTeamName")]
     public string AwayTeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("homeTeamId")]
+    public string? HomeTeamId { get; set; }
+
+    [JsonPropertyName("awayTeamId")]
+    public string? AwayTeamId { get; set; }
 
     [JsonPropertyName("homeScore")]
     public int HomeScore { get; set; }
@@ -1072,6 +1094,308 @@ public class CompetitionHubDto
 
     [JsonPropertyName("topAssists")]
     public List<PlayerStatLeaderDto> TopAssists { get; set; } = new();
+
+    [JsonPropertyName("fixtures")]
+    public List<CompetitionFixtureDto> Fixtures { get; set; } = new();
+
+    [JsonPropertyName("knockoutStages")]
+    public List<KnockoutStageDto> KnockoutStages { get; set; } = new();
 }
+
+public class CompetitionFixtureDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("roundName")]
+    public string RoundName { get; set; } = string.Empty;
+
+    [JsonPropertyName("competitionId")]
+    public string? CompetitionId { get; set; }
+
+    [JsonPropertyName("competitionName")]
+    public string? CompetitionName { get; set; }
+
+    [JsonPropertyName("competitionLogo")]
+    public string? CompetitionLogo { get; set; }
+
+    [JsonPropertyName("kickoffUtc")]
+    public string KickoffUtc { get; set; } = string.Empty;
+
+    [JsonPropertyName("homeTeamId")]
+    public string HomeTeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("homeTeamName")]
+    public string HomeTeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("homeTeamShortName")]
+    public string? HomeTeamShortName { get; set; }
+
+    [JsonPropertyName("homeTeamLogo")]
+    public string? HomeTeamLogo { get; set; }
+
+    [JsonPropertyName("awayTeamId")]
+    public string AwayTeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("awayTeamName")]
+    public string AwayTeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("awayTeamShortName")]
+    public string? AwayTeamShortName { get; set; }
+
+    [JsonPropertyName("awayTeamLogo")]
+    public string? AwayTeamLogo { get; set; }
+
+    [JsonPropertyName("homeScore")]
+    public int? HomeScore { get; set; }
+
+    [JsonPropertyName("awayScore")]
+    public int? AwayScore { get; set; }
+
+    [JsonPropertyName("statusText")]
+    public string StatusText { get; set; } = string.Empty;
+
+    [JsonPropertyName("isFinished")]
+    public bool IsFinished { get; set; }
+
+    [JsonPropertyName("isStarted")]
+    public bool IsStarted { get; set; }
+
+    [JsonPropertyName("isLive")]
+    public bool IsLive { get; set; }
+
+    private string? _customScoreOrTime;
+
+    [JsonIgnore]
+    public string? CustomScoreOrTime
+    {
+        get => _customScoreOrTime;
+        set => _customScoreOrTime = value;
+    }
+
+    [JsonIgnore]
+    public string ScoreOrTime
+    {
+        get => ScoreOrTimeDisplay;
+        set => _customScoreOrTime = value;
+    }
+
+    [JsonIgnore]
+    public string ScoreOrTimeDisplay
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_customScoreOrTime)) return _customScoreOrTime;
+            if (IsFinished || IsLive)
+            {
+                if (HomeScore.HasValue && AwayScore.HasValue) return $"{HomeScore.Value} - {AwayScore.Value}";
+                if (!string.IsNullOrWhiteSpace(StatusText)) return StatusText;
+            }
+            if (DateTimeOffset.TryParse(KickoffUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dt))
+            {
+                return dt.ToLocalTime().ToString("MMM d, HH:mm");
+            }
+            return !string.IsNullOrWhiteSpace(StatusText) ? StatusText : "Upcoming";
+        }
+        set => _customScoreOrTime = value;
+    }
+}
+
+public class KnockoutTieDto
+{
+    [JsonPropertyName("stageName")]
+    public string StageName { get; set; } = string.Empty;
+
+    [JsonPropertyName("homeTeamId")]
+    public string? HomeTeamId { get; set; }
+
+    [JsonPropertyName("homeTeamName")]
+    public string HomeTeamName { get; set; } = "TBD";
+
+    [JsonPropertyName("homeTeamLogo")]
+    public string? HomeTeamLogo { get; set; }
+
+    [JsonPropertyName("awayTeamId")]
+    public string? AwayTeamId { get; set; }
+
+    [JsonPropertyName("awayTeamName")]
+    public string AwayTeamName { get; set; } = "TBD";
+
+    [JsonPropertyName("awayTeamLogo")]
+    public string? AwayTeamLogo { get; set; }
+
+    [JsonPropertyName("leg1Score")]
+    public string? Leg1Score { get; set; }
+
+    [JsonPropertyName("leg2Score")]
+    public string? Leg2Score { get; set; }
+
+    [JsonPropertyName("aggregateScore")]
+    public string? AggregateScore { get; set; }
+
+    [JsonPropertyName("penaltyScore")]
+    public string? PenaltyScore { get; set; }
+
+    [JsonPropertyName("winnerTeamName")]
+    public string? WinnerTeamName { get; set; }
+
+    [JsonPropertyName("scoreOrStatus")]
+    public string ScoreOrStatus { get; set; } = "vs";
+
+    [JsonPropertyName("isFinished")]
+    public bool IsFinished { get; set; }
+}
+
+public class KnockoutStageDto
+{
+    [JsonPropertyName("stageName")]
+    public string StageName { get; set; } = string.Empty;
+
+    [JsonPropertyName("participantCount")]
+    public int ParticipantCount { get; set; }
+
+    [JsonPropertyName("ties")]
+    public List<KnockoutTieDto> Ties { get; set; } = new();
+}
+
+public class TeamSquadPlayerDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("positionGroup")]
+    public string PositionGroup { get; set; } = string.Empty;
+
+    [JsonPropertyName("shirtNumber")]
+    public int? ShirtNumber { get; set; }
+
+    [JsonPropertyName("countryCode")]
+    public string? CountryCode { get; set; }
+
+    [JsonPropertyName("rating")]
+    public double? Rating { get; set; }
+
+    [JsonPropertyName("goals")]
+    public int? Goals { get; set; }
+
+    [JsonPropertyName("assists")]
+    public int? Assists { get; set; }
+
+    [JsonPropertyName("yellowCards")]
+    public int? YellowCards { get; set; }
+
+    [JsonPropertyName("redCards")]
+    public int? RedCards { get; set; }
+
+    [JsonIgnore]
+    public string ShirtNumberDisplay => ShirtNumber.HasValue ? $"#{ShirtNumber.Value}" : "-";
+
+    [JsonIgnore]
+    public string RatingDisplay => Rating.HasValue ? Rating.Value.ToString("0.0", CultureInfo.InvariantCulture) : "-";
+}
+
+public class TeamHubDto
+{
+    [JsonPropertyName("teamId")]
+    public string TeamId { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamName")]
+    public string TeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("shortName")]
+    public string ShortName { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamLogo")]
+    public string TeamLogo { get; set; } = string.Empty;
+
+    [JsonPropertyName("countryCode")]
+    public string CountryCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("primaryLeagueId")]
+    public string PrimaryLeagueId { get; set; } = string.Empty;
+
+    [JsonPropertyName("primaryLeagueName")]
+    public string PrimaryLeagueName { get; set; } = string.Empty;
+
+    [JsonPropertyName("primaryLeagueLogo")]
+    public string PrimaryLeagueLogo { get; set; } = string.Empty;
+
+    [JsonPropertyName("stadiumName")]
+    public string StadiumName { get; set; } = string.Empty;
+
+    [JsonPropertyName("coachName")]
+    public string CoachName { get; set; } = string.Empty;
+
+    [JsonPropertyName("recentForm")]
+    public List<string> RecentForm { get; set; } = new();
+
+    [JsonPropertyName("upcomingFixtures")]
+    public List<CompetitionFixtureDto> UpcomingFixtures { get; set; } = new();
+
+    [JsonPropertyName("recentResults")]
+    public List<CompetitionFixtureDto> RecentResults { get; set; } = new();
+
+    [JsonPropertyName("squadPlayers")]
+    public List<TeamSquadPlayerDto> SquadPlayers { get; set; } = new();
+
+    [JsonPropertyName("standings")]
+    public List<StandingRowDto> Standings { get; set; } = new();
+}
+
+public sealed record EntityAlertProfileDto
+{
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "InheritGlobal"; // "InheritGlobal", "Custom", "Muted"
+
+    [JsonPropertyName("enableKickoffReminder")]
+    public bool EnableKickoffReminder { get; init; } = true;
+
+    [JsonPropertyName("enableGoals")]
+    public bool EnableGoals { get; init; } = true;
+
+    [JsonPropertyName("enableRedCards")]
+    public bool EnableRedCards { get; init; } = true;
+
+    [JsonPropertyName("enableKickoff")]
+    public bool EnableKickoff { get; init; } = true;
+
+    [JsonPropertyName("enableHalfTime")]
+    public bool EnableHalfTime { get; init; } = true;
+
+    [JsonPropertyName("enableFullTime")]
+    public bool EnableFullTime { get; init; } = true;
+
+    [JsonPropertyName("enablePostponed")]
+    public bool EnablePostponed { get; init; } = true;
+
+    [JsonPropertyName("enableCancelled")]
+    public bool EnableCancelled { get; init; } = true;
+
+    [JsonPropertyName("soundOverride")]
+    public string SoundOverride { get; init; } = "InheritGlobal"; // "InheritGlobal", "Stadium", "Mute", "WindowsDefault"
+
+    public bool IsTypeEnabled(string typeName)
+    {
+        if (string.Equals(Mode, "Muted", StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.Equals(Mode, "InheritGlobal", StringComparison.OrdinalIgnoreCase)) return true;
+
+        return (typeName ?? string.Empty).ToLowerInvariant() switch
+        {
+            "goal" => EnableGoals,
+            "redcard" or "red_card" => EnableRedCards,
+            "matchstarted" or "match_started" or "kickoff" => EnableKickoff,
+            "halftime" or "half_time" or "secondhalf" or "second_half" => EnableHalfTime,
+            "matchfinished" or "match_finished" or "fulltime" or "full_time" => EnableFullTime,
+            "matchpostponed" or "postponed" => EnablePostponed,
+            "matchcancelled" or "cancelled" => EnableCancelled,
+            "kickoffreminder" or "kickoff_reminder" => EnableKickoffReminder,
+            _ => true
+        };
+    }
+}
+
 
 

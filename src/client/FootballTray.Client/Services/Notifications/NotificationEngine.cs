@@ -147,6 +147,21 @@ public sealed class NotificationEngine
             _deduplicationStore.MarkNotified($"match:{match.Id}:score:{match.Score.Home}-{match.Score.Away}");
         }
 
+        if (match.HomeTeam != null && match.HomeTeam.RedCards > 0)
+        {
+            for (int r = 1; r <= match.HomeTeam.RedCards; r++)
+            {
+                _deduplicationStore.MarkNotified($"match:{match.Id}:redcard:home:{r}");
+            }
+        }
+        if (match.AwayTeam != null && match.AwayTeam.RedCards > 0)
+        {
+            for (int r = 1; r <= match.AwayTeam.RedCards; r++)
+            {
+                _deduplicationStore.MarkNotified($"match:{match.Id}:redcard:away:{r}");
+            }
+        }
+
         if (match.RecentEvents != null)
         {
             foreach (var ev in match.RecentEvents)
@@ -331,6 +346,27 @@ public sealed class NotificationEngine
                     continue;
                 }
 
+                string? scoringTeam = null;
+                if (!string.IsNullOrEmpty(ev.TeamId))
+                {
+                    if (string.Equals(ev.TeamId, curr.HomeTeam?.Id, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(ev.TeamId, curr.HomeTeam?.LegacyId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        scoringTeam = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home";
+                    }
+                    else if (string.Equals(ev.TeamId, curr.AwayTeam?.Id, StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(ev.TeamId, curr.AwayTeam?.LegacyId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        scoringTeam = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away";
+                    }
+                }
+                if (string.IsNullOrEmpty(scoringTeam))
+                {
+                    scoringTeam = currHome > prevHome
+                        ? (curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home")
+                        : (currAway > prevAway ? (curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away") : null);
+                }
+
                 candidates.Add(new NotificationCandidate
                 {
                     FixtureId = curr.Id,
@@ -352,7 +388,10 @@ public sealed class NotificationEngine
                     ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
                     ExtraMinute = ev.ExtraMinute > 0 ? ev.ExtraMinute : curr.ExtraMinute,
                     EventPlayerName = ev.PlayerName,
-                    EventDescription = ev.Description
+                    EventDescription = ev.Description,
+                    ScoringTeamName = scoringTeam,
+                    AssistPlayerName = ev.AssistPlayerName,
+                    EventDetail = ev.Detail
                 });
 
                 goalCandidateEmitted = true;
@@ -365,8 +404,8 @@ public sealed class NotificationEngine
             }
         }
 
-        // 2. Score increment fallback (detects goals only when RecentEvents collection is absent from payload)
-        if (prev != null && curr.Score != null && curr.RecentEvents == null)
+        // 2. Score increment fallback (detects goals when score increased and not already emitted via explicit event)
+        if (prev != null && curr.Score != null && !goalCandidateEmitted)
         {
             int prevHome = prev.Score?.Home ?? 0;
             int prevAway = prev.Score?.Away ?? 0;
@@ -376,8 +415,12 @@ public sealed class NotificationEngine
             if (currHome > prevHome || currAway > prevAway)
             {
                 string scoreKey = $"match:{curr.Id}:score:{currHome}-{currAway}";
-                if (!goalCandidateEmitted && !_deduplicationStore.IsAlreadyNotified(scoreKey))
+                if (!_deduplicationStore.IsAlreadyNotified(scoreKey))
                 {
+                    string scoringTeam = currHome > prevHome 
+                        ? (curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home")
+                        : (curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away");
+
                     candidates.Add(new NotificationCandidate
                     {
                         FixtureId = curr.Id,
@@ -398,9 +441,11 @@ public sealed class NotificationEngine
                         AwayScore = currAway,
                         ElapsedMinute = curr.ElapsedMinute,
                         ExtraMinute = curr.ExtraMinute,
-                        EventPlayerName = null, // Will be enriched on-demand if missing in NotificationService
-                        EventDescription = null
+                        EventPlayerName = null,
+                        EventDescription = $"Goal! {scoringTeam} scored ({currHome}-{currAway})",
+                        ScoringTeamName = scoringTeam
                     });
+                    _deduplicationStore.MarkNotified(scoreKey);
                 }
             }
         }
@@ -408,11 +453,6 @@ public sealed class NotificationEngine
 
     private void EvaluateCardEvents(TrayMatchDto? prev, TrayMatchDto curr, List<NotificationCandidate> candidates)
     {
-        if (curr.RecentEvents == null || curr.RecentEvents.Count == 0)
-        {
-            return;
-        }
-
         // Strictly suppress event-based notifications (goals, cards, penalties) if the incoming curr state
         // indicates the match is over (FT, FINISHED, etc.) AND prev was null (initial hydration).
         string currState = (curr.State ?? string.Empty).ToUpperInvariant();
@@ -421,51 +461,127 @@ public sealed class NotificationEngine
             return;
         }
 
-        var prevEventIds = prev?.RecentEvents != null
-            ? new HashSet<string>(prev.RecentEvents.Select(e => e.Id), StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool redCardEmitted = false;
 
-        foreach (var ev in curr.RecentEvents)
+        // 1. Evaluate explicit recent events if present in tray payload
+        if (curr.RecentEvents != null && curr.RecentEvents.Count > 0)
         {
-            if (!IsRedCardEvent(ev))
+            var prevEventIds = prev?.RecentEvents != null
+                ? new HashSet<string>(prev.RecentEvents.Select(e => e.Id), StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ev in curr.RecentEvents)
             {
-                continue;
+                if (!IsRedCardEvent(ev))
+                {
+                    continue;
+                }
+
+                if (prevEventIds.Contains(ev.Id))
+                {
+                    continue;
+                }
+
+                string key = $"match:{curr.Id}:card:{ev.Id}";
+                if (_deduplicationStore.IsAlreadyNotified(key))
+                {
+                    continue;
+                }
+
+                candidates.Add(new NotificationCandidate
+                {
+                    FixtureId = curr.Id,
+                    Type = NotificationType.RedCard,
+                    DeduplicationKey = key,
+                    EventUid = ev.Id,
+                    PreviousState = prev?.State,
+                    NewState = curr.State ?? "LIVE",
+                    HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
+                    AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
+                    CompetitionId = curr.Competition?.Id,
+                    CompetitionLegacyId = curr.Competition?.LegacyId,
+                    HomeTeamId = curr.HomeTeam?.Id,
+                    HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
+                    AwayTeamId = curr.AwayTeam?.Id,
+                    AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
+                    HomeScore = curr.Score?.Home ?? 0,
+                    AwayScore = curr.Score?.Away ?? 0,
+                    ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
+                    ExtraMinute = ev.ExtraMinute > 0 ? ev.ExtraMinute : curr.ExtraMinute,
+                    EventPlayerName = ev.PlayerName,
+                    EventDescription = ev.Description ?? "Red Card"
+                });
+                redCardEmitted = true;
+            }
+        }
+
+        // 2. Red card count delta fallback (if red cards increased on Home or Away)
+        if (prev != null && !redCardEmitted)
+        {
+            int prevHomeRed = prev.HomeTeam?.RedCards ?? 0;
+            int currHomeRed = curr.HomeTeam?.RedCards ?? 0;
+            int prevAwayRed = prev.AwayTeam?.RedCards ?? 0;
+            int currAwayRed = curr.AwayTeam?.RedCards ?? 0;
+
+            if (currHomeRed > prevHomeRed)
+            {
+                string cardKey = $"match:{curr.Id}:redcard:home:{currHomeRed}";
+                if (!_deduplicationStore.IsAlreadyNotified(cardKey))
+                {
+                    string teamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home";
+                    candidates.Add(new NotificationCandidate
+                    {
+                        FixtureId = curr.Id,
+                        Type = NotificationType.RedCard,
+                        DeduplicationKey = cardKey,
+                        EventUid = null,
+                        PreviousState = prev.State,
+                        NewState = curr.State ?? "LIVE",
+                        HomeTeamName = teamName,
+                        AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
+                        CompetitionId = curr.Competition?.Id,
+                        HomeTeamId = curr.HomeTeam?.Id,
+                        AwayTeamId = curr.AwayTeam?.Id,
+                        HomeScore = curr.Score?.Home ?? 0,
+                        AwayScore = curr.Score?.Away ?? 0,
+                        ElapsedMinute = curr.ElapsedMinute,
+                        ExtraMinute = curr.ExtraMinute,
+                        EventPlayerName = teamName,
+                        EventDescription = $"Red Card for {teamName}!"
+                    });
+                    _deduplicationStore.MarkNotified(cardKey);
+                }
             }
 
-            if (prevEventIds.Contains(ev.Id))
+            if (currAwayRed > prevAwayRed)
             {
-                continue;
+                string cardKey = $"match:{curr.Id}:redcard:away:{currAwayRed}";
+                if (!_deduplicationStore.IsAlreadyNotified(cardKey))
+                {
+                    string teamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away";
+                    candidates.Add(new NotificationCandidate
+                    {
+                        FixtureId = curr.Id,
+                        Type = NotificationType.RedCard,
+                        DeduplicationKey = cardKey,
+                        EventUid = null,
+                        PreviousState = prev.State,
+                        NewState = curr.State ?? "LIVE",
+                        HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
+                        AwayTeamName = teamName,
+                        CompetitionId = curr.Competition?.Id,
+                        HomeTeamId = curr.HomeTeam?.Id,
+                        AwayTeamId = curr.AwayTeam?.Id,
+                        HomeScore = curr.Score?.Home ?? 0,
+                        AwayScore = curr.Score?.Away ?? 0,
+                        ElapsedMinute = curr.ElapsedMinute,
+                        ExtraMinute = curr.ExtraMinute,
+                        EventPlayerName = teamName,
+                        EventDescription = $"Red Card for {teamName}!"
+                    });
+                    _deduplicationStore.MarkNotified(cardKey);
+                }
             }
-
-            string key = $"match:{curr.Id}:card:{ev.Id}";
-            if (_deduplicationStore.IsAlreadyNotified(key))
-            {
-                continue;
-            }
-
-            candidates.Add(new NotificationCandidate
-            {
-                FixtureId = curr.Id,
-                Type = NotificationType.RedCard,
-                DeduplicationKey = key,
-                EventUid = ev.Id,
-                PreviousState = prev?.State,
-                NewState = curr.State ?? "LIVE",
-                HomeTeamName = curr.HomeTeam?.Name ?? curr.HomeTeam?.ShortName ?? "Home",
-                AwayTeamName = curr.AwayTeam?.Name ?? curr.AwayTeam?.ShortName ?? "Away",
-                CompetitionId = curr.Competition?.Id,
-                CompetitionLegacyId = curr.Competition?.LegacyId,
-                HomeTeamId = curr.HomeTeam?.Id,
-                HomeTeamLegacyId = curr.HomeTeam?.LegacyId,
-                AwayTeamId = curr.AwayTeam?.Id,
-                AwayTeamLegacyId = curr.AwayTeam?.LegacyId,
-                HomeScore = curr.Score?.Home ?? 0,
-                AwayScore = curr.Score?.Away ?? 0,
-                ElapsedMinute = ev.Minute > 0 ? ev.Minute : curr.ElapsedMinute,
-                ExtraMinute = ev.ExtraMinute > 0 ? ev.ExtraMinute : curr.ExtraMinute,
-                EventPlayerName = ev.PlayerName,
-                EventDescription = ev.Description ?? "Red Card"
-            });
         }
     }
 

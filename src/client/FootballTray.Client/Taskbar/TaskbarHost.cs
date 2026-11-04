@@ -785,6 +785,14 @@ public sealed class TaskbarHost : IDisposable
             case WM_ERASEBKGND:
                 return new IntPtr(1); // Suppress background repaint flicker
 
+            case WM_MOUSEWHEEL:
+                short wheelDelta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                if (_hostedContent is TaskbarTicker tickerHost)
+                {
+                    tickerHost.OnHostMouseWheel(wheelDelta);
+                }
+                return IntPtr.Zero;
+
             case WM_DESTROY:
                 TaskbarLogger.Debug($"[HOST] Ephemeral Host HWND 0x{hWnd.ToInt64():X} received WM_DESTROY.");
                 return IntPtr.Zero;

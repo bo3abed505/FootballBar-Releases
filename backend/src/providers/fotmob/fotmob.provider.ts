@@ -300,7 +300,8 @@ export class FotmobProvider implements IDataProvider {
     if (combined.includes('europa') || combined.includes('uel')) return 73;
     if (combined.includes('champions') || combined.includes('ucl')) return 42;
     if (combined.includes('premier') && combined.includes('league') && !combined.includes('egy')) return 47;
-    if (combined.includes('egypt')) return 525;
+    if (combined.includes('egypt')) return 519;
+    if (combined.includes('afc champions') || combined.includes('acl elite') || combined.includes('525')) return 525;
     if (combined.includes('laliga') || combined.includes('la_liga') || combined.includes('la liga')) return 87;
     if (combined.includes('serie_a') || combined.includes('serie a')) return 55;
     if (combined.includes('bundesliga')) return 54;

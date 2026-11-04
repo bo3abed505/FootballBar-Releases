@@ -58,6 +58,7 @@ public static class TaskbarNativeMethods
     public const uint WM_NCDESTROY = 0x0082;
     public const uint WM_ERASEBKGND = 0x0014;
     public const uint WM_SETICON = 0x0080;
+    public const uint WM_MOUSEWHEEL = 0x020A;
 
     // LoadImage and Icon constants
     public const uint IMAGE_ICON = 1;

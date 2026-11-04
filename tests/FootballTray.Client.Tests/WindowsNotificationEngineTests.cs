@@ -147,8 +147,8 @@ public partial class WindowsNotificationEngineTests
 
         Assert.AreEqual(1, alerts.Count);
         Assert.AreEqual(NotificationType.Goal, alerts[0].Type);
-        Assert.AreEqual("Arsenal FC 1–0 Chelsea FC", alerts[0].Title);
-        Assert.AreEqual("15' B. Saka", alerts[0].Body);
+        Assert.AreEqual("⚽ GOAL! Arsenal FC", alerts[0].Title);
+        Assert.AreEqual("Arsenal FC [1] - 0 Chelsea FC • 15' B. Saka", alerts[0].Body);
         Assert.AreEqual("match:fix_001:event:evt_goal_saka", alerts[0].DeduplicationKey);
         StringAssert.Contains(alerts[0].ActivationArguments, "eventUid=evt_goal_saka");
     }
@@ -183,8 +183,8 @@ public partial class WindowsNotificationEngineTests
         var alerts = await _notificationService.ProcessTrayUpdateAsync(snap1, snap2);
 
         Assert.AreEqual(1, alerts.Count);
-        Assert.AreEqual("Arsenal FC 1–1 Chelsea FC", alerts[0].Title);
-        Assert.AreEqual("38' C. Palmer", alerts[0].Body);
+        Assert.AreEqual("⚽ GOAL! Chelsea FC", alerts[0].Title);
+        Assert.AreEqual("Arsenal FC 1 - [1] Chelsea FC • 38' C. Palmer", alerts[0].Body);
     }
 
     [TestMethod]
@@ -455,8 +455,8 @@ public partial class WindowsNotificationEngineTests
 
         Assert.AreEqual(1, _testRenderer.Rendered.Count);
         Assert.AreEqual(NotificationType.Goal, _testRenderer.Rendered[0].Type);
-        Assert.AreEqual("Arsenal FC 1–0 Chelsea FC", _testRenderer.Rendered[0].Title);
-        Assert.AreEqual("78' G. Martinelli", _testRenderer.Rendered[0].Body);
+        Assert.AreEqual("⚽ GOAL! Arsenal FC", _testRenderer.Rendered[0].Title);
+        Assert.AreEqual("Arsenal FC [1] - 0 Chelsea FC • 78' G. Martinelli", _testRenderer.Rendered[0].Body);
     }
 
     [TestMethod]
@@ -530,21 +530,21 @@ public partial class WindowsNotificationEngineTests
     {
         var prev = CreateTrayData("fix_001", "LIVE", 10, 0, 0);
 
-        // Score changed to 1-0 but NO new event provided (e.g. score correction)
+        // Score changed to 1-0: fallback score-based goal alert is emitted immediately so fans never miss a goal!
         var scoreOnlyChange = CreateTrayData("fix_001", "LIVE", 11, 1, 0, new List<TrayEventDto>());
         var alerts1 = await _notificationService.ProcessTrayUpdateAsync(prev, scoreOnlyChange);
 
-        Assert.AreEqual(0, alerts1.Count);
+        Assert.AreEqual(1, alerts1.Count);
+        Assert.AreEqual("match:fix_001:score:1-0", alerts1[0].DeduplicationKey);
 
-        // Now event arrives
+        // Now event arrives for the same scoreline: deduplication store recognizes scoreline was already notified
         var eventArrival = CreateTrayData("fix_001", "LIVE", 12, 1, 0, new List<TrayEventDto>
         {
             new() { Id = "evt_saka_real", Type = "Goal", Minute = 10, PlayerName = "B. Saka" }
         });
         var alerts2 = await _notificationService.ProcessTrayUpdateAsync(scoreOnlyChange, eventArrival);
 
-        Assert.AreEqual(1, alerts2.Count);
-        Assert.AreEqual("match:fix_001:event:evt_saka_real", alerts2[0].DeduplicationKey);
+        Assert.AreEqual(0, alerts2.Count);
     }
 
     [TestMethod]

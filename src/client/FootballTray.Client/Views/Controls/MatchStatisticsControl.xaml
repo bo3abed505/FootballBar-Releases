@@ -14,7 +14,7 @@
         </Grid.RowDefinitions>
 
         <!-- Teams Legend -->
-        <Grid Grid.Row="0" Margin="4,0,4,8">
+        <Grid Grid.Row="0" Margin="4,0,4,8" Visibility="{Binding StatisticsVisibility}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -262,14 +262,79 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="⚔️ Head-to-Head Summary" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" />
-                            <Border Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4" Padding="8,2">
+                            <Border Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4" Padding="8,2" Visibility="{Binding HasH2HMeetingsVisibility}">
                                 <TextBlock Text="{Binding H2HRecordDisplay}" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                             </Border>
                         </Grid>
 
-                        <TextBlock Text="Last 5 Head-to-Head Meetings" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
+                        <!-- 2-Row Visual Scoreboard -->
+                        <Border
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12,10"
+                            Visibility="{Binding HasH2HMeetingsVisibility}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
 
-                        <ItemsControl ItemsSource="{Binding LastFiveMeetings}">
+                                <!-- Home Team Column (Left) -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                    <Border Width="20" Height="20" VerticalAlignment="Center">
+                                        <Image Source="{Binding HomeTeamLogo}" Width="20" Height="20" Stretch="Uniform" />
+                                    </Border>
+                                    <TextBlock Text="{Binding HomeTeamName}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="110" />
+                                </StackPanel>
+
+                                <!-- Central Scoreboard (2 Rows) -->
+                                <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                                    <!-- Row 1: [Home Wins (#38BDF8)] — [Draws (#94A3B8)] — [Away Wins (#F59E0B)] -->
+                                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding H2HHomeWinsText}" FontSize="16" FontWeight="Bold" Foreground="#38BDF8" />
+                                        <TextBlock Text="—" FontSize="14" FontWeight="SemiBold" Foreground="#94A3B8" />
+                                        <TextBlock Text="{Binding H2HDrawsText}" FontSize="16" FontWeight="Bold" Foreground="#94A3B8" />
+                                        <TextBlock Text="—" FontSize="14" FontWeight="SemiBold" Foreground="#94A3B8" />
+                                        <TextBlock Text="{Binding H2HAwayWinsText}" FontSize="16" FontWeight="Bold" Foreground="#F59E0B" />
+                                    </StackPanel>
+                                    <!-- Row 2: Aligned directly under numbers: Wins, Draws, Wins (caption 11px, #94A3B8) -->
+                                    <Grid HorizontalAlignment="Center">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Wins" FontSize="11" Foreground="#94A3B8" TextAlignment="Center" MinWidth="26" />
+                                        <TextBlock Grid.Column="1" Text="Draws" FontSize="11" Foreground="#94A3B8" TextAlignment="Center" Margin="10,0,10,0" />
+                                        <TextBlock Grid.Column="2" Text="Wins" FontSize="11" Foreground="#94A3B8" TextAlignment="Center" MinWidth="26" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <!-- Away Team Column (Right) -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                    <TextBlock Text="{Binding AwayTeamName}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextAlignment="Right" TextTrimming="CharacterEllipsis" MaxWidth="110" />
+                                    <Border Width="20" Height="20" VerticalAlignment="Center">
+                                        <Image Source="{Binding AwayTeamLogo}" Width="20" Height="20" Stretch="Uniform" />
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Zero-meeting fallback banner -->
+                        <Border
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            CornerRadius="6"
+                            Padding="12,10"
+                            Visibility="{Binding HasNoH2HMeetingsVisibility}">
+                            <TextBlock Text="No previous meetings recorded" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                        </Border>
+
+                        <TextBlock Text="Last 5 Head-to-Head Meetings" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" Visibility="{Binding HasH2HMeetingsVisibility}" />
+
+                        <ItemsControl ItemsSource="{Binding LastFiveMeetings}" Visibility="{Binding HasH2HMeetingsVisibility}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10,6" Margin="0,0,0,4">
@@ -280,14 +345,30 @@
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0" Spacing="2">
-                                                <TextBlock Text="{Binding HomeTeamName}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <Button
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Padding="0"
+                                                    HorizontalAlignment="Left"
+                                                    Command="{Binding OpenHomeTeamHubCommand}"
+                                                    ToolTipService.ToolTip="Open Team Hub">
+                                                    <TextBlock Text="{Binding HomeTeamName}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                </Button>
                                                 <TextBlock Text="{Binding DateDisplay}" FontSize="9" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                             </StackPanel>
                                             <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="3" Padding="8,2" Margin="6,0,6,0" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding ScoreDisplay}" FontSize="11" FontWeight="Bold" />
                                             </Border>
                                             <StackPanel Grid.Column="2" Spacing="2">
-                                                <TextBlock Text="{Binding AwayTeamName}" FontSize="11" FontWeight="SemiBold" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
+                                                <Button
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Padding="0"
+                                                    HorizontalAlignment="Right"
+                                                    Command="{Binding OpenAwayTeamHubCommand}"
+                                                    ToolTipService.ToolTip="Open Team Hub">
+                                                    <TextBlock Text="{Binding AwayTeamName}" FontSize="11" FontWeight="SemiBold" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
+                                                </Button>
                                                 <TextBlock Text="{Binding CompetitionName}" FontSize="9" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                         </Grid>
@@ -306,7 +387,8 @@
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="14">
+                    Padding="14"
+                    Visibility="{Binding HeatmapVisibility}">
                     <StackPanel Spacing="12">
                         <TextBlock Text="🔥 Tactical Action &amp; Pitch Heatmap" FontSize="13" FontWeight="Bold" />
 
@@ -321,7 +403,7 @@
                             <Border Grid.Column="0" Background="#1E293B" CornerRadius="6" Padding="8,6">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="TOP THIRD" FontSize="9" FontWeight="Bold" Foreground="#F87171" HorizontalAlignment="Center" />
-                                    <TextBlock Text="{Binding AwayAttackingThirdPct}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    <TextBlock Text="{Binding AwayAttackingThirdDisplay}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
                                     <TextBlock Text="Away Attacking" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center" />
                                 </StackPanel>
                             </Border>
@@ -337,7 +419,7 @@
                             <Border Grid.Column="2" Background="#1E293B" CornerRadius="6" Padding="8,6">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="BOTTOM THIRD" FontSize="9" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center" />
-                                    <TextBlock Text="{Binding HomeAttackingThirdPct}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
+                                    <TextBlock Text="{Binding HomeAttackingThirdDisplay}" TextAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" />
                                     <TextBlock Text="Home Attacking" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center" />
                                 </StackPanel>
                             </Border>

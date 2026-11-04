@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using FootballTray.Client.Diagnostics;
 using FootballTray.Client.Serialization;
 using FootballTray.Client.Services.Notifications;
+using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.Services.Preferences;
 
@@ -137,9 +138,9 @@ public sealed class PreferencesService : IPreferencesService
 
             bool alreadyFollowed = teams.Any(t =>
                 string.Equals(t.Id, team.Id, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) && FixtureRelevanceEngine.IsValidCanonicalTeam(canonicalTargetId, t.Name)) ||
                 (!string.IsNullOrWhiteSpace(t.Name) && !string.IsNullOrWhiteSpace(team.Name) && string.Equals(t.Name.Trim(), team.Name.Trim(), StringComparison.OrdinalIgnoreCase)) ||
-                (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+                (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase) && FixtureRelevanceEngine.IsValidCanonicalTeam(existingCanon, t.Name)));
 
             if (!alreadyFollowed)
             {
@@ -171,9 +172,9 @@ public sealed class PreferencesService : IPreferencesService
 
             int removed = teams.RemoveAll(t =>
                 string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(t.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) && FixtureRelevanceEngine.IsValidCanonicalTeam(canonicalTargetId, t.Name)) ||
                 (!string.IsNullOrWhiteSpace(t.Name) && string.Equals(t.Name.Trim(), teamId.Trim(), StringComparison.OrdinalIgnoreCase)) ||
-                (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+                (CanonicalEntityIds.TryTranslateLegacyId(t.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase) && FixtureRelevanceEngine.IsValidCanonicalTeam(existingCanon, t.Name)));
 
             if (removed > 0)
             {
@@ -229,21 +230,47 @@ public sealed class PreferencesService : IPreferencesService
         PreferencesChanged?.Invoke(this, _currentPreferences);
     }
 
-    public async Task UnfollowCompetitionAsync(string competitionId, CancellationToken cancellationToken = default)
+    public bool IsCompetitionFollowed(string? id, string? name = null, string? country = null)
     {
-        if (string.IsNullOrWhiteSpace(competitionId)) return;
+        var set = _currentPreferences.GetFollowedCompetitionIdSet();
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            if (set.Contains(id)) return true;
+            if (CanonicalEntityIds.TryTranslateLegacyId(id, out var canon) && set.Contains(canon)) return true;
+        }
+        if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(country))
+        {
+            if (set.Contains($"name_country:{name.Trim()}|{country.Trim()}")) return true;
+        }
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            if (_currentPreferences.FollowedCompetitions?.Any(c => string.Equals(c.Name?.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase)) == true)
+                return true;
+        }
+        return false;
+    }
+
+    public Task UnfollowCompetitionAsync(string competitionId, CancellationToken cancellationToken = default) =>
+        UnfollowCompetitionAsync(competitionId, null, null, cancellationToken);
+
+    public async Task UnfollowCompetitionAsync(string competitionId, string? name, string? country, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(competitionId) && string.IsNullOrWhiteSpace(name)) return;
 
         await _lock.WaitAsync(cancellationToken);
         try
         {
             var comps = _currentPreferences.FollowedCompetitions?.ToList() ?? new List<FollowedCompetition>();
-            string canonicalTargetId = CanonicalEntityIds.TryTranslateLegacyId(competitionId, out var canon) ? canon : competitionId;
+            string canonicalTargetId = !string.IsNullOrWhiteSpace(competitionId) && CanonicalEntityIds.TryTranslateLegacyId(competitionId, out var canon) ? canon : competitionId;
 
             int removed = comps.RemoveAll(c =>
-                string.Equals(c.Id, competitionId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrWhiteSpace(c.Name) && string.Equals(c.Name.Trim(), competitionId.Trim(), StringComparison.OrdinalIgnoreCase)) ||
-                (CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase)));
+                (!string.IsNullOrWhiteSpace(competitionId) && (
+                    string.Equals(c.Id, competitionId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(c.Id, canonicalTargetId, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrWhiteSpace(c.Name) && string.Equals(c.Name.Trim(), competitionId.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                    (CanonicalEntityIds.TryTranslateLegacyId(c.Id, out var existingCanon) && string.Equals(existingCanon, canonicalTargetId, StringComparison.OrdinalIgnoreCase))))
+                || (!string.IsNullOrWhiteSpace(name) && string.Equals(c.Name?.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase) && (string.IsNullOrWhiteSpace(country) || string.IsNullOrWhiteSpace(c.Country) || string.Equals(c.Country.Trim(), country.Trim(), StringComparison.OrdinalIgnoreCase)))
+            );
 
             if (removed > 0)
             {
@@ -465,9 +492,13 @@ public sealed class PreferencesService : IPreferencesService
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            if (_currentPreferences.EnableTickerCarousel != enable)
+            if (_currentPreferences.EnableTickerCarousel != enable || (enable && _currentPreferences.ManualPinnedMatchId != null))
             {
-                var updated = _currentPreferences with { EnableTickerCarousel = enable };
+                var updated = _currentPreferences with 
+                { 
+                    EnableTickerCarousel = enable,
+                    ManualPinnedMatchId = enable ? null : _currentPreferences.ManualPinnedMatchId
+                };
                 var normalized = NormalizePreferences(updated);
                 await SaveToDiskAsync(normalized, cancellationToken);
                 _currentPreferences = normalized;
@@ -976,11 +1007,32 @@ public sealed class PreferencesService : IPreferencesService
             TargetScreenDeviceName = raw.TargetScreenDeviceName,
             EnableTickerCarousel = raw.EnableTickerCarousel,
             Use24HourFormat = raw.Use24HourFormat,
+            ManualPinnedMatchId = raw.ManualPinnedMatchId,
+            SavedAutoRotateModeBeforePin = raw.SavedAutoRotateModeBeforePin,
             IsRunAtStartupEnabled = raw.IsRunAtStartupEnabled,
             IsLoggingEnabled = raw.IsLoggingEnabled,
             IsDebugLoggingEnabled = raw.IsDebugLoggingEnabled,
             IsKickoffReminderEnabled = raw.IsKickoffReminderEnabled,
             KickoffReminderOffsetMinutes = raw.KickoffReminderOffsetMinutes >= 0 ? raw.KickoffReminderOffsetMinutes : 15,
+            TickerRotationScope = raw.TickerRotationScope?.Trim() switch
+            {
+                "AllFollowed" => "AllFollowed",
+                "AllLive" => "AllLive",
+                "CustomQueue" => "CustomQueue",
+                _ => "FollowedLive"
+            },
+            EnableTickerEventPreemption = raw.EnableTickerEventPreemption,
+            CustomTickerQueueMatchIds = (raw.CustomTickerQueueMatchIds ?? Enumerable.Empty<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            TeamAlertProfiles = raw.TeamAlertProfiles != null
+                ? new Dictionary<string, EntityAlertProfileDto>(raw.TeamAlertProfiles, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, EntityAlertProfileDto>(StringComparer.OrdinalIgnoreCase),
+            CompetitionAlertProfiles = raw.CompetitionAlertProfiles != null
+                ? new Dictionary<string, EntityAlertProfileDto>(raw.CompetitionAlertProfiles, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, EntityAlertProfileDto>(StringComparer.OrdinalIgnoreCase),
             ExtensionData = raw.ExtensionData
         };
     }
@@ -1003,5 +1055,224 @@ public sealed class PreferencesService : IPreferencesService
                i == "team_alahly" ||
                i == "team_egypt" ||
                i == "team_spain";
+    }
+
+    public async Task SetTickerRotationScopeAsync(string scope, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var normalized = string.IsNullOrWhiteSpace(scope) ? "FollowedLive" : scope.Trim();
+            if (string.Equals(_currentPreferences.TickerRotationScope, normalized, StringComparison.Ordinal))
+                return;
+            var updated = _currentPreferences with { TickerRotationScope = normalized };
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetEnableTickerEventPreemptionAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_currentPreferences.EnableTickerEventPreemption == enabled)
+                return;
+            var updated = _currentPreferences with { EnableTickerEventPreemption = enabled };
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task ActivateCustomQueueAsync(IReadOnlyList<string> matchIds, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var list = (matchIds ?? Array.Empty<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var updated = _currentPreferences with
+            {
+                EnableTickerCarousel = true,
+                TickerRotationScope = "CustomQueue",
+                CustomTickerQueueMatchIds = list
+            };
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetCustomTickerQueueMatchIdsAsync(IReadOnlyList<string> matchIds, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var list = (matchIds ?? Array.Empty<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            UserPreferences updated;
+            if (list.Count == 1)
+            {
+                var lastMatchId = list[0];
+                var restoredScope = !string.IsNullOrWhiteSpace(_currentPreferences.SavedAutoRotateModeBeforePin) && _currentPreferences.SavedAutoRotateModeBeforePin != "CustomQueue"
+                    ? _currentPreferences.SavedAutoRotateModeBeforePin
+                    : "FollowedLive";
+
+                updated = _currentPreferences with
+                {
+                    ManualPinnedMatchId = lastMatchId,
+                    CustomTickerQueueMatchIds = new List<string>(),
+                    EnableTickerCarousel = false,
+                    TickerRotationScope = restoredScope
+                };
+            }
+            else
+            {
+                updated = _currentPreferences with { CustomTickerQueueMatchIds = list };
+            }
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetManualPinnedMatchIdAsync(string? matchId, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            UserPreferences updated;
+            if (!string.IsNullOrWhiteSpace(matchId))
+            {
+                var currentMode = _currentPreferences.TickerRotationScope != "CustomQueue" ? _currentPreferences.TickerRotationScope : "FollowedLive";
+                updated = _currentPreferences with
+                {
+                    ManualPinnedMatchId = matchId.Trim(),
+                    SavedAutoRotateModeBeforePin = _currentPreferences.SavedAutoRotateModeBeforePin ?? currentMode,
+                    EnableTickerCarousel = false
+                };
+            }
+            else
+            {
+                var restoredScope = !string.IsNullOrWhiteSpace(_currentPreferences.SavedAutoRotateModeBeforePin) && _currentPreferences.SavedAutoRotateModeBeforePin != "CustomQueue"
+                    ? _currentPreferences.SavedAutoRotateModeBeforePin
+                    : "FollowedLive";
+
+                updated = _currentPreferences with
+                {
+                    ManualPinnedMatchId = null,
+                    EnableTickerCarousel = true,
+                    TickerRotationScope = restoredScope,
+                    SavedAutoRotateModeBeforePin = null
+                };
+            }
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetTeamAlertProfileAsync(string teamId, FootballTray.Core.Dto.EntityAlertProfileDto? profile, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(teamId)) return;
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var dict = new Dictionary<string, FootballTray.Core.Dto.EntityAlertProfileDto>(
+                _currentPreferences.TeamAlertProfiles ?? new Dictionary<string, FootballTray.Core.Dto.EntityAlertProfileDto>(),
+                StringComparer.OrdinalIgnoreCase);
+            string canonicalId = CanonicalEntityIds.TryTranslateLegacyId(teamId.Trim(), out var canon) ? canon : teamId.Trim();
+            if (profile == null || string.Equals(profile.Mode, "InheritGlobal", StringComparison.OrdinalIgnoreCase))
+            {
+                dict.Remove(teamId.Trim());
+                dict.Remove(canonicalId);
+            }
+            else
+            {
+                dict[teamId.Trim()] = profile;
+                dict[canonicalId] = profile;
+            }
+            var updated = _currentPreferences with { TeamAlertProfiles = dict };
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
+    }
+
+    public async Task SetCompetitionAlertProfileAsync(string competitionId, FootballTray.Core.Dto.EntityAlertProfileDto? profile, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(competitionId)) return;
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var dict = new Dictionary<string, FootballTray.Core.Dto.EntityAlertProfileDto>(
+                _currentPreferences.CompetitionAlertProfiles ?? new Dictionary<string, FootballTray.Core.Dto.EntityAlertProfileDto>(),
+                StringComparer.OrdinalIgnoreCase);
+            string canonicalId = CanonicalEntityIds.TryTranslateLegacyId(competitionId.Trim(), out var canon) ? canon : competitionId.Trim();
+            if (profile == null || string.Equals(profile.Mode, "InheritGlobal", StringComparison.OrdinalIgnoreCase))
+            {
+                dict.Remove(competitionId.Trim());
+                dict.Remove(canonicalId);
+            }
+            else
+            {
+                dict[competitionId.Trim()] = profile;
+                dict[canonicalId] = profile;
+            }
+            var updated = _currentPreferences with { CompetitionAlertProfiles = dict };
+            var normalizedPrefs = NormalizePreferences(updated);
+            await SaveToDiskAsync(normalizedPrefs, cancellationToken);
+            _currentPreferences = normalizedPrefs;
+            _isLoaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        PreferencesChanged?.Invoke(this, _currentPreferences);
     }
 }

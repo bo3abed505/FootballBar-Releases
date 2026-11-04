@@ -1222,7 +1222,7 @@ public class HeatmapPointViewModel
     public double CanvasLeft { get; set; }
     public double CanvasTop { get; set; }
     public double Size { get; set; } = 40;
-    public SolidColorBrush FillBrush { get; set; } = new(Windows.UI.Color.FromArgb(100, 245, 158, 11));
+    public SolidColorBrush? FillBrush { get; set; }
     public double Opacity { get; set; } = 0.6;
 }
 
@@ -1253,7 +1253,25 @@ public class H2HMeetingViewModel
     public string HomeTeamName { get; set; } = string.Empty;
     public string AwayTeamName { get; set; } = string.Empty;
     public string ScoreDisplay { get; set; } = string.Empty;
+    public string HomeTeamId { get; set; } = string.Empty;
+    public string AwayTeamId { get; set; } = string.Empty;
     public string SummaryText => $"{HomeTeamName} {ScoreDisplay} {AwayTeamName}";
+
+    public System.Windows.Input.ICommand OpenHomeTeamHubCommand => new RelayCommand(() =>
+    {
+        if (!string.IsNullOrWhiteSpace(HomeTeamId))
+        {
+            App.OpenTeamHub(HomeTeamId, HomeTeamName);
+        }
+    });
+
+    public System.Windows.Input.ICommand OpenAwayTeamHubCommand => new RelayCommand(() =>
+    {
+        if (!string.IsNullOrWhiteSpace(AwayTeamId))
+        {
+            App.OpenTeamHub(AwayTeamId, AwayTeamName);
+        }
+    });
 }
 
 public class StatComparisonViewModel : INotifyPropertyChanged
@@ -1321,6 +1339,26 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private string _title = "Match Center";
     private string _competitionName = "Football";
     private string _statusText = "PREMATCH";
+    private string _matchState = "PREMATCH";
+
+    public string MatchState
+    {
+        get => _matchState;
+        set
+        {
+            if (SetProperty(ref _matchState, value))
+            {
+                OnPropertyChanged(nameof(IsPrematch));
+                OnPropertyChanged(nameof(HasHeatmap));
+                OnPropertyChanged(nameof(HeatmapVisibility));
+            }
+        }
+    }
+
+    public bool IsPrematch => string.IsNullOrWhiteSpace(_matchState) || _matchState is "PREMATCH" or "UPCOMING" or "NOT_STARTED" or "SCHEDULED" or "TIMED" or "NS";
+    public bool HasHeatmap => HeatmapPoints.Count > 0 && !IsPrematch;
+    public Visibility HeatmapVisibility => HasHeatmap ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility StatisticsVisibility => HasStatistics ? Visibility.Visible : Visibility.Collapsed;
     private string _homeTeamName = "Home Team";
     private string _awayTeamName = "Away Team";
     private string? _homeTeamLogoUrl;
@@ -1635,7 +1673,13 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     public bool HasStatistics
     {
         get => _hasStatistics;
-        set => SetProperty(ref _hasStatistics, value);
+        set
+        {
+            if (SetProperty(ref _hasStatistics, value))
+            {
+                OnPropertyChanged(nameof(StatisticsVisibility));
+            }
+        }
     }
 
     public bool HasLineups
@@ -2181,12 +2225,36 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private int _awayMiddleThirdPct = 45;
     private int _awayDefensiveThirdPct = 25;
 
-    public int HomeAttackingThirdPct { get => _homeAttackingThirdPct; set => SetProperty(ref _homeAttackingThirdPct, value); }
+    public int HomeAttackingThirdPct
+    {
+        get => _homeAttackingThirdPct;
+        set
+        {
+            if (SetProperty(ref _homeAttackingThirdPct, value))
+            {
+                OnPropertyChanged(nameof(HomeAttackingThirdDisplay));
+            }
+        }
+    }
+    public string HomeAttackingThirdDisplay => $"{HomeAttackingThirdPct}%";
+
     public int HomeMiddleThirdPct { get => _homeMiddleThirdPct; set { if (SetProperty(ref _homeMiddleThirdPct, value)) OnPropertyChanged(nameof(MidfieldContestDisplay)); } }
     public string MidfieldContestDisplay => $"{HomeMiddleThirdPct}%";
     public int HomeDefensiveThirdPct { get => _homeDefensiveThirdPct; set => SetProperty(ref _homeDefensiveThirdPct, value); }
 
-    public int AwayAttackingThirdPct { get => _awayAttackingThirdPct; set => SetProperty(ref _awayAttackingThirdPct, value); }
+    public int AwayAttackingThirdPct
+    {
+        get => _awayAttackingThirdPct;
+        set
+        {
+            if (SetProperty(ref _awayAttackingThirdPct, value))
+            {
+                OnPropertyChanged(nameof(AwayAttackingThirdDisplay));
+            }
+        }
+    }
+    public string AwayAttackingThirdDisplay => $"{AwayAttackingThirdPct}%";
+
     public int AwayMiddleThirdPct { get => _awayMiddleThirdPct; set => SetProperty(ref _awayMiddleThirdPct, value); }
     public int AwayDefensiveThirdPct { get => _awayDefensiveThirdPct; set => SetProperty(ref _awayDefensiveThirdPct, value); }
 
@@ -2274,9 +2342,57 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
     }
 
-    public int H2HHomeWins { get => _h2hHomeWins; set { if (SetProperty(ref _h2hHomeWins, value)) OnPropertyChanged(nameof(H2HRecordDisplay)); } }
-    public int H2HDraws { get => _h2hDraws; set { if (SetProperty(ref _h2hDraws, value)) OnPropertyChanged(nameof(H2HRecordDisplay)); } }
-    public int H2HAwayWins { get => _h2hAwayWins; set { if (SetProperty(ref _h2hAwayWins, value)) OnPropertyChanged(nameof(H2HRecordDisplay)); } }
+    public int H2HHomeWins
+    {
+        get => _h2hHomeWins;
+        set
+        {
+            if (SetProperty(ref _h2hHomeWins, value))
+            {
+                OnPropertyChanged(nameof(H2HHomeWinsText));
+                OnPropertyChanged(nameof(H2HRecordDisplay));
+                OnPropertyChanged(nameof(HasH2HMeetingsVisibility));
+                OnPropertyChanged(nameof(HasNoH2HMeetingsVisibility));
+            }
+        }
+    }
+
+    public int H2HDraws
+    {
+        get => _h2hDraws;
+        set
+        {
+            if (SetProperty(ref _h2hDraws, value))
+            {
+                OnPropertyChanged(nameof(H2HDrawsText));
+                OnPropertyChanged(nameof(H2HRecordDisplay));
+                OnPropertyChanged(nameof(HasH2HMeetingsVisibility));
+                OnPropertyChanged(nameof(HasNoH2HMeetingsVisibility));
+            }
+        }
+    }
+
+    public int H2HAwayWins
+    {
+        get => _h2hAwayWins;
+        set
+        {
+            if (SetProperty(ref _h2hAwayWins, value))
+            {
+                OnPropertyChanged(nameof(H2HAwayWinsText));
+                OnPropertyChanged(nameof(H2HRecordDisplay));
+                OnPropertyChanged(nameof(HasH2HMeetingsVisibility));
+                OnPropertyChanged(nameof(HasNoH2HMeetingsVisibility));
+            }
+        }
+    }
+
+    public string H2HHomeWinsText => $"{H2HHomeWins}";
+    public string H2HDrawsText => $"{H2HDraws}";
+    public string H2HAwayWinsText => $"{H2HAwayWins}";
+
+    public Visibility HasH2HMeetingsVisibility => (LastFiveMeetings.Count > 0 || (H2HHomeWins + H2HDraws + H2HAwayWins) > 0) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HasNoH2HMeetingsVisibility => HasH2HMeetingsVisibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
 
     public string H2HRecordDisplay
     {
@@ -2317,7 +2433,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         set => SetProperty(ref _hasAggregateScore, value);
     }
 
+    public Func<string, Task>? OnNavigateToMatch { get; set; }
+
     public ObservableCollection<StandingRowItemViewModel> Standings { get; } = new();
+    public ObservableCollection<CompetitionFixtureViewModel> CompetitionFixtures { get; } = new();
+    public ObservableCollection<KnockoutStageViewModel> KnockoutStages { get; } = new();
     public ObservableCollection<PlayerStatLeaderItemViewModel> TopScorers { get; } = new();
     public ObservableCollection<PlayerStatLeaderItemViewModel> TopAssists { get; } = new();
 
@@ -2325,10 +2445,67 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     public bool HasTopScorers => TopScorers.Count > 0;
     public bool HasTopAssists => TopAssists.Count > 0;
     public bool HasLeaders => HasTopScorers || HasTopAssists;
+    public bool HasNoKnockoutBracket => KnockoutStages.Count == 0;
 
     public Visibility StandingsVisibility => HasStandings ? Visibility.Visible : Visibility.Collapsed;
     public Visibility LeadersVisibility => HasLeaders ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NoStandingsVisibility => (!HasStandings && !HasLeaders) ? Visibility.Visible : Visibility.Collapsed;
+
+    private int _standingsSubTabIndex = 0;
+    public int StandingsSubTabIndex
+    {
+        get => _standingsSubTabIndex;
+        set
+        {
+            if (SetProperty(ref _standingsSubTabIndex, value))
+            {
+                OnPropertyChanged(nameof(LeagueTableSubTabVisibility));
+                OnPropertyChanged(nameof(FixturesSubTabVisibility));
+                OnPropertyChanged(nameof(KnockoutSubTabVisibility));
+                OnPropertyChanged(nameof(TopScorersSubTabVisibility));
+                OnPropertyChanged(nameof(TopAssistsSubTabVisibility));
+                OnPropertyChanged(nameof(LeagueTableTabBrush));
+                OnPropertyChanged(nameof(FixturesTabBrush));
+                OnPropertyChanged(nameof(KnockoutTabBrush));
+                OnPropertyChanged(nameof(TopScorersTabBrush));
+                OnPropertyChanged(nameof(TopAssistsTabBrush));
+                OnPropertyChanged(nameof(LeagueTableTabTextBrush));
+                OnPropertyChanged(nameof(FixturesTabTextBrush));
+                OnPropertyChanged(nameof(KnockoutTabTextBrush));
+                OnPropertyChanged(nameof(TopScorersTabTextBrush));
+                OnPropertyChanged(nameof(TopAssistsTabTextBrush));
+            }
+        }
+    }
+
+    public Visibility LeagueTableSubTabVisibility => _standingsSubTabIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility FixturesSubTabVisibility => _standingsSubTabIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility KnockoutSubTabVisibility => _standingsSubTabIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility TopScorersSubTabVisibility => _standingsSubTabIndex == 3 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility TopAssistsSubTabVisibility => _standingsSubTabIndex == 4 ? Visibility.Visible : Visibility.Collapsed;
+
+    private static readonly SolidColorBrush ActiveSubTabBg = new(Windows.UI.Color.FromArgb(50, 56, 189, 248));
+    private static readonly SolidColorBrush InactiveSubTabBg = new(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+    private static readonly SolidColorBrush ActiveSubTabText = new(Windows.UI.Color.FromArgb(255, 56, 189, 248));
+    private static readonly SolidColorBrush InactiveSubTabText = new(Windows.UI.Color.FromArgb(255, 148, 163, 184));
+
+    public SolidColorBrush LeagueTableTabBrush => _standingsSubTabIndex == 0 ? ActiveSubTabBg : InactiveSubTabBg;
+    public SolidColorBrush FixturesTabBrush => _standingsSubTabIndex == 1 ? ActiveSubTabBg : InactiveSubTabBg;
+    public SolidColorBrush KnockoutTabBrush => _standingsSubTabIndex == 2 ? ActiveSubTabBg : InactiveSubTabBg;
+    public SolidColorBrush TopScorersTabBrush => _standingsSubTabIndex == 3 ? ActiveSubTabBg : InactiveSubTabBg;
+    public SolidColorBrush TopAssistsTabBrush => _standingsSubTabIndex == 4 ? ActiveSubTabBg : InactiveSubTabBg;
+
+    public SolidColorBrush LeagueTableTabTextBrush => _standingsSubTabIndex == 0 ? ActiveSubTabText : InactiveSubTabText;
+    public SolidColorBrush FixturesTabTextBrush => _standingsSubTabIndex == 1 ? ActiveSubTabText : InactiveSubTabText;
+    public SolidColorBrush KnockoutTabTextBrush => _standingsSubTabIndex == 2 ? ActiveSubTabText : InactiveSubTabText;
+    public SolidColorBrush TopScorersTabTextBrush => _standingsSubTabIndex == 3 ? ActiveSubTabText : InactiveSubTabText;
+    public SolidColorBrush TopAssistsTabTextBrush => _standingsSubTabIndex == 4 ? ActiveSubTabText : InactiveSubTabText;
+
+    public RelayCommand SelectLeagueTableSubTabCommand => new(() => StandingsSubTabIndex = 0);
+    public RelayCommand SelectFixturesSubTabCommand => new(() => StandingsSubTabIndex = 1);
+    public RelayCommand SelectKnockoutSubTabCommand => new(() => StandingsSubTabIndex = 2);
+    public RelayCommand SelectTopScorersSubTabCommand => new(() => StandingsSubTabIndex = 3);
+    public RelayCommand SelectTopAssistsSubTabCommand => new(() => StandingsSubTabIndex = 4);
 
     public void Load(MatchDetailDto match)
     {
@@ -2354,6 +2531,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         CompetitionCode = match.Competition?.Code;
         Title = $"{HomeTeamName} vs {AwayTeamName} - Match Center";
         CompetitionName = match.Competition?.Name ?? "Football";
+        MatchState = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
 
         RefreshFollowAndPinStates();
 
@@ -2715,7 +2893,16 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
             foreach (var g in homeGoals)
             {
-                var minutes = string.Join(", ", g.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                var minutes = string.Join(", ", g.Select(e =>
+                {
+                    bool isOg = string.Equals(e.Detail, "Own Goal", StringComparison.OrdinalIgnoreCase) ||
+                                e.Type?.Equals("OwnGoal", StringComparison.OrdinalIgnoreCase) == true ||
+                                e.Description?.Contains("Own Goal", StringComparison.OrdinalIgnoreCase) == true ||
+                                e.Description?.Contains("(OG)", StringComparison.OrdinalIgnoreCase) == true ||
+                                e.Detail?.Contains("OG", StringComparison.OrdinalIgnoreCase) == true;
+                    string minStr = e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'";
+                    return isOg ? $"{minStr} (OG)" : minStr;
+                }));
                 newHomeIncidents.Add(new MatchHeaderIncidentViewModel
                 {
                     Icon = "⚽",
@@ -2769,7 +2956,16 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
             foreach (var g in awayGoals)
             {
-                var minutes = string.Join(", ", g.Select(e => e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'"));
+                var minutes = string.Join(", ", g.Select(e =>
+                {
+                    bool isOg = string.Equals(e.Detail, "Own Goal", StringComparison.OrdinalIgnoreCase) ||
+                                e.Type?.Equals("OwnGoal", StringComparison.OrdinalIgnoreCase) == true ||
+                                e.Description?.Contains("Own Goal", StringComparison.OrdinalIgnoreCase) == true ||
+                                e.Description?.Contains("(OG)", StringComparison.OrdinalIgnoreCase) == true ||
+                                e.Detail?.Contains("OG", StringComparison.OrdinalIgnoreCase) == true;
+                    string minStr = e.ExtraMinute > 0 ? $"{e.Minute}+{e.ExtraMinute}'" : $"{e.Minute}'";
+                    return isOg ? $"{minStr} (OG)" : minStr;
+                }));
                 newAwayIncidents.Add(new MatchHeaderIncidentViewModel
                 {
                     Icon = "⚽",
@@ -2920,19 +3116,29 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 }
                 else
                 {
+                    bool isOgEvent = string.Equals(ev.Detail, "Own Goal", StringComparison.OrdinalIgnoreCase) || ev.Type?.Equals("OwnGoal", StringComparison.OrdinalIgnoreCase) == true || ev.Description?.Contains("Own Goal", StringComparison.OrdinalIgnoreCase) == true || ev.Description?.Contains("(OG)", StringComparison.OrdinalIgnoreCase) == true || ev.Detail?.Contains("OG", StringComparison.OrdinalIgnoreCase) == true;
                     if (!string.IsNullOrWhiteSpace(ev.PlayerName))
                     {
                         eventTitle = FormatPlayerWithLineup(ev.PlayerName, match.Lineups, ev.PlayerId);
-                        eventSubtitle = !string.IsNullOrWhiteSpace(ev.AssistPlayerName)
+                        var _unusedOg = string.Equals(ev.Detail, "Own Goal", StringComparison.OrdinalIgnoreCase) ||
+                                         ev.Type?.Equals("OwnGoal", StringComparison.OrdinalIgnoreCase) == true ||
+                                         ev.Description?.Contains("Own Goal", StringComparison.OrdinalIgnoreCase) == true ||
+                                         ev.Description?.Contains("(OG)", StringComparison.OrdinalIgnoreCase) == true ||
+                                         ev.Detail?.Contains("OG", StringComparison.OrdinalIgnoreCase) == true;
+                        if (isOgEvent && !eventTitle.Contains("(OG)"))
+                        {
+                            eventTitle = $"{eventTitle} (OG)";
+                        }
+                        eventSubtitle = isOgEvent ? "Own Goal" : (!string.IsNullOrWhiteSpace(ev.AssistPlayerName)
                             ? $"Assist: {FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups)}"
-                            : cleanedDesc;
+                            : cleanedDesc);
                     }
                     else
                     {
                         eventTitle = !string.IsNullOrWhiteSpace(cleanedDesc) ? cleanedDesc : (ev.Type ?? "Event");
-                        eventSubtitle = !string.IsNullOrWhiteSpace(ev.AssistPlayerName)
+                        eventSubtitle = isOgEvent ? "Own Goal" : (!string.IsNullOrWhiteSpace(ev.AssistPlayerName)
                             ? $"Assist: {FormatPlayerWithLineup(ev.AssistPlayerName, match.Lineups)}"
-                            : string.Empty;
+                            : string.Empty);
                     }
                 }
 
@@ -3669,6 +3875,53 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         }
         OnPropertyChanged(nameof(HasTopScorers));
 
+        CompetitionFixtures.Clear();
+        var mainVmForFix = App.CurrentMainViewModel;
+        var prefsForFix = mainVmForFix?.PreferencesService?.GetPreferences();
+        var followedTeamsForFix = prefsForFix?.GetFollowedTeamIdSet() ?? new HashSet<string>();
+        var followedNamesForFix = prefsForFix?.FollowedTeams?.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (match.Fixtures != null)
+        {
+            foreach (var f in match.Fixtures)
+            {
+                CompetitionFixtures.Add(new CompetitionFixtureViewModel(f, targetId =>
+                {
+                    if (OnNavigateToMatch != null)
+                    {
+                        _ = OnNavigateToMatch(targetId);
+                    }
+                },
+                followedTeamsForFix.Contains(f.HomeTeamId) || followedNamesForFix.Contains(f.HomeTeamName) ||
+                (!string.IsNullOrEmpty(match.HomeTeam?.Id) && string.Equals(f.HomeTeamId, match.HomeTeam.Id, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(match.HomeTeam?.Name) && string.Equals(f.HomeTeamName, match.HomeTeam.Name, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(match.AwayTeam?.Id) && string.Equals(f.HomeTeamId, match.AwayTeam.Id, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(match.AwayTeam?.Name) && string.Equals(f.HomeTeamName, match.AwayTeam.Name, StringComparison.OrdinalIgnoreCase)),
+                followedTeamsForFix.Contains(f.AwayTeamId) || followedNamesForFix.Contains(f.AwayTeamName) ||
+                (!string.IsNullOrEmpty(match.HomeTeam?.Id) && string.Equals(f.AwayTeamId, match.HomeTeam.Id, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(match.HomeTeam?.Name) && string.Equals(f.AwayTeamName, match.HomeTeam.Name, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(match.AwayTeam?.Id) && string.Equals(f.AwayTeamId, match.AwayTeam.Id, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(match.AwayTeam?.Name) && string.Equals(f.AwayTeamName, match.AwayTeam.Name, StringComparison.OrdinalIgnoreCase))));
+            }
+        }
+
+        KnockoutStages.Clear();
+        if (match.KnockoutStages != null)
+        {
+            foreach (var s in match.KnockoutStages)
+            {
+                var stageVm = new KnockoutStageViewModel { StageName = s.StageName };
+                if (s.Ties != null)
+                {
+                    foreach (var tie in s.Ties)
+                    {
+                        stageVm.Ties.Add(new KnockoutTieViewModel(tie));
+                    }
+                }
+                KnockoutStages.Add(stageVm);
+            }
+        }
+        OnPropertyChanged(nameof(HasNoKnockoutBracket));
+
         TopAssists.Clear();
         if (match.TopAssists != null)
         {
@@ -4111,6 +4364,11 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     y = Math.Round(0.12 + ((i + 1.0) / (countInRow + 1.0)) * 0.76, 3);
                 }
 
+                if (isHomeTeam && countInRow > 1)
+                {
+                    y = Math.Round(1.0 - y, 3);
+                }
+
                 string pos = item.Player.Position?.Trim().ToUpperInvariant() ?? string.Empty;
                 string badge = pos switch
                 {
@@ -4269,7 +4527,17 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
     private void PopulateStatistics(MatchDetailDto match)
     {
-        if (match.Statistics == null || match.Statistics.Count == 0)
+        string stateUpper = (match.State ?? string.Empty).Trim().ToUpperInvariant();
+        bool isPrematch = !string.IsNullOrEmpty(stateUpper) && stateUpper is "PREMATCH" or "UPCOMING" or "NOT_STARTED" or "SCHEDULED" or "TIMED" or "NS";
+
+        bool hasActualStats = match.Statistics != null && match.Statistics.Count > 0 &&
+            match.Statistics.Any(s => (s.PossessionPercent.HasValue && s.PossessionPercent.Value != 50 && s.PossessionPercent.Value > 0) ||
+                                      (s.TotalShots.HasValue && s.TotalShots.Value > 0) ||
+                                      (s.ShotsOnGoal.HasValue && s.ShotsOnGoal.Value > 0) ||
+                                      (s.ExpectedGoals.HasValue && s.ExpectedGoals.Value > 0) ||
+                                      (s.Xg.HasValue && s.Xg.Value > 0));
+
+        if ((isPrematch && !hasActualStats) || match.Statistics == null || match.Statistics.Count == 0)
         {
             SmartMergeStats(MatchStats, Array.Empty<StatComparisonViewModel>());
             HasStatistics = false;
@@ -4494,11 +4762,15 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                     MatchId = m.MatchId,
                     DateDisplay = dt,
                     CompetitionName = m.CompetitionName ?? "Match",
+                    HomeTeamId = m.HomeTeamId ?? (string.Equals(m.HomeTeamName, HomeTeamName, StringComparison.OrdinalIgnoreCase) ? HomeTeamId : (string.Equals(m.HomeTeamName, AwayTeamName, StringComparison.OrdinalIgnoreCase) ? AwayTeamId : string.Empty)),
+                    AwayTeamId = m.AwayTeamId ?? (string.Equals(m.AwayTeamName, AwayTeamName, StringComparison.OrdinalIgnoreCase) ? AwayTeamId : (string.Equals(m.AwayTeamName, HomeTeamName, StringComparison.OrdinalIgnoreCase) ? HomeTeamId : string.Empty)),
                     HomeTeamName = m.HomeTeamName,
                     AwayTeamName = m.AwayTeamName,
                     ScoreDisplay = m.ScoreDisplay
                 });
             }
+            OnPropertyChanged(nameof(HasH2HMeetingsVisibility));
+            OnPropertyChanged(nameof(HasNoH2HMeetingsVisibility));
         }
         else
         {
@@ -4513,12 +4785,16 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             HomeFormBadges.Clear();
             AwayFormBadges.Clear();
             LastFiveMeetings.Clear();
+            OnPropertyChanged(nameof(HasH2HMeetingsVisibility));
+            OnPropertyChanged(nameof(HasNoH2HMeetingsVisibility));
         }
 
         OnPropertyChanged(nameof(H2HRecordDisplay));
 
         // Heatmaps
         PopulateHeatmaps(match);
+        OnPropertyChanged(nameof(HasHeatmap));
+        OnPropertyChanged(nameof(HeatmapVisibility));
     }
 
     private void PopulateHeatmaps(MatchDetailDto match)
@@ -4546,9 +4822,17 @@ public class MatchCenterViewModel : INotifyPropertyChanged
                 {
                     double left = Math.Round((pt.X / 100.0) * 340.0 - 18.0, 1);
                     double top = Math.Round((pt.Y / 100.0) * 500.0 - 18.0, 1);
-                    var brush = isHome
-                        ? new SolidColorBrush(Windows.UI.Color.FromArgb((byte)(pt.Intensity * 180), 14, 165, 233))
-                        : new SolidColorBrush(Windows.UI.Color.FromArgb((byte)(pt.Intensity * 180), 239, 68, 68));
+                    SolidColorBrush? brush = null;
+                    try
+                    {
+                        brush = isHome
+                            ? new SolidColorBrush(Windows.UI.Color.FromArgb((byte)(pt.Intensity * 180), 14, 165, 233))
+                            : new SolidColorBrush(Windows.UI.Color.FromArgb((byte)(pt.Intensity * 180), 239, 68, 68));
+                    }
+                    catch
+                    {
+                        // In non-UI test environments without initialized WinUI compositor
+                    }
 
                     HeatmapPoints.Add(new HeatmapPointViewModel
                     {
@@ -4571,6 +4855,8 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             AwayDefensiveThirdPct = 34;
         }
         OnPropertyChanged(nameof(MidfieldContestDisplay));
+        OnPropertyChanged(nameof(HasHeatmap));
+        OnPropertyChanged(nameof(HeatmapVisibility));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

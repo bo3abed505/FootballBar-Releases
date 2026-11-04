@@ -103,6 +103,17 @@ public class SyncService : ISyncService
         return _dataByKey.Keys.Any(k => k.StartsWith(dateKeyPrefix, StringComparison.OrdinalIgnoreCase));
     }
 
+    public TrayDataDto? GetCachedDataForDate(DateTime date)
+    {
+        var dateKeyPrefix = $"{date.Date:yyyy-MM-dd}|";
+        var matchingKey = _dataByKey.Keys.FirstOrDefault(k => k.StartsWith(dateKeyPrefix, StringComparison.OrdinalIgnoreCase));
+        if (matchingKey != null && _dataByKey.TryGetValue(matchingKey, out var cachedData))
+        {
+            return cachedData;
+        }
+        return null;
+    }
+
     private static string BuildRequestKey(DateTime? date, IEnumerable<string> teams, IEnumerable<string> comps)
     {
         var datePart = date.HasValue ? date.Value.ToString("yyyy-MM-dd") : DateTime.Today.ToString("yyyy-MM-dd");
@@ -421,15 +432,11 @@ public class SyncService : ISyncService
                 _freshnessState = DataFreshnessState.NotModified;
                 _lastValidatedAt = DateTimeOffset.UtcNow;
                 _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
-                if (!string.IsNullOrWhiteSpace(response.ETag))
+                string? notModEtag = !string.IsNullOrWhiteSpace(response.ETag) ? response.ETag : (!string.IsNullOrWhiteSpace(etagToSend) ? etagToSend : (response.Envelope?.ETag ?? response.Envelope?.Data?.ETag));
+                if (!string.IsNullOrWhiteSpace(notModEtag))
                 {
-                    _lastKnownEtag = response.ETag;
-                    _etagsByKey[requestKey] = response.ETag;
-                }
-                else if (!string.IsNullOrWhiteSpace(etagToSend))
-                {
-                    _lastKnownEtag = etagToSend;
-                    _etagsByKey[requestKey] = etagToSend;
+                    _lastKnownEtag = notModEtag;
+                    _etagsByKey[requestKey] = notModEtag;
                 }
 
                 if (response.QuotaExhausted && _currentTrayData != null)
@@ -458,7 +465,8 @@ public class SyncService : ISyncService
 
             if (response.IsSuccess && response.Envelope?.Data != null)
             {
-                var envelope = response.Envelope;
+                var envelope = response.Envelope!;
+                var data = envelope.Data!;
                 var serverVersion = envelope.Version;
 
                 if (_currentTrayData != null && serverVersion < _lastKnownVersion)
@@ -470,19 +478,20 @@ public class SyncService : ISyncService
                 bool isViewingTargetDate = _targetDate.Date == queryDate;
                 if (isViewingTargetDate)
                 {
-                    _currentTrayData = envelope.Data;
+                    _currentTrayData = data;
                 }
                 _lastKnownVersion = serverVersion;
-                _lastKnownEtag = response.ETag;
+                string? effectiveFreshEtag = !string.IsNullOrWhiteSpace(response.ETag) ? response.ETag : (envelope.ETag ?? data.ETag);
+                _lastKnownEtag = effectiveFreshEtag;
                 _lastValidatedAt = DateTimeOffset.UtcNow;
                 _lastSuccessfulServerResponseTime = DateTimeOffset.UtcNow;
                 _freshnessState = DataFreshnessState.Fresh;
 
                 // Cache in memory by requestKey
-                _dataByKey[requestKey] = envelope.Data;
-                if (!string.IsNullOrWhiteSpace(response.ETag))
+                _dataByKey[requestKey] = data;
+                if (!string.IsNullOrWhiteSpace(effectiveFreshEtag))
                 {
-                    _etagsByKey[requestKey] = response.ETag;
+                    _etagsByKey[requestKey] = effectiveFreshEtag;
                 }
 
                 // Atomically persist to disk if query is today
@@ -496,13 +505,13 @@ public class SyncService : ISyncService
                 {
                     var preferences = _preferencesService?.GetPreferences();
                     pinnedMatchId ??= App.CurrentTickerCoordinator?.PinnedMatchId ?? App.CurrentMainViewModel?.ManualPinnedMatchId;
-                    await _notificationService.ProcessTrayUpdateAsync(previousData, envelope.Data, preferences, pinnedMatchId, cancellationToken);
+                    await _notificationService.ProcessTrayUpdateAsync(previousData, data, preferences, pinnedMatchId, cancellationToken);
                 }
 
-                AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {envelope.Data.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms, Date: {normalizedDate}).");
-                _notificationCoordinator?.ProcessKickoffReminders(envelope.Data, _preferencesService?.GetPreferences());
+                AppLogger.Info("Sync", "PollSuccess", $"Backend payload received (v{serverVersion}, {data.Matches?.Count ?? 0} matches, {_lastRefreshDurationMs}ms, Date: {normalizedDate}).");
+                _notificationCoordinator?.ProcessKickoffReminders(data, _preferencesService?.GetPreferences());
                 _lastPublishedDate = normalizedDate;
-                PublishUpdate(envelope.Data, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt, queryDate);
+                PublishUpdate(data, _freshnessState, _lastKnownVersion, _lastKnownEtag, _lastValidatedAt, queryDate);
                 return _freshnessState;
             }
 

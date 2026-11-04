@@ -21,6 +21,7 @@
         PointerPressed="RootBorder_PointerPressed"
         PointerMoved="RootBorder_PointerMoved"
         PointerReleased="RootBorder_PointerReleased"
+        PointerWheelChanged="RootBorder_PointerWheelChanged"
         Tapped="RootBorder_Tapped"
         DoubleTapped="RootBorder_DoubleTapped">
 
@@ -38,10 +39,12 @@
                     x:Name="MenuUnpinMatch"
                     Text="📌 Unpin Match"
                     Click="OnUnpinMatchClicked" />
-                <ToggleMenuFlyoutItem
-                    x:Name="MenuAutoRotateToggle"
-                    Text="🔄 Auto-Rotate Ticker"
-                    Click="MenuAutoRotateToggle_Click" />
+                <ToggleMenuFlyoutItem x:Name="MenuAutoRotateToggle" Text="🔄 Auto-Rotate Ticker" Click="MenuAutoRotateToggle_Click" />
+                <MenuFlyoutSeparator />
+                <ToggleMenuFlyoutItem x:Name="MenuModeFollowedLive" Text="⭐ Auto-Rotate Mode: Followed Live" Click="OnAutoRotateModeSelected" Tag="FollowedLive" />
+                <ToggleMenuFlyoutItem x:Name="MenuModeAllFollowed" Text="📅 Auto-Rotate Mode: All Followed" Click="OnAutoRotateModeSelected" Tag="AllFollowed" />
+                <ToggleMenuFlyoutItem x:Name="MenuModeAllLive" Text="🔴 Auto-Rotate Mode: All Live" Click="OnAutoRotateModeSelected" Tag="AllLive" />
+                <ToggleMenuFlyoutItem x:Name="MenuModeCustomQueue" Text="📋 Auto-Rotate Mode: Custom Queue" Click="OnAutoRotateModeSelected" Tag="CustomQueue" />
                 <MenuFlyoutItem
                     x:Name="MenuTogglePin"
                     Text="Toggle Pin"

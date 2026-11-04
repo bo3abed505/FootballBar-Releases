@@ -28,4 +28,5 @@ public interface ISyncService : IDisposable
     void TriggerImmediateSync();
     void RefreshTickerOnPreferenceChange();
     bool HasCachedDataForDate(DateTime date) => false;
+    TrayDataDto? GetCachedDataForDate(DateTime date) => null;
 }

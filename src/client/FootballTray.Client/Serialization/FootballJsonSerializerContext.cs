@@ -56,6 +56,16 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(SyncPreferencesRequestDto))]
 [JsonSerializable(typeof(CompetitionHubDto))]
 [JsonSerializable(typeof(ApiResponseEnvelope<CompetitionHubDto>))]
+[JsonSerializable(typeof(TeamSquadPlayerDto))]
+[JsonSerializable(typeof(List<TeamSquadPlayerDto>))]
+[JsonSerializable(typeof(TeamHubDto))]
+[JsonSerializable(typeof(ApiResponseEnvelope<TeamHubDto>))]
+[JsonSerializable(typeof(CompetitionFixtureDto))]
+[JsonSerializable(typeof(List<CompetitionFixtureDto>))]
+[JsonSerializable(typeof(KnockoutStageDto))]
+[JsonSerializable(typeof(List<KnockoutStageDto>))]
+[JsonSerializable(typeof(KnockoutTieDto))]
+[JsonSerializable(typeof(List<KnockoutTieDto>))]
 [JsonSerializable(typeof(StandingRowDto))]
 [JsonSerializable(typeof(List<StandingRowDto>))]
 [JsonSerializable(typeof(PlayerStatLeaderDto))]
@@ -67,6 +77,9 @@ namespace FootballTray.Client.Serialization;
 [JsonSerializable(typeof(OtaManifestCacheRecord))]
 [JsonSerializable(typeof(Dictionary<string, int>))]
 [JsonSerializable(typeof(List<int>))]
+[JsonSerializable(typeof(EntityAlertProfileDto))]
+[JsonSerializable(typeof(Dictionary<string, EntityAlertProfileDto>))]
+[JsonSerializable(typeof(List<string>))]
 public partial class FootballJsonSerializerContext : JsonSerializerContext
 {
 }

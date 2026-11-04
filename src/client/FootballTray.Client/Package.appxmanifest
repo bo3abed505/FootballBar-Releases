@@ -9,7 +9,7 @@
   <Identity
     Name="FootballTray.LiveFootballScores"
     Publisher="CN=FootballTray"
-    Version="1.2.2.0"
+    Version="1.3.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>

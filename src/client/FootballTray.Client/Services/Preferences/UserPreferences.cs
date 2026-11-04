@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.Services.Preferences;
 
@@ -56,6 +57,19 @@ public sealed record UserPreferences
     [JsonPropertyName("use24HourFormat")]
     public bool Use24HourFormat { get; init; } = true;
 
+    [JsonPropertyName("use24HourTime")]
+    public bool Use24HourTime
+    {
+        get => Use24HourFormat;
+        init => Use24HourFormat = value;
+    }
+
+    [JsonPropertyName("manualPinnedMatchId")]
+    public string? ManualPinnedMatchId { get; init; } = null;
+
+    [JsonPropertyName("savedAutoRotateModeBeforePin")]
+    public string? SavedAutoRotateModeBeforePin { get; init; } = null;
+
     [JsonPropertyName("isRunAtStartupEnabled")]
     public bool IsRunAtStartupEnabled { get; init; } = false;
 
@@ -70,6 +84,21 @@ public sealed record UserPreferences
 
     [JsonPropertyName("kickoffReminderOffsetMinutes")]
     public int KickoffReminderOffsetMinutes { get; init; } = 15;
+
+    [JsonPropertyName("tickerRotationScope")]
+    public string TickerRotationScope { get; init; } = "FollowedLive";
+
+    [JsonPropertyName("enableTickerEventPreemption")]
+    public bool EnableTickerEventPreemption { get; init; } = true;
+
+    [JsonPropertyName("customTickerQueueMatchIds")]
+    public List<string> CustomTickerQueueMatchIds { get; init; } = new();
+
+    [JsonPropertyName("teamAlertProfiles")]
+    public Dictionary<string, EntityAlertProfileDto> TeamAlertProfiles { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("competitionAlertProfiles")]
+    public Dictionary<string, EntityAlertProfileDto> CompetitionAlertProfiles { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
@@ -110,26 +139,40 @@ public sealed record UserPreferences
             if (id.Equals(CanonicalEntityIds.Barcelona, StringComparison.OrdinalIgnoreCase) ||
                 id.Equals(CanonicalEntityIds.LegacyBarcelona, StringComparison.OrdinalIgnoreCase) ||
                 id.Equals(CanonicalEntityIds.BarcelonaMockAlias, StringComparison.OrdinalIgnoreCase) ||
-                id.Equals(CanonicalEntityIds.BarcelonaNumericId.ToString(), StringComparison.OrdinalIgnoreCase))
+                id.Equals(CanonicalEntityIds.BarcelonaNumericId.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                id.Equals("team_529", StringComparison.OrdinalIgnoreCase) ||
+                id.Equals("529", StringComparison.OrdinalIgnoreCase))
             {
                 set.Add(CanonicalEntityIds.Barcelona);
                 set.Add(CanonicalEntityIds.LegacyBarcelona);
                 set.Add(CanonicalEntityIds.BarcelonaMockAlias);
                 set.Add(CanonicalEntityIds.BarcelonaNumericId.ToString());
+                set.Add("team_529");
+                set.Add("529");
             }
             else if (id.Equals(CanonicalEntityIds.AlAhly, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.LegacyAlAhly, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.AlAhlyMockAlias, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.AlAhlyNumericId.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                     id.Equals("1577", StringComparison.OrdinalIgnoreCase) ||
-                     id.Equals("team_1577", StringComparison.OrdinalIgnoreCase))
+                     id.Equals("team_1029", StringComparison.OrdinalIgnoreCase))
             {
                 set.Add(CanonicalEntityIds.AlAhly);
                 set.Add(CanonicalEntityIds.LegacyAlAhly);
                 set.Add(CanonicalEntityIds.AlAhlyMockAlias);
                 set.Add(CanonicalEntityIds.AlAhlyNumericId.ToString());
-                set.Add("1577");
-                set.Add("team_1577");
+                set.Add("team_1029");
+            }
+            else if (id.Equals(CanonicalEntityIds.Zamalek, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.LegacyZamalek, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.ZamalekMockAlias, StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals(CanonicalEntityIds.ZamalekNumericId.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals("team_1028", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add(CanonicalEntityIds.Zamalek);
+                set.Add(CanonicalEntityIds.LegacyZamalek);
+                set.Add(CanonicalEntityIds.ZamalekMockAlias);
+                set.Add(CanonicalEntityIds.ZamalekNumericId.ToString());
+                set.Add("team_1028");
             }
             else if (id.Equals(CanonicalEntityIds.Egypt, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.LegacyEgypt, StringComparison.OrdinalIgnoreCase) ||
@@ -204,12 +247,14 @@ public sealed record UserPreferences
             else if (id.Equals(CanonicalEntityIds.LaLiga, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.LegacyLaLiga, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.LaLigaMockAlias, StringComparison.OrdinalIgnoreCase) ||
-                     id.Equals(CanonicalEntityIds.LaLigaNumericId.ToString(), StringComparison.OrdinalIgnoreCase))
+                     id.Equals("87", StringComparison.OrdinalIgnoreCase) ||
+                     id.Equals("comp_87", StringComparison.OrdinalIgnoreCase))
             {
                 set.Add(CanonicalEntityIds.LaLiga);
                 set.Add(CanonicalEntityIds.LegacyLaLiga);
                 set.Add(CanonicalEntityIds.LaLigaMockAlias);
-                set.Add(CanonicalEntityIds.LaLigaNumericId.ToString());
+                set.Add("87");
+                set.Add("comp_87");
             }
             else if (id.Equals(CanonicalEntityIds.EgyptianPremierLeague, StringComparison.OrdinalIgnoreCase) ||
                      id.Equals(CanonicalEntityIds.LegacyEgyptianPremierLeague, StringComparison.OrdinalIgnoreCase) ||

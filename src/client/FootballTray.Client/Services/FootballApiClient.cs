@@ -96,6 +96,19 @@ public class CompetitionHubApiResponse
         new() { IsSuccess = false, ErrorMessage = message };
 }
 
+public class TeamHubApiResponse
+{
+    public bool IsSuccess { get; init; }
+    public ApiResponseEnvelope<TeamHubDto>? Envelope { get; init; }
+    public string? ErrorMessage { get; init; }
+
+    public static TeamHubApiResponse Success(ApiResponseEnvelope<TeamHubDto> envelope) =>
+        new() { IsSuccess = true, Envelope = envelope };
+
+    public static TeamHubApiResponse Error(string message) =>
+        new() { IsSuccess = false, ErrorMessage = message };
+}
+
 public class FootballApiClient : IDisposable
 {
     public const string DefaultBaseUrl = "http://127.0.0.1:4000";
@@ -358,7 +371,7 @@ public class FootballApiClient : IDisposable
                 {
                     offlineCached.Data.CachedFallback = true;
                 }
-                return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+                return TrayApiResponse.Success(offlineCached, offlineCached.ETag ?? offlineCached.Data?.ETag, quotaExhausted: false, cachedFallback: true);
             }
 
             return nativeRes;
@@ -518,7 +531,7 @@ public class FootballApiClient : IDisposable
                     {
                         offlineCached.Data.CachedFallback = true;
                     }
-                    return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+                    return TrayApiResponse.Success(offlineCached, offlineCached.ETag ?? offlineCached.Data?.ETag, quotaExhausted: false, cachedFallback: true);
                 }
 
                 return nativeRes;
@@ -564,7 +577,7 @@ public class FootballApiClient : IDisposable
                 {
                     offlineCached.Data.CachedFallback = true;
                 }
-                return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+                return TrayApiResponse.Success(offlineCached, offlineCached.ETag ?? offlineCached.Data?.ETag, quotaExhausted: false, cachedFallback: true);
             }
 
             return nativeRes;
@@ -714,7 +727,7 @@ public class FootballApiClient : IDisposable
                     {
                         offlineCached.Data.CachedFallback = true;
                     }
-                    return TrayApiResponse.Success(offlineCached, null, quotaExhausted: false, cachedFallback: true);
+                    return TrayApiResponse.Success(offlineCached, offlineCached.ETag ?? offlineCached.Data?.ETag, quotaExhausted: false, cachedFallback: true);
                 }
 
                 return nativeRes;
@@ -1250,6 +1263,132 @@ public class FootballApiClient : IDisposable
 
             Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "CompetitionHubNetworkError", $"Network error for '{url}': [{ex.GetType().Name}] {ex.Message}", ex);
             return CompetitionHubApiResponse.Error($"Network error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Fetches team hub details, fixtures, form, squad, and standings.
+    /// Falls back seamlessly to In-Process Native Telemetry when local daemon is absent.
+    /// </summary>
+    public async Task<TeamHubApiResponse> GetTeamHubAsync(
+        string teamId,
+        string? name = null,
+        string? logoUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(teamId))
+        {
+            return TeamHubApiResponse.Error("Team ID cannot be empty.");
+        }
+
+        await EnsureEngineStateAsync(cancellationToken);
+
+        if (_useStandaloneNativeEngine)
+        {
+            var hub = await _nativeProvider.GetTeamHubAsync(teamId, name, logoUrl, cancellationToken);
+            if (hub != null)
+            {
+                var env = new ApiResponseEnvelope<TeamHubDto>
+                {
+                    SchemaVersion = "2.0",
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    Version = 2,
+                    GeneratedAt = DateTimeOffset.UtcNow,
+                    ServerTime = DateTimeOffset.UtcNow,
+                    Stale = false,
+                    Data = hub
+                };
+                _ = _cacheService.SaveTeamHubCacheAsync(teamId, env, CancellationToken.None);
+                return TeamHubApiResponse.Success(env);
+            }
+
+            // Tier 3 Offline Disk Fallback
+            var offlineCached = await _cacheService.LoadTeamHubCacheAsync(teamId, cancellationToken);
+            if (offlineCached != null)
+            {
+                offlineCached.Stale = true;
+                return TeamHubApiResponse.Success(offlineCached);
+            }
+
+            return TeamHubApiResponse.Error($"Team hub data not found for '{teamId}'.");
+        }
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+        string url = $"{_httpClient.BaseAddress}api/v2/teams/{Uri.EscapeDataString(teamId)}/hub";
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, linkedCts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                string json = await response.Content.ReadAsStringAsync(linkedCts.Token);
+                string snippet = json.Length > 200 ? json[..200] : json;
+
+                try
+                {
+                    var envelope = JsonSerializer.Deserialize(
+                        json,
+                        FootballJsonSerializerContext.Default.ApiResponseEnvelopeTeamHubDto
+                    );
+
+                    if (envelope?.Data == null)
+                    {
+                        Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "TeamHubNullData", $"Team hub envelope Data was null for '{teamId}'. Payload: {snippet}");
+                        return TeamHubApiResponse.Error("Failed to deserialize team hub response.");
+                    }
+
+                    _ = _cacheService.SaveTeamHubCacheAsync(teamId, envelope, CancellationToken.None);
+                    return TeamHubApiResponse.Success(envelope);
+                }
+                catch (JsonException jEx)
+                {
+                    Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "TeamHubDeserializationFailed", $"Failed to parse JSON for '{teamId}': {jEx.Message}. Payload: {snippet}", jEx);
+                    return TeamHubApiResponse.Error($"JSON deserialization error: {jEx.Message}");
+                }
+            }
+
+            string errorBody = await response.Content.ReadAsStringAsync(linkedCts.Token);
+            Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "TeamHubHttpError", $"HTTP {(int)response.StatusCode} for '{url}': {errorBody}");
+            return TeamHubApiResponse.Error($"Server returned HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (_enableNativeFallback)
+            {
+                ActivateStandaloneMode(ex.Message);
+                var hub = await _nativeProvider.GetTeamHubAsync(teamId, name, logoUrl, linkedCts.Token);
+                if (hub != null)
+                {
+                    var env = new ApiResponseEnvelope<TeamHubDto>
+                    {
+                        SchemaVersion = "2.0",
+                        RequestId = Guid.NewGuid().ToString("N"),
+                        Version = 2,
+                        GeneratedAt = DateTimeOffset.UtcNow,
+                        ServerTime = DateTimeOffset.UtcNow,
+                        Stale = false,
+                        Data = hub
+                    };
+                    _ = _cacheService.SaveTeamHubCacheAsync(teamId, env, CancellationToken.None);
+                    return TeamHubApiResponse.Success(env);
+                }
+
+                // Tier 3 Offline Disk Fallback
+                var offlineCached = await _cacheService.LoadTeamHubCacheAsync(teamId, cancellationToken);
+                if (offlineCached != null)
+                {
+                    offlineCached.Stale = true;
+                    return TeamHubApiResponse.Success(offlineCached);
+                }
+            }
+
+            Diagnostics.AppDiagnosticsLogger.LogError("FootballApiClient", "TeamHubNetworkError", $"Network error for '{url}': [{ex.GetType().Name}] {ex.Message}", ex);
+            return TeamHubApiResponse.Error($"Network error: {ex.Message}");
         }
     }
 

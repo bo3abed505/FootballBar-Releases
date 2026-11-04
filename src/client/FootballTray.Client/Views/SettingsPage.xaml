@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:prefs="using:FootballTray.Client.Services.Preferences"
+    xmlns:vm="using:FootballTray.Client.ViewModels"
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
@@ -64,8 +65,146 @@
                         <!-- Auto-Rotate Ticker (Carousel Mode) -->
                         <ToggleSwitch
                             x:Name="TickerCarouselToggle"
-                            Header="Auto-Rotate Ticker (Carousel Mode)"
+                            Header="Auto-Rotate Ticker"
                             Toggled="OnTickerCarouselToggled" />
+
+                        <!-- Auto-Rotate Mode -->
+                        <StackPanel x:Name="TickerRotationScopePanel" Spacing="6" Margin="0,2,0,0">
+                            <TextBlock Text="Auto-Rotate Mode" FontWeight="Medium" FontSize="13" />
+                            <ComboBox x:Name="TickerRotationScopeCombo" SelectionChanged="OnTickerRotationScopeChanged" Width="260" IsEnabled="{x:Bind TickerCarouselToggle.IsOn, Mode=OneWay}">
+                                <ComboBoxItem Tag="FollowedLive">⭐ Followed Live</ComboBoxItem>
+                                <ComboBoxItem Tag="AllFollowed">📅 All Followed</ComboBoxItem>
+                                <ComboBoxItem Tag="AllLive">🔴 All Live</ComboBoxItem>
+                                <ComboBoxItem Tag="CustomQueue">📋 Custom Queue</ComboBoxItem>
+                            </ComboBox>
+                        </StackPanel>
+                        <!-- Custom Queue Matches -->
+                        <StackPanel x:Name="CustomQueueMatchesSection" Spacing="8" Margin="0,6,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="📋 Custom Queue Matches" FontWeight="Medium" FontSize="13" VerticalAlignment="Center" />
+                                <Button
+                                    Grid.Column="1"
+                                    Content="Clear Queue"
+                                    Click="OnClearCustomQueueClicked"
+                                    Padding="8,3"
+                                    FontSize="11"
+                                    Style="{ThemeResource SubtleButtonStyle}" />
+                            </Grid>
+                            <TextBlock
+                                Text="Matches rotate in this sequence when Custom Queue mode is active. Drag to reorder, or use the arrow buttons."
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock
+                                x:Name="NoCustomQueueMatchesText"
+                                Text="No matches in custom queue. Pin matches from the match cards to build your queue."
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Visibility="Collapsed"
+                                FontSize="12" />
+
+                            <ItemsControl
+                                x:Name="CustomQueueMatchesItemsControl"
+                                ItemsSource="{x:Bind ViewModel.CustomQueueMatches, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CustomQueueMatchItemViewModel">
+                                        <Border
+                                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="8,6"
+                                            Margin="0,0,0,4">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Index Badge -->
+                                                <Border
+                                                    Grid.Column="0"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="6,2"
+                                                    VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind IndexBadge, Mode=OneWay}"
+                                                        FontSize="11"
+                                                        FontWeight="Bold"
+                                                        Foreground="#FFFFFF" />
+                                                </Border>
+
+                                                <!-- Match Title & Competition -->
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind MatchTitle}"
+                                                        FontWeight="SemiBold"
+                                                        FontSize="12"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock
+                                                        Text="{x:Bind CompetitionName}"
+                                                        FontSize="10"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+
+                                                <!-- Status -->
+                                                <Border
+                                                    Grid.Column="2"
+                                                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="6,2"
+                                                    VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind StatusText, Mode=OneWay}"
+                                                        FontSize="10"
+                                                        FontWeight="SemiBold" />
+                                                </Border>
+
+                                                <!-- Move Up / Down -->
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                                                    <Button
+                                                        Content="↑"
+                                                        Tag="{x:Bind MatchId}"
+                                                        Click="OnMoveQueueMatchUpClicked"
+                                                        ToolTipService.ToolTip="Move Up"
+                                                        Padding="6,2"
+                                                        FontSize="11"
+                                                        Style="{ThemeResource SubtleButtonStyle}" />
+                                                    <Button
+                                                        Content="↓"
+                                                        Tag="{x:Bind MatchId}"
+                                                        Click="OnMoveQueueMatchDownClicked"
+                                                        ToolTipService.ToolTip="Move Down"
+                                                        Padding="6,2"
+                                                        FontSize="11"
+                                                        Style="{ThemeResource SubtleButtonStyle}" />
+                                                </StackPanel>
+
+                                                <!-- Remove / Unpin -->
+                                                <Button
+                                                    Grid.Column="4"
+                                                    Content="✕"
+                                                    Tag="{x:Bind MatchId}"
+                                                    Click="OnRemoveQueueMatchClicked"
+                                                    ToolTipService.ToolTip="Remove from queue"
+                                                    Padding="6,2"
+                                                    FontSize="11"
+                                                    Style="{ThemeResource SubtleButtonStyle}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
 
                         <!-- 24-Hour Time Format -->
                         <ToggleSwitch
@@ -180,6 +319,110 @@
                                     Content="🔊 Test Sound"
                                     Click="OnTestSoundClicked" />
                             </Grid>
+                        </StackPanel>
+                        <MenuFlyoutSeparator Margin="0,4,0,4" />
+
+                        <!-- Followed Entity Alert Overrides -->
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xEA8F;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                <TextBlock Text="Per-Club &amp; Per-Competition 🔔 Alert Overrides" FontWeight="Medium" FontSize="13" />
+                            </StackPanel>
+                            <TextBlock
+                                Text="Customize or mute goal, card, and kickoff alerts for individual clubs and competitions."
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock
+                                x:Name="NoFollowedEntityAlertsText"
+                                Text="No clubs or competitions followed yet. Follow teams or leagues from Search to set custom alert profiles."
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Visibility="Collapsed" />
+
+                            <ListView
+                                x:Name="EntityAlertOverridesListView"
+                                SelectionMode="None"
+                                MaxHeight="300"
+                                ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:FollowedEntityAlertItemViewModel">
+                                        <Border
+                                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="10,6"
+                                            Margin="0,0,0,4">
+                                            <Grid ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Type Badge (🛡️ Club / 🏆 Competition) -->
+                                                <Border
+                                                    Grid.Column="0"
+                                                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="5,2"
+                                                    VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind TypeBadge}"
+                                                        FontSize="11"
+                                                        FontWeight="SemiBold" />
+                                                </Border>
+
+                                                <!-- Name -->
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Text="{x:Bind Name}"
+                                                    FontWeight="SemiBold"
+                                                    FontSize="12"
+                                                    VerticalAlignment="Center"
+                                                    TextTrimming="CharacterEllipsis" />
+
+                                                <!-- Status Badge -->
+                                                <Border
+                                                    Grid.Column="2"
+                                                    Background="{ThemeResource LayerFillColorAltBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="6,2"
+                                                    VerticalAlignment="Center">
+                                                    <TextBlock
+                                                        Text="{x:Bind StatusBadge, Mode=OneWay}"
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </Border>
+
+                                                <!-- Configure Button -->
+                                                <Button
+                                                    Grid.Column="3"
+                                                    Content="🔔 Configure Alerts"
+                                                    Tag="{x:Bind}"
+                                                    Click="OnConfigureEntityAlertsClicked"
+                                                    Padding="8,4"
+                                                    FontSize="11" />
+
+                                                <!-- Reset Button -->
+                                                <Button
+                                                    Grid.Column="4"
+                                                    Content="Reset to Global"
+                                                    Tag="{x:Bind}"
+                                                    Click="OnResetEntityAlertClicked"
+                                                    IsEnabled="{x:Bind CanReset, Mode=OneWay}"
+                                                    Padding="8,4"
+                                                    FontSize="11"
+                                                    Style="{ThemeResource SubtleButtonStyle}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
                         </StackPanel>
                     </StackPanel>
                 </Border>

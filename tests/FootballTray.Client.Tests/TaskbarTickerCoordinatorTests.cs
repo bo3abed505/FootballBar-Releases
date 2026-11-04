@@ -673,9 +673,9 @@ public class TaskbarTickerCoordinatorTests
 
         // 1. Simulate Yesterday's schedule: finished matches, 0 live
         var m1 = CreateMatch("m1", "MCI", "BHA", "FINISHED", 90, 1, 1);
-        m1.KickoffTime = DateTime.UtcNow.AddDays(-1);
+        m1.KickoffTime = DateTime.Today.AddDays(-1).ToUniversalTime();
         var m2 = CreateMatch("m2", "ARS", "CHE", "FINISHED", 90, 2, 0);
-        m2.KickoffTime = DateTime.UtcNow.AddDays(-1);
+        m2.KickoffTime = DateTime.Today.AddDays(-1).ToUniversalTime();
         var prefs = new FootballTray.Client.Services.Preferences.UserPreferences
         {
             EnableTickerCarousel = false,

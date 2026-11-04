@@ -69,6 +69,29 @@ public sealed class NotificationCoordinator
                     if (!relevance.IsRelevant) continue;
                 }
 
+                // Entity alert profile check for kickoff reminder
+                if (prefs.TeamAlertProfiles != null && prefs.TeamAlertProfiles.Count > 0)
+                {
+                    EntityAlertProfileDto? tProf = null;
+                    if (!string.IsNullOrWhiteSpace(match.HomeTeam?.Id) && prefs.TeamAlertProfiles.TryGetValue(match.HomeTeam.Id, out var hp)) tProf = hp;
+                    else if (!string.IsNullOrWhiteSpace(match.AwayTeam?.Id) && prefs.TeamAlertProfiles.TryGetValue(match.AwayTeam.Id, out var ap)) tProf = ap;
+
+                    if (tProf != null)
+                    {
+                        if (string.Equals(tProf.Mode, "Muted", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (string.Equals(tProf.Mode, "Custom", StringComparison.OrdinalIgnoreCase) && !tProf.EnableKickoffReminder) continue;
+                    }
+                }
+
+                if (prefs.CompetitionAlertProfiles != null && prefs.CompetitionAlertProfiles.Count > 0 && match.Competition != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(match.Competition.Id) && prefs.CompetitionAlertProfiles.TryGetValue(match.Competition.Id, out var cProf))
+                    {
+                        if (string.Equals(cProf.Mode, "Muted", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (string.Equals(cProf.Mode, "Custom", StringComparison.OrdinalIgnoreCase) && !cProf.EnableKickoffReminder) continue;
+                    }
+                }
+
                 var kickoffTime = match.KickoffTime;
                 var timeUntilKickoff = kickoffTime - now;
 

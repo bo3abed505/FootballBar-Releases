@@ -75,6 +75,7 @@ public sealed partial class MainPage : Page
         if (_viewModel == null) return;
 
         CompetitionGroupsList.ItemsSource = _viewModel.CompetitionGroups;
+        FollowingDayGroupsList.ItemsSource = _viewModel.FollowingDayGroups;
         CalendarDaysList.ItemsSource = _viewModel.CalendarDays;
         TeamsList.ItemsSource = _viewModel.SearchCatalog.FollowedTeams;
         CompetitionsList.ItemsSource = _viewModel.SearchCatalog.FollowedCompetitions;
@@ -131,6 +132,10 @@ public sealed partial class MainPage : Page
             EmptyStateTitleText.Text = _viewModel.EmptyStateTitle;
             EmptyStateSubtitleText.Text = _viewModel.EmptyStateMessage;
             CompetitionGroupsList.Visibility = Visibility.Collapsed;
+            if (FollowingDayGroupsList != null)
+            {
+                FollowingDayGroupsList.Visibility = Visibility.Collapsed;
+            }
             if (EmptyStateProgressRing != null)
             {
                 EmptyStateProgressRing.Visibility = _viewModel.IsSynchronizingSchedule ? Visibility.Visible : Visibility.Collapsed;
@@ -143,13 +148,21 @@ public sealed partial class MainPage : Page
         else
         {
             EmptyStateBorder.Visibility = Visibility.Collapsed;
-            CompetitionGroupsList.Visibility = Visibility.Visible;
+            CompetitionGroupsList.Visibility = _viewModel.StandardScheduleVisibility;
+            if (FollowingDayGroupsList != null)
+            {
+                FollowingDayGroupsList.Visibility = _viewModel.FollowingScheduleVisibility;
+            }
         }
 
         // 7-Day Calendar Navigation Bar visibility
         if (CalendarScrollViewer != null)
         {
-            CalendarScrollViewer.Visibility = _viewModel.IsCalendarVisible ? Visibility.Visible : Visibility.Collapsed;
+            CalendarScrollViewer.Visibility = _viewModel.IsCalendarStripVisible ? Visibility.Visible : Visibility.Collapsed;
+        }
+        if (MatchCalendarDatePicker != null)
+        {
+            MatchCalendarDatePicker.Visibility = _viewModel.IsDatePickerVisible ? Visibility.Visible : Visibility.Collapsed;
         }
 
         // Status / Error InfoBar
@@ -198,9 +211,11 @@ public sealed partial class MainPage : Page
             StandingsAndLeadersPanel.Visibility = _viewModel.IsStandingsMode ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        if (LeagueTableTabButton != null && TopScorersTabButton != null && TopAssistsTabButton != null)
+        if (LeagueTableTabButton != null && FixturesTabButton != null && KnockoutBracketTabButton != null && TopScorersTabButton != null && TopAssistsTabButton != null)
         {
             LeagueTableTabButton.Style = _viewModel.IsLeagueTableSelected ? accentStyle : defaultStyle;
+            FixturesTabButton.Style = _viewModel.IsFixturesSelected ? accentStyle : defaultStyle;
+            KnockoutBracketTabButton.Style = _viewModel.IsKnockoutBracketSelected ? accentStyle : defaultStyle;
             TopScorersTabButton.Style = _viewModel.IsTopScorersSelected ? accentStyle : defaultStyle;
             TopAssistsTabButton.Style = _viewModel.IsTopAssistsSelected ? accentStyle : defaultStyle;
         }
@@ -212,6 +227,14 @@ public sealed partial class MainPage : Page
         if (LeagueTableContainer != null)
         {
             LeagueTableContainer.Visibility = _viewModel.HubTableSubTabVisibility;
+        }
+        if (FixturesContainer != null)
+        {
+            FixturesContainer.Visibility = _viewModel.HubFixturesSubTabVisibility;
+        }
+        if (KnockoutBracketContainer != null)
+        {
+            KnockoutBracketContainer.Visibility = _viewModel.HubKnockoutBracketSubTabVisibility;
         }
         if (TopScorersContainer != null)
         {
@@ -274,7 +297,7 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnTopScorersTabClicked(object sender, RoutedEventArgs e)
+    private void OnFixturesTabClicked(object sender, RoutedEventArgs e)
     {
         if (_viewModel != null)
         {
@@ -283,12 +306,153 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnTopAssistsTabClicked(object sender, RoutedEventArgs e)
+    private void OnKnockoutBracketTabClicked(object sender, RoutedEventArgs e)
     {
         if (_viewModel != null)
         {
             _viewModel.StandingsSubTabIndex = 2;
             UpdateModeAndStandingsUi();
+        }
+    }
+
+    private void OnTopScorersTabClicked(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            _viewModel.StandingsSubTabIndex = 3;
+            UpdateModeAndStandingsUi();
+        }
+    }
+
+    private void OnTopAssistsTabClicked(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            _viewModel.StandingsSubTabIndex = 4;
+            UpdateModeAndStandingsUi();
+        }
+    }
+
+    private void OnFixtureItemClicked(object sender, RoutedEventArgs e)
+    {
+        var fixVm = ((sender as FrameworkElement)?.DataContext as CompetitionFixtureViewModel)
+            ?? ((sender as FrameworkElement)?.Tag as CompetitionFixtureViewModel);
+
+        string? matchId = (sender as FrameworkElement)?.Tag as string
+            ?? fixVm?.Id
+            ?? ((sender as FrameworkElement)?.DataContext as FootballTray.Core.Dto.CompetitionFixtureDto)?.Id;
+
+        if (fixVm != null)
+        {
+            App.OpenMatchCenter(fixVm.ToTrayMatchDto());
+        }
+        else if (!string.IsNullOrWhiteSpace(matchId))
+        {
+            App.OpenMatchCenter(matchId);
+        }
+    }
+
+    private void OnFixtureCardTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject dep)
+        {
+            var parent = dep;
+            while (parent != null && !ReferenceEquals(parent, sender))
+            {
+                if (parent is ButtonBase)
+                {
+                    return;
+                }
+                parent = VisualTreeHelper.GetParent(parent);
+            }
+        }
+
+        var fixVm = ((sender as FrameworkElement)?.DataContext as CompetitionFixtureViewModel)
+            ?? ((sender as FrameworkElement)?.Tag as CompetitionFixtureViewModel);
+
+        if (fixVm != null)
+        {
+            App.OpenMatchCenter(fixVm.ToTrayMatchDto());
+        }
+    }
+
+    private void OnScheduleHomeTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel match && !string.IsNullOrWhiteSpace(match.HomeTeamId))
+        {
+            App.OpenTeamHub(match.HomeTeamId, match.HomeTeamName, match.HomeTeamLogoUrl);
+        }
+    }
+
+    private void OnScheduleAwayTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel match && !string.IsNullOrWhiteSpace(match.AwayTeamId))
+        {
+            App.OpenTeamHub(match.AwayTeamId, match.AwayTeamName, match.AwayTeamLogoUrl);
+        }
+    }
+
+    private void OnFixtureHomeTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CompetitionFixtureViewModel fix && !string.IsNullOrWhiteSpace(fix.HomeTeamId))
+        {
+            App.OpenTeamHub(fix.HomeTeamId, fix.HomeTeamName, fix.HomeTeamLogo);
+        }
+    }
+
+    private void OnFixtureAwayTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CompetitionFixtureViewModel fix && !string.IsNullOrWhiteSpace(fix.AwayTeamId))
+        {
+            App.OpenTeamHub(fix.AwayTeamId, fix.AwayTeamName, fix.AwayTeamLogo);
+        }
+    }
+
+    private void OnStandingTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is StandingRowItemViewModel row)
+        {
+            App.OpenTeamHub(row.TeamId, row.DisplayName, row.TeamLogoUrl);
+        }
+    }
+
+    private void OnSearchTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is FollowedTeamItemViewModel team)
+        {
+            App.OpenTeamHub(team.Id, team.Name, team.LogoUrl);
+        }
+    }
+
+    private void OnFollowedTeamClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is FollowedTeamItemViewModel team)
+        {
+            App.OpenTeamHub(team.Id, team.Name, team.LogoUrl);
+        }
+    }
+
+    private void OnSearchCompetitionClicked(object sender, RoutedEventArgs e)
+    {
+        var comp = (sender as FrameworkElement)?.Tag as FollowedCompetitionItemViewModel
+            ?? (sender as FrameworkElement)?.DataContext as FollowedCompetitionItemViewModel;
+        if (comp != null && _viewModel != null)
+        {
+            _viewModel.NavigateToCompetition(comp.Id, comp.Name, comp.LogoUrl);
+            UpdateModeAndStandingsUi();
+            Bindings.Update();
+        }
+    }
+
+    private void OnFollowedCompetitionClicked(object sender, RoutedEventArgs e)
+    {
+        var comp = (sender as FrameworkElement)?.Tag as FollowedCompetitionItemViewModel
+            ?? (sender as FrameworkElement)?.DataContext as FollowedCompetitionItemViewModel;
+        if (comp != null && _viewModel != null)
+        {
+            _viewModel.NavigateToCompetition(comp.Id, comp.Name, comp.LogoUrl);
+            UpdateModeAndStandingsUi();
+            Bindings.Update();
         }
     }
 
@@ -354,6 +518,34 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnEntityAlertsClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag != null)
+        {
+            var prefs = _viewModel?.PreferencesService ?? App.CurrentPreferencesService;
+            if (prefs == null) return;
+
+            if (fe.Tag is FollowedTeamItemViewModel teamVm)
+            {
+                FootballTray.Client.Views.Controls.EntityAlertFlyoutHelper.ShowAlertProfileFlyout(
+                    fe,
+                    teamVm.Id,
+                    teamVm.Name,
+                    isTeam: true,
+                    prefs);
+            }
+            else if (fe.Tag is FollowedCompetitionItemViewModel compVm)
+            {
+                FootballTray.Client.Views.Controls.EntityAlertFlyoutHelper.ShowAlertProfileFlyout(
+                    fe,
+                    compVm.Id,
+                    compVm.Name,
+                    isTeam: false,
+                    prefs);
+            }
+        }
+    }
+
     private async void OnRemoveTeamClicked(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string teamId && _viewModel != null)
@@ -388,8 +580,8 @@ public sealed partial class MainPage : Page
         FilterAllButton.Style = _viewModel.ActiveFilter == MatchFilterType.All ? accentStyle : defaultStyle;
         FilterFollowingButton.Style = _viewModel.ActiveFilter == MatchFilterType.Following ? accentStyle : defaultStyle;
         FilterLiveButton.Style = _viewModel.ActiveFilter == MatchFilterType.Live ? accentStyle : defaultStyle;
-        FilterUpcomingButton.Style = _viewModel.ActiveFilter == MatchFilterType.Upcoming ? accentStyle : defaultStyle;
-        FilterFinishedButton.Style = _viewModel.ActiveFilter == MatchFilterType.Finished ? accentStyle : defaultStyle;
+        FilterUpcomingButton.Visibility = Visibility.Collapsed;
+        FilterFinishedButton.Visibility = Visibility.Collapsed;
     }
 
     private void OnFilterAllClick(object sender, RoutedEventArgs e) => _viewModel?.SetFilter(MatchFilterType.All);
@@ -435,11 +627,29 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnTogglePinClicked(object sender, RoutedEventArgs e)
+    private async void OnTogglePinClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem)
+        if (sender is FrameworkElement fe && fe.Tag is MatchItemViewModel matchItem && _viewModel != null)
         {
-            _viewModel?.TogglePinMatch(matchItem.Id);
+            await _viewModel.HandleMatchPinToggleAsync(matchItem.Id, null, async ctx =>
+            {
+                if (this.XamlRoot == null) return ContentDialogChoice.Replace;
+                var dialog = new ContentDialog
+                {
+                    Title = ctx.Title,
+                    Content = ctx.Content,
+                    PrimaryButtonText = ctx.PrimaryButtonText,
+                    SecondaryButtonText = ctx.SecondaryButtonText,
+                    CloseButtonText = ctx.CloseButtonText,
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = this.XamlRoot
+                };
+                dialog.Resources["ContentDialogMinWidth"] = 460.0;
+                var res = await dialog.ShowAsync();
+                if (res == ContentDialogResult.Primary) return ContentDialogChoice.Replace;
+                if (res == ContentDialogResult.Secondary) return ContentDialogChoice.AddToQueue;
+                return ContentDialogChoice.Cancel;
+            });
         }
     }
 

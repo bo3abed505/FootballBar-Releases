@@ -551,7 +551,8 @@ public class UserPreferencesAndRelevanceTests
 
         Assert.AreEqual(1, alerts.Count);
         Assert.AreEqual(1, renderer.Rendered.Count);
-        Assert.AreEqual("15' L. Yamal", renderer.Rendered[0].Body);
+        Assert.AreEqual("⚽ GOAL! FC Barcelona", renderer.Rendered[0].Title);
+        Assert.AreEqual("FC Barcelona [1] - 0 Real Madrid • 15' L. Yamal", renderer.Rendered[0].Body);
     }
 
     [TestMethod]
@@ -809,7 +810,8 @@ public class UserPreferencesAndRelevanceTests
         await syncService.PollOnceAsync();
 
         Assert.AreEqual(1, renderer.Rendered.Count);
-        Assert.AreEqual("88' Raphinha", renderer.Rendered[0].Body);
+        Assert.AreEqual("⚽ GOAL! FC Barcelona", renderer.Rendered[0].Title);
+        Assert.AreEqual("FC Barcelona [1] - 0 Real Madrid • 88' Raphinha", renderer.Rendered[0].Body);
     }
 
     // ============================================================
