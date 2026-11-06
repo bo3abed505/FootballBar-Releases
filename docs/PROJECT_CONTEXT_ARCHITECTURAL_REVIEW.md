@@ -11,7 +11,7 @@
 - **Application:** Standalone Windows 11 football companion featuring a live score ticker docked directly inside the Windows taskbar (`Shell_TrayWnd`), paired with a WinUI 3 dashboard, Match Center, system toast notifications, and stadium audio cues.
 - **Backend Service:** Autonomous Node.js/TypeScript background daemon (Fastify 5 + SQLite via better-sqlite3 + Drizzle ORM) spawned and managed by the desktop client. It handles provider ingestion, caching, and rate budgeting.
 - **Current Release & Tag:** `v1.1.0` (commit `bac728f`, tagged 2026-09-25). Repository `VERSION` = `1.1.0`.
-- **Current Stage:** **Post-v1.1.0 Stabilization & FotMob Provider Migration.** Moving away from the 100 req/day quota constraints of API-Football to FotMob's unmetered JSON feeds.
+- **Current Stage:** **Post-v1.1.0 Stabilization & NativeTelemetry Provider Migration.** Moving away from the 100 req/day quota constraints of API-Football to NativeTelemetry's unmetered JSON feeds.
 - **Git State:** `master` at HEAD commit `a1a0e6a` (2026-10-09). **46 modified + 18 untracked files (~+3,026 / −1,263 lines) currently reside uncommitted in the working tree.** No git remote is configured.
 - **Status of Previous Review:** The 5 key architectural questions from our preliminary audit have been formally settled with the outgoing reviewer and Product Owner (see §10 & §12). The core operational directives are locked for the v1.2 milestone.
 
@@ -51,7 +51,7 @@ flowchart TD
   subgraph LocalDaemon["Backend Daemon (Fastify 5 + Drizzle + better-sqlite3)"]
     HttpRoutes["api/routes.ts<br/>/api/v2/tray, /matches/:id"] --> FixturesRepo["FixturesRepository"]
     Scheduler["AcquisitionScheduler"] --> PolicyEngine["AcquisitionPolicyEngine<br/>Pure Decision Engine"]
-    Scheduler --> SyncEngine["SyncService"] --> ActiveProvider["IDataProvider<br/>FotmobProvider (Primary)"]
+    Scheduler --> SyncEngine["SyncService"] --> ActiveProvider["IDataProvider<br/>NativeTelemetryProvider (Primary)"]
     SyncEngine --> MatchRepo["MatchRepository / AcquisitionService<br/>Canonical Identity Normalization"]
     MatchRepo --> SqliteDb[("SQLite Database<br/>backend/local.db (WAL)")]
     FixturesRepo --> SqliteDb
@@ -59,7 +59,7 @@ flowchart TD
   end
 
   ApiClient -- "HTTP 127.0.0.1:4000 (JSON + ETag 304)" --> HttpRoutes
-  ActiveProvider -- "HTTPS (JSON)" --> ExternalProvider["FotMob /api/data/*<br/>(Fallback: API-Football)"]
+  ActiveProvider -- "HTTPS (JSON)" --> ExternalProvider["NativeTelemetry /api/data/*<br/>(Fallback: API-Football)"]
 ```
 
 ### 2.1 WinUI 3 Desktop Client (`src/client`)
@@ -93,10 +93,10 @@ flowchart TD
 | **Stabilization & Polishing ("Strikes")** | 2026-10-03 – 2026-10-09 | Win32 Ole32 clipboard, midnight rollover, timezone filtering, strict 3-day calendar window, non-blocking on-demand sync (`a1a0e6a` = master HEAD). |
 
 ### 3.1 Work Completed Post-v1.1.0 (Uncommitted Working Tree)
-Since the `a1a0e6a` commit, work has focused on the **FotMob provider migration** to escape external API quota limits:
+Since the `a1a0e6a` commit, work has focused on the **NativeTelemetry provider migration** to escape external API quota limits:
 
-1. **FotMob Ingestion Subsystem (`backend/src/providers/fotmob/`):**
-   - Implemented [fotmob.provider.ts](file:///f:/Programs/FootballTray/backend/src/providers/fotmob/fotmob.provider.ts) targeting FotMob JSON data endpoints with circuit breaker protection.
+1. **NativeTelemetry Ingestion Subsystem (`backend/src/providers/NativeTelemetry/`):**
+   - Implemented [NativeTelemetry.provider.ts](file:///f:/Programs/FootballTray/backend/src/providers/NativeTelemetry/NativeTelemetry.provider.ts) targeting NativeTelemetry JSON data endpoints with circuit breaker protection.
    - Built resilient Zod schemas in `schemas/` with `.nullish()` on all nested statistics so missing pre-match stats do not discard lineups or event payloads.
    - Built heuristic 3-letter team acronym (TLA) generator with stopword filtering and common club overrides.
    - Built tactical formation parser mapping strings like `"4-2-3-1"` to pitch grid coordinates (`Row:Col`).
@@ -106,8 +106,8 @@ Since the `a1a0e6a` commit, work has focused on the **FotMob provider migration*
    - Mapped substitution events (`swap[0]` / `swap[1]`) and card detail types, filtering non-incident markers.
    - Added weak ETag and HTTP 304 handling on `/api/v2/tray`.
 3. **October 18 Bug Batch (Cross-Layer Fixes):**
-   - **Substitution In/Out Swapped:** Aligned FotMob provider swap order with [MatchCenterViewModel.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Client/ViewModels/MatchCenterViewModel.cs) and added `AssistPlayerId` to [ApiContractDtos.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Core/Dto/ApiContractDtos.cs).
-   - **Competition Country & Major Leagues:** Propagated real country codes instead of `'COMP'` across [acquisition.service.ts](file:///f:/Programs/FootballTray/backend/src/acquisition/acquisition.service.ts), [match.repository.ts](file:///f:/Programs/FootballTray/backend/src/repositories/match.repository.ts), and DTO formatters. Ingests all daily FotMob matches without league filtering.
+   - **Substitution In/Out Swapped:** Aligned NativeTelemetry provider swap order with [MatchCenterViewModel.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Client/ViewModels/MatchCenterViewModel.cs) and added `AssistPlayerId` to [ApiContractDtos.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Core/Dto/ApiContractDtos.cs).
+   - **Competition Country & Major Leagues:** Propagated real country codes instead of `'COMP'` across [acquisition.service.ts](file:///f:/Programs/FootballTray/backend/src/acquisition/acquisition.service.ts), [match.repository.ts](file:///f:/Programs/FootballTray/backend/src/repositories/match.repository.ts), and DTO formatters. Ingests all daily NativeTelemetry matches without league filtering.
    - **Taskbar Ticker Polish:** Enforced 3-letter short names, dynamic live clock formatting (`67'`, `45+2'`, `HT`, `FT`), and high-quality bilinear crest rendering (`DecodePixelType.Logical`, 36×36).
    - **Pin Preservation on Calendar Navigation:** Preserved `_pinnedMatch` in [TaskbarTickerCoordinator.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Client/Taskbar/TaskbarTickerCoordinator.cs) across date changes.
    - **Polling Flip-Flop Fix:** Built per-URL ETag caching and parameter sorting in [FootballApiClient.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Client/Services/FootballApiClient.cs) to eliminate competing query state.
@@ -125,12 +125,12 @@ Status: 46 modified files, 18 untracked files (+3,026 / −1,263 lines)
 ```
 
 ### Breakdown of Changed/Untracked Files
-- **Backend Provider & Resilience (Untracked):** `fotmob.provider.ts`, `fotmob-provider.spec.ts`, `schemas/matches.schema.ts`, `schemas/match-details.schema.ts`, `circuit-breaker.ts`, `circuit-breaker.spec.ts`, `types.ts`, `errors.ts`, `provider.factory.ts`.
+- **Backend Provider & Resilience (Untracked):** `NativeTelemetry.provider.ts`, `NativeTelemetry-provider.spec.ts`, `schemas/matches.schema.ts`, `schemas/match-details.schema.ts`, `circuit-breaker.ts`, `circuit-breaker.spec.ts`, `types.ts`, `errors.ts`, `provider.factory.ts`.
 - **Backend Ingestion & Scheduling (Modified):** `acquisition-policy.ts`, `acquisition-scheduler.ts`, `acquisition.service.ts`, `sync.service.ts`, `daemon-preferences.service.ts`, `priority-competitions.ts`, `match.repository.ts`, `fixtures.repository.ts`.
 - **Backend API & Schema (Modified):** `routes.ts`, `v2-dto.ts`, `envelope.ts`, `schema.ts`, `db/index.ts`, `provider-alias.ts`.
 - **Client Services & ViewModels (Modified):** `FootballApiClient.cs`, `SyncService.cs`, `PreferencesService.cs`, `UserPreferences.cs`, `DaemonLifecycleManager.cs`, `TaskbarTicker.xaml.cs`, `TaskbarTickerCoordinator.cs`, `TrayTickerFormatter.cs`, `MainViewModel.cs`, `MatchCenterViewModel.cs`, `MatchItemViewModel.cs`, `SettingsPage.xaml(.cs)`.
 - **Contract DTOs (Modified):** `ApiContractDtos.cs`.
-- **Test Suites (Untracked/Modified):** `fotmob-details-hydration.test.ts`, `matchday-simulation.e2e.test.ts`, `database-injection-normalization.test.ts`, `tray-live-endpoint.test.ts`, `Phase8ClientConsumptionTests.cs`, `Phase10MatchCenterIntegrationTests.cs`.
+- **Test Suites (Untracked/Modified):** `NativeTelemetry-details-hydration.test.ts`, `matchday-simulation.e2e.test.ts`, `database-injection-normalization.test.ts`, `tray-live-endpoint.test.ts`, `Phase8ClientConsumptionTests.cs`, `Phase10MatchCenterIntegrationTests.cs`.
 - **Database Files (Tracked binaries - to be untracked):** `backend/local.db`, `backend/local.db-shm`, `backend/local.db-wal`.
 
 ---
@@ -221,7 +221,7 @@ pwsh -ExecutionPolicy Bypass -File ./scripts/validate-release.ps1
 
 - **Backend Unit & Integration Tests (`backend/tests/`):** 34 Vitest suites covering acquisition policy, scheduler lifecycle, rate limit quota-shield, canonical ingestion, v2 contracts, ETag 304 semantics, and matchday simulation.
 - **Client MSTest Suites (`tests/FootballTray.Client.Tests/`):** ~40 test classes covering ticker rotation, coordinate geometry, ETag regression, MainViewModel UI states, notification deduplication, preferences migration, and release packaging.
-- **Current Operational Reality:** The full test suite has **not** been run since the FotMob migration began. Several tests still carry API-Football fixture shapes. A dedicated serial remediation pass is scheduled in Phase 2 of the roadmap.
+- **Current Operational Reality:** The full test suite has **not** been run since the NativeTelemetry migration began. Several tests still carry API-Football fixture shapes. A dedicated serial remediation pass is scheduled in Phase 2 of the roadmap.
 
 ---
 
@@ -230,7 +230,7 @@ pwsh -ExecutionPolicy Bypass -File ./scripts/validate-release.ps1
 | Component | Key Source Files |
 |---|---|
 | **Runtime & Lifecycles** | [app-runtime.ts](file:///f:/Programs/FootballTray/backend/src/runtime/app-runtime.ts) • [DaemonLifecycleManager.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Client/Services/Daemon/DaemonLifecycleManager.cs) • [App.xaml.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Client/App.xaml.cs) |
-| **FotMob Provider** | [fotmob.provider.ts](file:///f:/Programs/FootballTray/backend/src/providers/fotmob/fotmob.provider.ts) • [matches.schema.ts](file:///f:/Programs/FootballTray/backend/src/providers/fotmob/schemas/matches.schema.ts) • [match-details.schema.ts](file:///f:/Programs/FootballTray/backend/src/providers/fotmob/schemas/match-details.schema.ts) |
+| **NativeTelemetry Provider** | [NativeTelemetry.provider.ts](file:///f:/Programs/FootballTray/backend/src/providers/NativeTelemetry/NativeTelemetry.provider.ts) • [matches.schema.ts](file:///f:/Programs/FootballTray/backend/src/providers/NativeTelemetry/schemas/matches.schema.ts) • [match-details.schema.ts](file:///f:/Programs/FootballTray/backend/src/providers/NativeTelemetry/schemas/match-details.schema.ts) |
 | **API Endpoints & Contracts** | [routes.ts](file:///f:/Programs/FootballTray/backend/src/api/routes.ts) • [v2-dto.ts](file:///f:/Programs/FootballTray/backend/src/api/v2-dto.ts) • [envelope.ts](file:///f:/Programs/FootballTray/backend/src/api/envelope.ts) • [ApiContractDtos.cs](file:///f:/Programs/FootballTray/src/client/FootballTray.Core/Dto/ApiContractDtos.cs) |
 | **Policy & Scheduler** | [acquisition-policy.ts](file:///f:/Programs/FootballTray/backend/src/acquisition/acquisition-policy.ts) • [acquisition-scheduler.ts](file:///f:/Programs/FootballTray/backend/src/acquisition/acquisition-scheduler.ts) • [sync.service.ts](file:///f:/Programs/FootballTray/backend/src/acquisition/sync.service.ts) • [daemon-preferences.service.ts](file:///f:/Programs/FootballTray/backend/src/acquisition/daemon-preferences.service.ts) |
 | **Database & Identity** | [schema.ts](file:///f:/Programs/FootballTray/backend/src/db/schema.ts) • [db/index.ts](file:///f:/Programs/FootballTray/backend/src/db/index.ts) • [provider-alias.ts](file:///f:/Programs/FootballTray/backend/src/db/provider-alias.ts) • [fixtures.repository.ts](file:///f:/Programs/FootballTray/backend/src/repositories/fixtures.repository.ts) • [match.repository.ts](file:///f:/Programs/FootballTray/backend/src/repositories/match.repository.ts) |
@@ -250,20 +250,20 @@ The outgoing reviewer and Product Owner have formally agreed upon the following 
   1. Add `.gitignore` rules for runtime binaries (`local.db*`).
   2. Untrack existing SQLite binaries from the git index without deleting local files: `git rm --cached backend/local.db backend/local.db-shm backend/local.db-wal`.
   3. Stage and commit all changes into logical commits:
-     - `feat(provider): implement FotMob provider, Zod schemas, and circuit breaker`
-     - `feat(acquisition): integrate FotMob schedule ingestion and canonical mapping`
+     - `feat(provider): implement NativeTelemetry provider, Zod schemas, and circuit breaker`
+     - `feat(acquisition): integrate NativeTelemetry schedule ingestion and canonical mapping`
      - `feat(api): add v2 live tray routes, ETag caching, and detail normalization`
      - `feat(client): update taskbar ticker, pin caching, and substitution mapping`
-     - `test: add FotMob integration, simulation, and contract test suites`
+     - `test: add NativeTelemetry integration, simulation, and contract test suites`
   4. Prompt the user to add a secure private git remote (`git remote add origin ...`) and push master.
 
-### Directive 2: FotMob as Permanent Primary, API-Football as Strict Fallback
-- **Decision:** FotMob is the permanent, authoritative primary football data provider.
+### Directive 2: NativeTelemetry as Permanent Primary, API-Football as Strict Fallback
+- **Decision:** NativeTelemetry is the permanent, authoritative primary football data provider.
 - **Operational Model:**
   - Eliminate user-facing manual runtime provider hot-swapping from the UI, which creates severe split-brain states in the sync engine.
   - API-Football is relegated strictly to an automated, circuit-breaker-triggered fallback.
-  - Fallback to API-Football engages **only** if FotMob experiences repeated consecutive HTTP/parsing errors and the circuit breaker trips to `OPEN`.
-  - Establish a single source of truth: the daemon defaults to FotMob in all environments.
+  - Fallback to API-Football engages **only** if NativeTelemetry experiences repeated consecutive HTTP/parsing errors and the circuit breaker trips to `OPEN`.
+  - Establish a single source of truth: the daemon defaults to NativeTelemetry in all environments.
 
 ### Directive 3: Dynamic Kickoff Wake-up Guard in Halftime Suspend
 - **Decision:** Eradicate the unconditional 15-minute sleep during halftime.
@@ -278,9 +278,9 @@ The outgoing reviewer and Product Owner have formally agreed upon the following 
 - **Execution Plan:** Update [.gitignore](file:///f:/Programs/FootballTray/.gitignore) with `backend/*.db`, `backend/*.db-shm`, and `backend/*.db-wal`.
 
 ### Directive 5: Strict v1.2 Scope Boundary (Scope Freeze)
-- **Decision:** v1.2 is defined strictly by the **stabilization, data integrity verification, and production release of the FotMob provider migration**.
+- **Decision:** v1.2 is defined strictly by the **stabilization, data integrity verification, and production release of the NativeTelemetry provider migration**.
 - **Scope Boundary:**
-  - **In Scope for v1.2:** Live bug batch verification, git baseline commitment, halftime wake-up guard, automated circuit-breaker fallback, serial test suite remediation, docs update (SQLite/FotMob), and release packaging.
+  - **In Scope for v1.2:** Live bug batch verification, git baseline commitment, halftime wake-up guard, automated circuit-breaker fallback, serial test suite remediation, docs update (SQLite/NativeTelemetry), and release packaging.
   - **Out of Scope (Deferred to v1.3+):** League standings/tables views, player profile popups, secondary provider integrations, MSIX packaging, and database architecture rewrites.
 
 ---
@@ -313,7 +313,7 @@ sequenceDiagram
 
   Note over Rev: Step 3: Architecture Alignment
   Rev->>Agent: Prompt 4: Unify Provider Source of Truth (Directive 2)
-  Agent->>Agent: Pins FotMob as primary, removes UI combo, wires circuit breaker fallback
+  Agent->>Agent: Pins NativeTelemetry as primary, removes UI combo, wires circuit breaker fallback
   Agent-->>Rev: Reports 0 build errors
 
   Note over Rev: Step 4: Verification & Release
@@ -332,8 +332,9 @@ sequenceDiagram
    - Issue **Prompt 2** to update `acquisition-policy.ts` with the dynamic kickoff delta calculation so the scheduler never sleeps past a kickoff.
    - Issue **Prompt 3** to update `routes.ts` so `handleMatchDetails` returns the existing SQLite record immediately without blocking the client on third-party HTTP timeouts.
 3. **Phase 3: Solidifying the Provider Hierarchy (Directive 2)**
-   - Issue **Prompt 4** to clean up the provider selection split-brain: remove the experimental combo from `SettingsPage`, set FotMob as the default across all configs, and wire API-Football as a purely automated fallback when the FotMob circuit breaker opens.
+   - Issue **Prompt 4** to clean up the provider selection split-brain: remove the experimental combo from `SettingsPage`, set NativeTelemetry as the default across all configs, and wire API-Football as a purely automated fallback when the NativeTelemetry circuit breaker opens.
 4. **Phase 4: Test Suite Alignment & v1.2 Release**
    - Run a serial test pass (`npm test --fileParallelism=false`) and update test fixtures that still expect API-Football payload shapes.
-   - Update `README.md`, `ROADMAP.md`, and `RELEASE.md` to document the SQLite + FotMob architecture.
+   - Update `README.md`, `ROADMAP.md`, and `RELEASE.md` to document the SQLite + NativeTelemetry architecture.
    - Run `publish-release.ps1 -Version "1.2.0"` and `validate-release.ps1` to produce the official release bundle.
+

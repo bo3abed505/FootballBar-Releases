@@ -22,8 +22,8 @@ param (
     [string]$ReleaseDir,
     [string]$PublishDir,
     [string]$OutputFile,
-    [string]$IdentityName = "FootballTray.Client",
-    [string]$Publisher = "CN=FootballTray",
+    [string]$IdentityName = "bo3abed505.FootballBarLiveFootballScoresFixturesRe",
+    [string]$Publisher = "CN=5DF30F18-9FB3-48BD-8538-AFFEA270896C",
     [switch]$SkipSign,
     [switch]$SkipPublish
 )
@@ -132,31 +132,21 @@ if (-not (Test-Path $manifestSource)) {
     throw "Missing Package.appxmanifest at '$manifestSource'."
 }
 
-$manifestContent = Get-Content -LiteralPath $manifestSource -Raw
-# Ensure version in manifest matches current build
-$manifestContent = [System.Text.RegularExpressions.Regex]::Replace(
-    $manifestContent,
-    'Version="[^"]+"',
-    "Version=`"$packageVersion`""
-)
-
+[xml]$manifestXml = Get-Content -LiteralPath $manifestSource -Raw
+$identityNode = $manifestXml.Package.Identity
+if ($null -eq $identityNode) {
+    throw "Invalid Package.appxmanifest: missing Package/Identity element."
+}
+$identityNode.SetAttribute("Version", $packageVersion)
 if (-not [string]::IsNullOrWhiteSpace($IdentityName)) {
-    $manifestContent = [System.Text.RegularExpressions.Regex]::Replace(
-        $manifestContent,
-        '(<Identity\s+[^>]*Name=")[^"]+(")',
-        "${1}$IdentityName${2}"
-    )
+    $identityNode.SetAttribute("Name", $IdentityName)
 }
 if (-not [string]::IsNullOrWhiteSpace($Publisher)) {
-    $manifestContent = [System.Text.RegularExpressions.Regex]::Replace(
-        $manifestContent,
-        '(<Identity\s+[^>]*Publisher=")[^"]+(")',
-        "${1}$Publisher${2}"
-    )
+    $identityNode.SetAttribute("Publisher", $Publisher)
 }
 
 $targetManifest = Join-Path $stagingDir "AppxManifest.xml"
-[System.IO.File]::WriteAllText($targetManifest, $manifestContent, [System.Text.UTF8Encoding]::new($false))
+$manifestXml.Save($targetManifest)
 Write-Host "  AppxManifest.xml written to staging directory." -ForegroundColor Green
 
 # 5. Execute makeappx.exe

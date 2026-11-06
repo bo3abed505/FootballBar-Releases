@@ -381,7 +381,7 @@ public class ReleaseEngineeringTests
     }
 
     [TestMethod]
-    public void Test09_PublishScript_WithoutUpdateDownloadUrl_RetainsCompatibilityAndOmitsManifest()
+    public void Test09_PublishScript_WithoutUpdateDownloadUrl_GeneratesAuthoritativeManifestByDefault()
     {
         string root = FindRepoRoot();
         string testVersion = $"0.0.0-test.{Guid.NewGuid():N}";
@@ -397,9 +397,9 @@ public class ReleaseEngineeringTests
             Assert.IsTrue(File.Exists(Path.Combine(releaseDir, $"FootballTray-v{testVersion}-win-x64.zip")), "Archive must exist.");
             Assert.IsTrue(File.Exists(Path.Combine(releaseDir, "SHA256SUMS.txt")), "Checksums must exist.");
             Assert.IsTrue(File.Exists(Path.Combine(releaseDir, "VERSION.txt")), "VERSION.txt must exist.");
-            Assert.IsFalse(File.Exists(manifestFile), "release-manifest.json must NOT be generated when -UpdateDownloadUrl is omitted.");
-            Assert.IsTrue(result.Stdout.Contains("Skipping release manifest (-UpdateDownloadUrl was not specified)."),
-                "Expected skip logging in output.");
+            Assert.IsTrue(File.Exists(manifestFile), "release-manifest.json must be generated using authoritative default download URL when -UpdateDownloadUrl is omitted.");
+            Assert.IsTrue(result.Stdout.Contains("Manifest generated successfully:"),
+                "Expected manifest generation logging in output.");
         }
         finally
         {
@@ -415,33 +415,35 @@ public class ReleaseEngineeringTests
     {
         string root = FindRepoRoot();
         string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        string testVersion = $"0.0.0-test.{Guid.NewGuid():N}";
+        string versionArg = $"-Version \"{testVersion}\"";
 
         // 1. Insecure HTTP
-        var rHttp = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"http://releases.example.invalid/v1.0.0/FootballTray-v1.0.0-win-x64.zip\"", root);
+        var rHttp = RunScriptDirect(publishScript, $"{versionArg} -UpdateDownloadUrl \"http://releases.example.invalid/v{testVersion}/FootballTray-v{testVersion}-win-x64.zip\"", root);
         Assert.AreNotEqual(0, rHttp.ExitCode);
         Assert.IsTrue(rHttp.Stdout.Contains("must use HTTPS scheme") || rHttp.Stderr.Contains("must use HTTPS scheme"),
             $"Expected HTTPS scheme failure message. Output: {rHttp.Stdout} {rHttp.Stderr}");
 
         // 2. Local file:// scheme
-        var rFile = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"file:///C:/FootballTray-v1.0.0-win-x64.zip\"", root);
+        var rFile = RunScriptDirect(publishScript, $"{versionArg} -UpdateDownloadUrl \"file:///C:/FootballTray-v{testVersion}-win-x64.zip\"", root);
         Assert.AreNotEqual(0, rFile.ExitCode);
         Assert.IsTrue(rFile.Stdout.Contains("must use HTTPS scheme") || rFile.Stderr.Contains("must use HTTPS scheme"),
             $"Expected file scheme failure message. Output: {rFile.Stdout} {rFile.Stderr}");
 
         // 3. Relative URL
-        var rRel = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"/downloads/FootballTray-v1.0.0-win-x64.zip\"", root);
+        var rRel = RunScriptDirect(publishScript, $"{versionArg} -UpdateDownloadUrl \"/downloads/FootballTray-v{testVersion}-win-x64.zip\"", root);
         Assert.AreNotEqual(0, rRel.ExitCode);
         Assert.IsTrue(rRel.Stdout.Contains("not a valid absolute URI") || rRel.Stderr.Contains("not a valid absolute URI"),
             $"Expected absolute URI failure message. Output: {rRel.Stdout} {rRel.Stderr}");
 
         // 4. Empty string
-        var rEmpty = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"\"", root);
+        var rEmpty = RunScriptDirect(publishScript, $"{versionArg} -UpdateDownloadUrl \"\"", root);
         Assert.AreNotEqual(0, rEmpty.ExitCode);
         Assert.IsTrue(rEmpty.Stdout.Contains("empty or whitespace") || rEmpty.Stderr.Contains("empty or whitespace"),
             $"Expected empty URL failure message. Output: {rEmpty.Stdout} {rEmpty.Stderr}");
 
         // 5. Whitespace string
-        var rWs = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"   \"", root);
+        var rWs = RunScriptDirect(publishScript, $"{versionArg} -UpdateDownloadUrl \"   \"", root);
         Assert.AreNotEqual(0, rWs.ExitCode);
         Assert.IsTrue(rWs.Stdout.Contains("empty or whitespace") || rWs.Stderr.Contains("empty or whitespace"),
             $"Expected whitespace URL failure message. Output: {rWs.Stdout} {rWs.Stderr}");
@@ -452,8 +454,9 @@ public class ReleaseEngineeringTests
     {
         string root = FindRepoRoot();
         string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        string testVersion = $"0.0.0-test.{Guid.NewGuid():N}";
 
-        var result = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"https://example.invalid/releases/v1.0.0/Foo.zip\"", root);
+        var result = RunScriptDirect(publishScript, $"-Version \"{testVersion}\" -UpdateDownloadUrl \"https://example.invalid/releases/v1.0.0/Foo.zip\"", root);
         Assert.AreNotEqual(0, result.ExitCode);
         Assert.IsTrue(result.Stdout.Contains("does not match the generated release archive filename") ||
                       result.Stderr.Contains("does not match the generated release archive filename"),
@@ -465,8 +468,9 @@ public class ReleaseEngineeringTests
     {
         string root = FindRepoRoot();
         string publishScript = Path.Combine(root, "scripts", "publish-release.ps1");
+        string testVersion = $"0.0.0-test.{Guid.NewGuid():N}";
 
-        var result = RunScriptDirect(publishScript, "-UpdateDownloadUrl \"https://example.invalid/v1.0.0/FootballTray-v1.0.0-win-x64.zip\" -SkipArchive", root);
+        var result = RunScriptDirect(publishScript, $"-Version \"{testVersion}\" -UpdateDownloadUrl \"https://example.invalid/v{testVersion}/FootballTray-v{testVersion}-win-x64.zip\" -SkipArchive", root);
         Assert.AreNotEqual(0, result.ExitCode);
         Assert.IsTrue(result.Stdout.Contains("Cannot generate release manifest when -SkipArchive is specified") ||
                       result.Stderr.Contains("Cannot generate release manifest when -SkipArchive is specified"),

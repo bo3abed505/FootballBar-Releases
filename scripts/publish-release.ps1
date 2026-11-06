@@ -15,7 +15,8 @@
 param (
     [string]$Version,
     [switch]$SkipArchive,
-    [string]$UpdateDownloadUrl
+    [string]$UpdateDownloadUrl,
+    [string]$ReleaseDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,7 +53,11 @@ Write-Host "============================================================" -Foreg
 Write-Host " FootballTray Release Publishing — v$Version" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
-$ReleaseBaseDir = Join-Path $RootDir "artifacts\releases\v$Version"
+if ([string]::IsNullOrWhiteSpace($ReleaseDir)) {
+    $ReleaseBaseDir = Join-Path $RootDir "artifacts\releases\v$Version"
+} else {
+    $ReleaseBaseDir = $ReleaseDir
+}
 $PublishDir = Join-Path $ReleaseBaseDir "win-x64"
 $ProjectFile = Join-Path $RootDir "src\client\FootballTray.Client\FootballTray.Client.csproj"
 $ArchiveFile = Join-Path $ReleaseBaseDir "FootballTray-v$Version-win-x64.zip"
@@ -60,9 +65,9 @@ $SetupExeFile = Join-Path $ReleaseBaseDir "FootballTray-Setup-v$Version-win-x64.
 $ChecksumFile = Join-Path $ReleaseBaseDir "SHA256SUMS.txt"
 $ManifestFile = Join-Path $ReleaseBaseDir "release-manifest.json"
 
-# Validate -UpdateDownloadUrl early (fail-fast)
-$hasUpdateUrl = $PSBoundParameters.ContainsKey('UpdateDownloadUrl')
-if ($hasUpdateUrl) {
+# Validate or default -UpdateDownloadUrl early (fail-fast)
+$hasExplicitUpdateUrl = $PSBoundParameters.ContainsKey('UpdateDownloadUrl')
+if ($hasExplicitUpdateUrl) {
     if ([string]::IsNullOrWhiteSpace($UpdateDownloadUrl)) {
         Write-Error "CRITICAL: -UpdateDownloadUrl was supplied but is empty or whitespace."
         exit 1
@@ -89,6 +94,14 @@ if ($hasUpdateUrl) {
     if ($urlFileName -cne $expectedZipName) {
         Write-Error "CRITICAL: -UpdateDownloadUrl filename '$urlFileName' does not match the generated release archive filename '$expectedZipName'."
         exit 1
+    }
+    $hasUpdateUrl = $true
+} else {
+    if (-not $SkipArchive) {
+        $UpdateDownloadUrl = "https://github.com/bo3abed505/FootballBar-Releases/releases/download/v$Version/FootballTray-v$Version-win-x64.zip"
+        $hasUpdateUrl = $true
+    } else {
+        $hasUpdateUrl = $false
     }
 }
 
@@ -152,6 +165,13 @@ if (Test-Path $PublishDir) {
 }
 if (Test-Path $ArchiveFile) {
     Remove-Item -Path $ArchiveFile -Force
+}
+if (Test-Path $SetupExeFile) {
+    Remove-Item -Path $SetupExeFile -Force
+}
+$msixFile = Join-Path $ReleaseBaseDir "FootballTray-v$Version-win-x64.msix"
+if (Test-Path $msixFile) {
+    Remove-Item -Path $msixFile -Force
 }
 if (Test-Path $ChecksumFile) {
     Remove-Item -Path $ChecksumFile -Force
@@ -322,6 +342,16 @@ if (Test-Path $otaSource) {
     Write-Host "  OTA manifest stamped with version $Version." -ForegroundColor Green
 }
 
+# 7b. Build Microsoft Store MSIX Package
+$buildMsixScript = Join-Path $ScriptDir "build-msix.ps1"
+if (Test-Path $buildMsixScript) {
+    Write-Host "`n[7b/9] Building Store MSIX package..." -ForegroundColor Yellow
+    & $buildMsixScript -Version $Version -ReleaseDir $ReleaseBaseDir -PublishDir $PublishDir -SkipSign
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to build MSIX package (exit code $LASTEXITCODE)."
+    }
+}
+
 # 8. Compute SHA-256 Checksums
 Write-Host "`n[8/9] Generating SHA-256 checksums..." -ForegroundColor Yellow
 $checksumEntries = [System.Collections.Generic.List[string]]::new()
@@ -336,6 +366,13 @@ if (Test-Path $SetupExeFile) {
     $setupHash = (Get-FileHash -Path $SetupExeFile -Algorithm SHA256).Hash.ToLowerInvariant()
     $checksumEntries.Add("$setupHash  $([System.IO.Path]::GetFileName($SetupExeFile))")
     Write-Host "  $setupHash  $([System.IO.Path]::GetFileName($SetupExeFile))" -ForegroundColor Cyan
+}
+
+$msixFile = Join-Path $ReleaseBaseDir "FootballTray-v$Version-win-x64.msix"
+if (Test-Path $msixFile) {
+    $msixHash = (Get-FileHash -Path $msixFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumEntries.Add("$msixHash  $([System.IO.Path]::GetFileName($msixFile))")
+    Write-Host "  $msixHash  $([System.IO.Path]::GetFileName($msixFile))" -ForegroundColor Cyan
 }
 
 $exeHash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLowerInvariant()

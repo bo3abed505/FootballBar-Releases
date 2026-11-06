@@ -7,8 +7,8 @@
   IgnorableNamespaces="uap rescap desktop">
 
   <Identity
-    Name="FootballTray.LiveFootballScores"
-    Publisher="CN=FootballTray"
+    Name="bo3abed505.FootballBarLiveFootballScoresFixturesRe"
+    Publisher="CN=5DF30F18-9FB3-48BD-8538-AFFEA270896C"
     Version="1.3.1.0"
     ProcessorArchitecture="x64" />
 

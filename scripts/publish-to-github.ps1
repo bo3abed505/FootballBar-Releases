@@ -26,7 +26,7 @@
 param(
     [string]$Tag = "v1.3.1",
     [string]$Repo = "bo3abed505/FootballBar-Releases",
-    [string]$Title = "FootballTray v1.3.1",
+    [string]$Title = "FootballBar v1.3.1",
     [string]$Target = "main",
     [string]$ReleaseDir = "artifacts/releases/v1.3.1",
     [int]$MaxRetries = 5,
@@ -52,6 +52,7 @@ if (-not (Test-Path $notesFile)) {
 $expectedAssets = @(
     (Join-Path $resolvedReleaseDir "release-manifest.json"),
     (Join-Path $resolvedReleaseDir "ota-telemetry-manifest.json"),
+    (Join-Path $resolvedReleaseDir "RELEASE_NOTES.txt"),
     (Join-Path $resolvedReleaseDir "SHA256SUMS.txt"),
     (Join-Path $resolvedReleaseDir "VERSION.txt"),
     (Join-Path $resolvedReleaseDir "FootballTray-$Tag-win-x64.msix"),

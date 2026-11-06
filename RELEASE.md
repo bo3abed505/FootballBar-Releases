@@ -1,14 +1,16 @@
-# FootballTray — Release Engineering & Deployment Guide
+# FootballBar — Release Engineering & Deployment Guide
 
 ## Product Overview & Version Metadata
 
-- **Application Name**: FootballTray
-- **Current Public Release**: `v1.0.3` (Immutable public release)
-- **Phase 5 A2 Implementation Commit**: `535b1faf9f91eaf78ca7631d4ab931ab08d8657e` (`perf(release): trim unused AI/ML payload`); this source milestone postdates the immutable public `v1.0.3` release.
+- **Application Name**: FootballBar (Executable binary: `FootballTray.exe`)
+- **Current Public Release**: `v1.3.1`
 - **Target OS**: Windows 11 (64-bit) / Windows 10 build 17763+ (64-bit)
 - **Architecture**: `win-x64`
-- **Application Framework**: WinUI 3 / Windows App SDK 2.4.0 (.NET 10.0)
-- **Packaging Model**: Unpackaged, Self-Contained Desktop Application (`WindowsPackageType=None`)
+- **Application Framework**: WinUI 3 / Windows App SDK (.NET 10.0)
+- **Packaging Models**:
+  - One-Click Interactive Installer: `FootballTray-Setup-v1.3.1-win-x64.exe`
+  - Unpackaged Portable Application: `FootballTray-v1.3.1-win-x64.zip`
+  - Microsoft Store Desktop Bridge: `FootballTray-v1.3.1-win-x64.msix`
 
 ---
 
@@ -115,14 +117,17 @@ The validation script verifies:
 ```
 artifacts/
   releases/
-    v1.0.0/
-      FootballTray-v1.0.0-win-x64.zip     # Distribution archive
-      SHA256SUMS.txt                      # SHA-256 Checksums
-      VERSION.txt                         # Version and build metadata
-      RELEASE_NOTES.txt                   # User-facing release notes
-      release-manifest.json               # (Optional) Update discovery manifest
-      win-x64/                            # Self-contained application folder
-        FootballTray.exe                  # Main application executable
+    v1.3.1/
+      FootballTray-Setup-v1.3.1-win-x64.exe # One-click dark setup wizard installer
+      FootballTray-v1.3.1-win-x64.msix      # Microsoft Store Desktop Bridge package
+      FootballTray-v1.3.1-win-x64.zip       # Portable distribution archive
+      release-manifest.json                 # Automatic update discovery manifest
+      ota-telemetry-manifest.json           # Dynamic route telemetry manifest
+      RELEASE_NOTES.txt                     # User-facing release notes
+      SHA256SUMS.txt                        # SHA-256 Checksums for all assets
+      VERSION.txt                           # Build and environment metadata
+      win-x64/                              # Published self-contained application folder
+        FootballTray.exe                    # Main application executable
         FootballTray.dll
         FootballTray.Core.dll
         Microsoft.WinUI.dll

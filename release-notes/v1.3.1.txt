@@ -1,0 +1,14 @@
+FootballBar v1.3.1 — Display Brand Rename, Dark Setup Wizard, Tactical Narrative Synthesizer, Cross-Midnight Fix & Store MSIX Packaging
+
+New Features & Enhancements:
+- Display Brand Rename ("FootballBar"): Complete user-facing brand update to FootballBar across the Main Window, Taskbar Ticker, System Tray, Setup Wizard, Windows Toast Notifications, and Settings while preserving zero-breakage backwards compatibility with existing user preferences and data directories.
+- Style B Dark-Mode Interactive Setup Wizard: Premium, dark-themed installer (FootballTray-Setup-v1.3.1-win-x64.exe) featuring custom branding, real-time extraction progress, and pre-selected defaults for Windows Startup, Desktop Shortcut, Start Menu Shortcut, and immediate post-install launch.
+- On-Device Tactical Narrative Synthesizer: Broadcast-style, analytical match recap generated dynamically in Match Center from live timeline events, expected goals (xG), possession, shots on target, 5-match form, and head-to-head records across Pre-Match, Live In-Play, and Finished fixtures.
+- Upstream Match Insights & Player of the Match: Direct extraction and display of official match insights, tactical storylines, and Player of the Match accolades within Match Center.
+- Cross-Midnight Match Continuity Hotfix: Resolved UTC vs. local timezone boundary discrepancies (12:00 AM - 2:00 AM EET / UTC+2) to keep live matches spanning midnight active and visible in both the Live tab and the Taskbar Ticker without background sync overwrites.
+- Single-Instance & Process Group Hardening: Robust single-instance mutex handling and process activation ensuring clean startup, preventing orphaned Task Manager processes, and restoring existing windows seamlessly on secondary launches.
+- Security Hardening (Zip-Slip Defense & HTTPS Pinning): Canonical path sanitization and directory traversal verification for installer and self-updater archive extraction; strict HTTPS scheme pinning and manifest payload validation.
+- Privacy & Diagnostic Telemetry Protection: Automated redaction of Windows usernames, user profile paths, and local device identifiers from error reports and diagnostic telemetry.
+- Performance & Memory Optimization: Pre-compiled regular expressions on high-frequency polling paths and bounded memory caches to ensure minimal resource consumption during 24/7 taskbar monitoring.
+- Microsoft Partner Center MSIX Distribution: Native Desktop Bridge MSIX packaging with official publisher identity and Store-compliant AppxManifest configuration.
+
