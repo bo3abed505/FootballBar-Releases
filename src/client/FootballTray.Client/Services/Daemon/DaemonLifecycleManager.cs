@@ -129,7 +129,7 @@ public sealed class DaemonLifecycleManager : IDisposable
     /// Ensures the backend daemon is running. If not already active, launches node dist/server.js
     /// in the background without creating a console window.
     /// </summary>
-    public async Task<bool> StartDaemonAsync(string activeProvider = "fotmob", CancellationToken cancellationToken = default)
+    public async Task<bool> StartDaemonAsync(string activeProvider = "live-telemetry", CancellationToken cancellationToken = default)
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("FOOTBALLTRAY_ENABLE_LOCAL_DAEMON"), "1", StringComparison.OrdinalIgnoreCase))
         {

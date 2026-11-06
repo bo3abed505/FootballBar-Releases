@@ -75,7 +75,7 @@ public sealed class TeamSquadPlayerItemViewModel
     }
 }
 
-public class TeamHubViewModel : INotifyPropertyChanged
+public class TeamHubViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly FootballApiClient _apiClient;
     private readonly IPreferencesService? _preferencesService;
@@ -719,6 +719,19 @@ public class TeamHubViewModel : INotifyPropertyChanged
 
     protected void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    public void Dispose()
+    {
+        try
+        {
+            _loadingCts?.Cancel();
+            _loadingCts?.Dispose();
+            _loadingCts = null;
+        }
+        catch { }
+
+        _apiClient?.Dispose();
+    }
 
     #endregion
 }

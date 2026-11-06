@@ -9,6 +9,7 @@ using System.Windows.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using FootballTray.Client.Services;
+using FootballTray.Client.Services.Telemetry;
 using FootballTray.Core.Dto;
 
 namespace FootballTray.Client.ViewModels;
@@ -1231,7 +1232,13 @@ public class FormBadgeViewModel
     public string Result { get; set; } = "D"; // "W", "D", "L"
     public string OpponentName { get; set; } = string.Empty;
     public string Score { get; set; } = string.Empty;
-    public string TooltipText => $"vs {OpponentName} ({Score})";
+    public string? MatchSummaryTooltip { get; set; }
+
+    public string TooltipText => !string.IsNullOrWhiteSpace(MatchSummaryTooltip)
+        ? MatchSummaryTooltip
+        : (!string.IsNullOrWhiteSpace(OpponentName) && !string.IsNullOrWhiteSpace(Score)
+            ? $"vs {OpponentName} ({Score})"
+            : (!string.IsNullOrWhiteSpace(OpponentName) ? $"vs {OpponentName}" : Result switch { "W" => "Win", "L" => "Loss", _ => "Draw" }));
 
     private static readonly SolidColorBrush WinBrush = new(Windows.UI.Color.FromArgb(255, 34, 197, 94));   // #22C55E
     private static readonly SolidColorBrush DrawBrush = new(Windows.UI.Color.FromArgb(255, 100, 116, 139)); // #64748B
@@ -1381,6 +1388,79 @@ public class MatchCenterViewModel : INotifyPropertyChanged
     private bool _isAwayTeamFollowed;
     private bool _isCompetitionFollowed;
     private bool _isPinned;
+
+    private string? _tacticalRecapBadge;
+    private string? _tacticalRecapSummary;
+    private ObservableCollection<string> _keyMatchInsights = new();
+    private PlayerOfTheMatchDto? _playerOfTheMatch;
+
+    public string? TacticalRecapBadge
+    {
+        get => _tacticalRecapBadge;
+        set => SetProperty(ref _tacticalRecapBadge, value);
+    }
+
+    public string? TacticalRecapSummary
+    {
+        get => _tacticalRecapSummary;
+        set
+        {
+            if (SetProperty(ref _tacticalRecapSummary, value))
+            {
+                OnPropertyChanged(nameof(HasTacticalRecap));
+                OnPropertyChanged(nameof(TacticalRecapVisibility));
+            }
+        }
+    }
+
+    public ObservableCollection<string> KeyMatchInsights
+    {
+        get => _keyMatchInsights;
+        set => SetProperty(ref _keyMatchInsights, value);
+    }
+
+    public PlayerOfTheMatchDto? PlayerOfTheMatch
+    {
+        get => _playerOfTheMatch;
+        set
+        {
+            if (SetProperty(ref _playerOfTheMatch, value))
+            {
+                OnPropertyChanged(nameof(HasPlayerOfTheMatch));
+                OnPropertyChanged(nameof(PlayerOfTheMatchVisibility));
+                OnPropertyChanged(nameof(PlayerOfTheMatchText));
+                OnPropertyChanged(nameof(PlayerOfTheMatchDisplayText));
+            }
+        }
+    }
+
+    public bool HasTacticalRecap => !string.IsNullOrWhiteSpace(TacticalRecapSummary);
+    public Visibility TacticalRecapVisibility => HasTacticalRecap ? Visibility.Visible : Visibility.Collapsed;
+
+    public bool HasKeyMatchInsights => KeyMatchInsights != null && KeyMatchInsights.Count > 0;
+    public Visibility KeyMatchInsightsVisibility => HasKeyMatchInsights ? Visibility.Visible : Visibility.Collapsed;
+
+    public bool HasPlayerOfTheMatch => PlayerOfTheMatch != null && !string.IsNullOrWhiteSpace(PlayerOfTheMatch.PlayerName);
+    public Visibility PlayerOfTheMatchVisibility => HasPlayerOfTheMatch ? Visibility.Visible : Visibility.Collapsed;
+
+    public string PlayerOfTheMatchText
+    {
+        get
+        {
+            if (PlayerOfTheMatch == null || string.IsNullOrWhiteSpace(PlayerOfTheMatch.PlayerName)) return string.Empty;
+            string ratingPart = !string.IsNullOrWhiteSpace(PlayerOfTheMatch.Rating) ? $" ({PlayerOfTheMatch.Rating})" : string.Empty;
+            return $"{PlayerOfTheMatch.PlayerName}{ratingPart}";
+        }
+    }
+
+    public string PlayerOfTheMatchDisplayText
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(PlayerOfTheMatchText)) return string.Empty;
+            return $"★ MOTM: {PlayerOfTheMatchText}";
+        }
+    }
 
     public string HomeTeamId { get; private set; } = string.Empty;
     public string HomeTeamLegacyId { get; private set; } = string.Empty;
@@ -2530,7 +2610,16 @@ public class MatchCenterViewModel : INotifyPropertyChanged
         CompetitionLegacyId = match.Competition?.LegacyId ?? string.Empty;
         CompetitionCode = match.Competition?.Code;
         Title = $"{HomeTeamName} vs {AwayTeamName} - Match Center";
-        CompetitionName = match.Competition?.Name ?? "Football";
+        string rawCompName = match.Competition?.Name ?? "Football";
+        if (!string.IsNullOrWhiteSpace(HomeTeamName) && rawCompName.EndsWith(HomeTeamName, StringComparison.OrdinalIgnoreCase))
+        {
+            rawCompName = rawCompName[..^HomeTeamName.Length].TrimEnd();
+        }
+        if (!string.IsNullOrWhiteSpace(AwayTeamName) && rawCompName.EndsWith(AwayTeamName, StringComparison.OrdinalIgnoreCase))
+        {
+            rawCompName = rawCompName[..^AwayTeamName.Length].TrimEnd();
+        }
+        CompetitionName = string.IsNullOrWhiteSpace(rawCompName) ? "Football" : rawCompName;
         MatchState = (match.State ?? "PREMATCH").Trim().ToUpperInvariant();
 
         RefreshFollowAndPinStates();
@@ -2665,13 +2754,7 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             {
                 if (val.StartsWith("ft_team_", StringComparison.OrdinalIgnoreCase))
                     return val.Substring(8);
-                if (val.StartsWith("team_", StringComparison.OrdinalIgnoreCase))
-                    return val.Substring(5);
-                if (val.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase))
-                    return val.Substring(7);
-                if (val.StartsWith("apifootball_", StringComparison.OrdinalIgnoreCase))
-                    return val.Substring(12);
-                return val;
+                return Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(val);
             }
 
             string evStripped = StripPrefix(evId);
@@ -3660,6 +3743,45 @@ public class MatchCenterViewModel : INotifyPropertyChanged
 
         // 5. Ensure tactical pitch lineups are ready
         EnsureLineupPitchPopulated();
+
+        // 6. Populate Tactical Recap & Match Insights
+        PopulateTacticalRecap(match);
+    }
+
+    private void PopulateTacticalRecap(MatchDetailDto match)
+    {
+        if (match == null) return;
+
+        // If synthesis wasn't done upstream or is empty, synthesize on-demand as fallback
+        if (string.IsNullOrWhiteSpace(match.TacticalRecapSummary))
+        {
+            TacticalNarrativeSynthesizer.Synthesize(match);
+        }
+
+        TacticalRecapBadge = match.TacticalRecapBadge ?? "TACTICAL PULSE";
+        TacticalRecapSummary = match.TacticalRecapSummary;
+        PlayerOfTheMatch = match.PlayerOfTheMatch;
+
+        KeyMatchInsights.Clear();
+        if (match.KeyMatchInsights != null)
+        {
+            foreach (var insight in match.KeyMatchInsights)
+            {
+                if (!string.IsNullOrWhiteSpace(insight))
+                {
+                    KeyMatchInsights.Add(insight.Trim());
+                }
+            }
+        }
+
+        OnPropertyChanged(nameof(HasTacticalRecap));
+        OnPropertyChanged(nameof(TacticalRecapVisibility));
+        OnPropertyChanged(nameof(HasKeyMatchInsights));
+        OnPropertyChanged(nameof(KeyMatchInsightsVisibility));
+        OnPropertyChanged(nameof(HasPlayerOfTheMatch));
+        OnPropertyChanged(nameof(PlayerOfTheMatchVisibility));
+        OnPropertyChanged(nameof(PlayerOfTheMatchText));
+        OnPropertyChanged(nameof(PlayerOfTheMatchDisplayText));
     }
 
     private static string StripTeamPrefix(string id)
@@ -4721,26 +4843,58 @@ public class MatchCenterViewModel : INotifyPropertyChanged
             _h2hSummaryDisplay = h2h.SummaryDisplay;
 
             HomeFormBadges.Clear();
-            foreach (var f in h2h.HomeForm)
+            if (h2h.HomeFormMatches != null && h2h.HomeFormMatches.Count > 0)
             {
-                HomeFormBadges.Add(new FormBadgeViewModel
+                foreach (var f in h2h.HomeFormMatches)
                 {
-                    Result = f.Result,
-                    OpponentName = f.OpponentName,
-                    Score = f.Score
-                });
+                    HomeFormBadges.Add(new FormBadgeViewModel
+                    {
+                        Result = f.Result,
+                        OpponentName = f.OpponentName,
+                        Score = f.ScoreText,
+                        MatchSummaryTooltip = f.MatchSummaryTooltip
+                    });
+                }
+            }
+            else if (h2h.HomeForm != null)
+            {
+                foreach (var f in h2h.HomeForm)
+                {
+                    HomeFormBadges.Add(new FormBadgeViewModel
+                    {
+                        Result = f.Result,
+                        OpponentName = f.OpponentName,
+                        Score = f.Score
+                    });
+                }
             }
             OnPropertyChanged(nameof(HomeFormBadges));
 
             AwayFormBadges.Clear();
-            foreach (var f in h2h.AwayForm)
+            if (h2h.AwayFormMatches != null && h2h.AwayFormMatches.Count > 0)
             {
-                AwayFormBadges.Add(new FormBadgeViewModel
+                foreach (var f in h2h.AwayFormMatches)
                 {
-                    Result = f.Result,
-                    OpponentName = f.OpponentName,
-                    Score = f.Score
-                });
+                    AwayFormBadges.Add(new FormBadgeViewModel
+                    {
+                        Result = f.Result,
+                        OpponentName = f.OpponentName,
+                        Score = f.ScoreText,
+                        MatchSummaryTooltip = f.MatchSummaryTooltip
+                    });
+                }
+            }
+            else if (h2h.AwayForm != null)
+            {
+                foreach (var f in h2h.AwayForm)
+                {
+                    AwayFormBadges.Add(new FormBadgeViewModel
+                    {
+                        Result = f.Result,
+                        OpponentName = f.OpponentName,
+                        Score = f.Score
+                    });
+                }
             }
             OnPropertyChanged(nameof(AwayFormBadges));
 

@@ -22,6 +22,9 @@ param (
     [string]$ReleaseDir,
     [string]$PublishDir,
     [string]$OutputFile,
+    [string]$IdentityName = "FootballTray.Client",
+    [string]$Publisher = "CN=FootballTray",
+    [switch]$SkipSign,
     [switch]$SkipPublish
 )
 
@@ -137,6 +140,21 @@ $manifestContent = [System.Text.RegularExpressions.Regex]::Replace(
     "Version=`"$packageVersion`""
 )
 
+if (-not [string]::IsNullOrWhiteSpace($IdentityName)) {
+    $manifestContent = [System.Text.RegularExpressions.Regex]::Replace(
+        $manifestContent,
+        '(<Identity\s+[^>]*Name=")[^"]+(")',
+        "${1}$IdentityName${2}"
+    )
+}
+if (-not [string]::IsNullOrWhiteSpace($Publisher)) {
+    $manifestContent = [System.Text.RegularExpressions.Regex]::Replace(
+        $manifestContent,
+        '(<Identity\s+[^>]*Publisher=")[^"]+(")',
+        "${1}$Publisher${2}"
+    )
+}
+
 $targetManifest = Join-Path $stagingDir "AppxManifest.xml"
 [System.IO.File]::WriteAllText($targetManifest, $manifestContent, [System.Text.UTF8Encoding]::new($false))
 Write-Host "  AppxManifest.xml written to staging directory." -ForegroundColor Green
@@ -155,6 +173,41 @@ if ($LASTEXITCODE -ne 0) {
 
 # Cleanup staging
 Remove-Item -Path $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+
+# 6. Signing & Certificate Export
+if ($SkipSign) {
+    Write-Host "`n[6/6] Skipping signing (-SkipSign specified). MSIX is ready for Microsoft Partner Center upload." -ForegroundColor Cyan
+} else {
+    Write-Host "`n[6/6] Signing MSIX package..." -ForegroundColor Yellow
+    $signtoolCandidates = @()
+    if (Test-Path $sdkKitsPath) {
+        $signtoolCandidates = @(Get-ChildItem -Path "$sdkKitsPath\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)
+    }
+    if ($signtoolCandidates.Count -eq 0) {
+        throw "signtool.exe not found in '$sdkKitsPath\*\x64\signtool.exe'."
+    }
+    $signtool = $signtoolCandidates[0].FullName
+    Write-Host "  Found signtool.exe at: $signtool" -ForegroundColor Green
+
+    $cert = Get-ChildItem -Path Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue |
+        Where-Object { $_.Subject -eq $Publisher -and $_.HasPrivateKey } |
+        Select-Object -First 1
+
+    if (-not $cert) {
+        Write-Host "  Generating self-signed code signing certificate for '$Publisher'..." -ForegroundColor Yellow
+        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $Publisher -CertStoreLocation "Cert:\CurrentUser\My" -HashAlgorithm "SHA256"
+    }
+
+    $cerPath = Join-Path $ReleaseDir "FootballTray-v$Version-win-x64.cer"
+    Export-Certificate -Cert $cert -FilePath $cerPath -Force | Out-Null
+    Write-Host "  Exported public certificate: $cerPath" -ForegroundColor Green
+
+    & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint $OutputFile
+    if ($LASTEXITCODE -ne 0) {
+        throw "signtool.exe failed to sign MSIX package with exit code $LASTEXITCODE"
+    }
+    Write-Host "  Signed MSIX package using cert thumbprint $($cert.Thumbprint)" -ForegroundColor Green
+}
 
 $msixSizeMb = [math]::Round(((Get-Item $OutputFile).Length / 1MB), 2)
 Write-Host "`n============================================================" -ForegroundColor Green

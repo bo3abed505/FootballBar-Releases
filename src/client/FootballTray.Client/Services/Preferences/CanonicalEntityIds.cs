@@ -120,10 +120,10 @@ public static class CanonicalEntityIds
 
     public static readonly IReadOnlyDictionary<string, string> LegacyToCanonicalMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        // Teams - Exact 1-to-1 Mapping to verified FotMob IDs
+        // Teams - Exact 1-to-1 Mapping to verified upstream IDs
         { "8634", Barcelona },
         { "team_8634", Barcelona },
-        { "fotmob_8634", Barcelona },
+        { "lt_8634", Barcelona },
         { "team_barcelona", Barcelona },
         { "team_529", Barcelona },
         { "529", Barcelona },
@@ -131,38 +131,38 @@ public static class CanonicalEntityIds
 
         { "8633", RealMadrid },
         { "team_8633", RealMadrid },
-        { "fotmob_8633", RealMadrid },
+        { "lt_8633", RealMadrid },
         { "team_realmadrid", RealMadrid },
         { "team_541", RealMadrid },
 
         { "9825", Arsenal },
         { "team_9825", Arsenal },
-        { "fotmob_9825", Arsenal },
+        { "lt_9825", Arsenal },
         { "team_arsenal", Arsenal },
 
         { "101745", AlAhly },
         { "team_101745", AlAhly },
-        { "fotmob_101745", AlAhly },
+        { "lt_101745", AlAhly },
         { "team_alahly", AlAhly },
         { "team_1029", AlAhly },
         { "ft_team_6C60757CB48CCE0E897AF02B71", AlAhly },
 
         { "80591", Zamalek },
         { "team_80591", Zamalek },
-        { "fotmob_80591", Zamalek },
+        { "lt_80591", Zamalek },
         { "team_zamalek", Zamalek },
         { "team_1028", Zamalek },
 
         { "32", Egypt },
         { "team_32", Egypt },
-        { "fotmob_32", Egypt },
+        { "lt_32", Egypt },
         { "team_egypt", Egypt },
         { "ft_team_E09F776574F182A24F2540B66D", Egypt },
 
-        // Competitions - Exact 1-to-1 Mapping to verified FotMob League IDs
+        // Competitions - Exact 1-to-1 Mapping to verified upstream League IDs
         { "47", PremierLeague },
         { "comp_47", PremierLeague },
-        { "fotmob_47", PremierLeague },
+        { "lt_47", PremierLeague },
         { "premier-league", PremierLeague },
         { "premier_league", PremierLeague },
         { "premier league", PremierLeague },
@@ -172,7 +172,7 @@ public static class CanonicalEntityIds
 
         { "87", LaLiga },
         { "comp_87", LaLiga },
-        { "fotmob_87", LaLiga },
+        { "lt_87", LaLiga },
         { "la-liga", LaLiga },
         { "la_liga", LaLiga },
         { "laliga", LaLiga },
@@ -181,13 +181,13 @@ public static class CanonicalEntityIds
 
         { "519", EgyptianPremierLeague },
         { "comp_519", EgyptianPremierLeague },
-        { "fotmob_519", EgyptianPremierLeague },
+        { "lt_519", EgyptianPremierLeague },
         { "10650", EgyptianPremierLeague },
         { "comp_10650", EgyptianPremierLeague },
-        { "fotmob_10650", EgyptianPremierLeague },
+        { "lt_10650", EgyptianPremierLeague },
         { "191", EgyptianPremierLeague },
         { "comp_191", EgyptianPremierLeague },
-        { "fotmob_191", EgyptianPremierLeague },
+        { "lt_191", EgyptianPremierLeague },
         { "egyptian-premier-league", EgyptianPremierLeague },
         { "egyptian_premier_league", EgyptianPremierLeague },
         { "egyptian premier league", EgyptianPremierLeague },
@@ -197,7 +197,7 @@ public static class CanonicalEntityIds
 
         { "525", AfcChampionsLeague },
         { "comp_525", AfcChampionsLeague },
-        { "fotmob_525", AfcChampionsLeague },
+        { "lt_525", AfcChampionsLeague },
         { "afc-champions-league", AfcChampionsLeague },
         { "afc_champions_league", AfcChampionsLeague },
         { "afc champions league", AfcChampionsLeague },
@@ -205,7 +205,7 @@ public static class CanonicalEntityIds
 
         { "42", ChampionsLeague },
         { "comp_42", ChampionsLeague },
-        { "fotmob_42", ChampionsLeague },
+        { "lt_42", ChampionsLeague },
         { "champions-league", ChampionsLeague },
         { "champions_league", ChampionsLeague },
         { "comp_ucl", ChampionsLeague },
@@ -214,65 +214,65 @@ public static class CanonicalEntityIds
 
         { "73", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" }, // Europa League
         { "comp_73", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" },
-        { "fotmob_73", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" },
+        { "lt_73", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" },
         { "europa-league", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" },
         { "europa_league", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" },
         { "comp_3", "ft_comp_01M33DKNC7HY1Q85DNPB713V5Y" },
 
         { "10216", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" }, // Conference League
         { "comp_10216", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" },
-        { "fotmob_10216", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" },
+        { "lt_10216", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" },
         { "conference-league", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" },
         { "conference_league", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" },
         { "comp_848", "ft_comp_01M33DKNC6Q5V0Q4D89Z37F8W8" },
 
         { "55", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" }, // Serie A
         { "comp_55", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" },
-        { "fotmob_55", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" },
+        { "lt_55", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" },
         { "serie-a", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" },
         { "serie_a", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" },
         { "comp_135", "ft_comp_01M33DKNC5E4N9Q4P4Y9A9Q2G7" },
 
         { "54", "ft_comp_01M33DKNC4D3M8P3N3X8Z8P1F6" }, // Bundesliga
         { "comp_54", "ft_comp_01M33DKNC4D3M8P3N3X8Z8P1F6" },
-        { "fotmob_54", "ft_comp_01M33DKNC4D3M8P3N3X8Z8P1F6" },
+        { "lt_54", "ft_comp_01M33DKNC4D3M8P3N3X8Z8P1F6" },
         { "bundesliga", "ft_comp_01M33DKNC4D3M8P3N3X8Z8P1F6" },
         { "comp_78", "ft_comp_01M33DKNC4D3M8P3N3X8Z8P1F6" },
 
         { "53", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" }, // Ligue 1
         { "comp_53", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" },
-        { "fotmob_53", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" },
+        { "lt_53", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" },
         { "ligue-1", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" },
         { "ligue_1", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" },
         { "comp_61", "ft_comp_01M33DKNC3C2L7N2M2W7Y7O0E5" },
 
         { "132", "ft_comp_01M33DKNC2B1K6M1L1V6X6N9D4" }, // FA Cup
         { "comp_132", "ft_comp_01M33DKNC2B1K6M1L1V6X6N9D4" },
-        { "fotmob_132", "ft_comp_01M33DKNC2B1K6M1L1V6X6N9D4" },
+        { "lt_132", "ft_comp_01M33DKNC2B1K6M1L1V6X6N9D4" },
         { "fa-cup", "ft_comp_01M33DKNC2B1K6M1L1V6X6N9D4" },
         { "comp_45", "ft_comp_01M33DKNC2B1K6M1L1V6X6N9D4" },
 
         { "138", "ft_comp_01M33DKNC1A0J5L0K0U5W5M8C3" }, // Copa del Rey
         { "comp_138", "ft_comp_01M33DKNC1A0J5L0K0U5W5M8C3" },
-        { "fotmob_138", "ft_comp_01M33DKNC1A0J5L0K0U5W5M8C3" },
+        { "lt_138", "ft_comp_01M33DKNC1A0J5L0K0U5W5M8C3" },
         { "copa-del-rey", "ft_comp_01M33DKNC1A0J5L0K0U5W5M8C3" },
         { "comp_143", "ft_comp_01M33DKNC1A0J5L0K0U5W5M8C3" },
 
         { "536", "ft_comp_01M33DKNC09ZH4KZJZTZV4L7B2" }, // Saudi Pro League
         { "comp_536", "ft_comp_01M33DKNC09ZH4KZJZTZV4L7B2" },
-        { "fotmob_536", "ft_comp_01M33DKNC09ZH4KZJZTZV4L7B2" },
+        { "lt_536", "ft_comp_01M33DKNC09ZH4KZJZTZV4L7B2" },
         { "saudi-pro-league", "ft_comp_01M33DKNC09ZH4KZJZTZV4L7B2" },
         { "comp_307", "ft_comp_01M33DKNC09ZH4KZJZTZV4L7B2" },
 
         { "130", "ft_comp_01M33DKNBZ8YG3JYIYSYU3K6A1" }, // MLS
         { "comp_130", "ft_comp_01M33DKNBZ8YG3JYIYSYU3K6A1" },
-        { "fotmob_130", "ft_comp_01M33DKNBZ8YG3JYIYSYU3K6A1" },
+        { "lt_130", "ft_comp_01M33DKNBZ8YG3JYIYSYU3K6A1" },
         { "mls", "ft_comp_01M33DKNBZ8YG3JYIYSYU3K6A1" },
         { "comp_253", "ft_comp_01M33DKNBZ8YG3JYIYSYU3K6A1" },
 
         { "289", AfricaCupOfNations },
         { "comp_289", AfricaCupOfNations },
-        { "fotmob_289", AfricaCupOfNations },
+        { "lt_289", AfricaCupOfNations },
         { "africa-cup-of-nations", AfricaCupOfNations },
         { "comp_afcon", AfricaCupOfNations },
         { "comp_6", AfricaCupOfNations },
@@ -280,7 +280,7 @@ public static class CanonicalEntityIds
 
         { "77", WorldCup },
         { "comp_77", WorldCup },
-        { "fotmob_77", WorldCup },
+        { "lt_77", WorldCup },
         { "world-cup", WorldCup },
         { "comp_wc", WorldCup },
         { "comp_1", WorldCup },
@@ -288,7 +288,7 @@ public static class CanonicalEntityIds
 
         { "50", EuroChampionship },
         { "comp_50", EuroChampionship },
-        { "fotmob_50", EuroChampionship },
+        { "lt_50", EuroChampionship },
         { "euro", EuroChampionship },
         { "comp_euro", EuroChampionship },
         { "comp_4", EuroChampionship },
@@ -296,7 +296,7 @@ public static class CanonicalEntityIds
 
         { "9806", NationsLeague },
         { "comp_9806", NationsLeague },
-        { "fotmob_9806", NationsLeague },
+        { "lt_9806", NationsLeague },
         { "nations-league", NationsLeague },
         { "comp_unl", NationsLeague },
         { "ft_comp_01M467Y24DRWPKFG9AX4XX88ZE", NationsLeague },
@@ -305,12 +305,65 @@ public static class CanonicalEntityIds
 
         { "44", CopaAmerica },
         { "comp_44", CopaAmerica },
-        { "fotmob_44", CopaAmerica },
+        { "lt_44", CopaAmerica },
         { "copa-america", CopaAmerica },
         { "comp_ca", CopaAmerica },
         { "comp_9", CopaAmerica },
         { "9", CopaAmerica }
     };
+
+    /// <summary>
+    /// Translates a legacy ID (numeric, prefixed, or mock alias) to its canonical ft_ form.
+    /// Handles provisional prefixed IDs and already-canonical IDs.
+    /// </summary>
+    /// <summary>
+    /// Strips any legacy or provider prefix (e.g. "lt_519", "comp_519", "team_8634")
+    /// from an ID that is not a canonical ULID (ft_team_ or ft_comp_), returning the numeric core.
+    /// Backward-compatible with v1.3.0 without storing provider names.
+    /// </summary>
+    public static string StripLegacyProviderPrefix(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return string.Empty;
+        var trimmed = id.Trim();
+        if (trimmed.StartsWith("ft_team_", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        int underscoreIdx = trimmed.IndexOf('_');
+        if (underscoreIdx > 0 && underscoreIdx == trimmed.LastIndexOf('_'))
+        {
+            bool prefixAllLetters = true;
+            for (int i = 0; i < underscoreIdx; i++)
+            {
+                char c = trimmed[i];
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+                {
+                    prefixAllLetters = false;
+                    break;
+                }
+            }
+
+            bool suffixAllDigits = (underscoreIdx < trimmed.Length - 1);
+            for (int i = underscoreIdx + 1; i < trimmed.Length; i++)
+            {
+                char c = trimmed[i];
+                if (!(c >= '0' && c <= '9'))
+                {
+                    suffixAllDigits = false;
+                    break;
+                }
+            }
+
+            if (prefixAllLetters && suffixAllDigits)
+            {
+                return trimmed[(underscoreIdx + 1)..];
+            }
+        }
+
+        return trimmed;
+    }
 
     /// <summary>
     /// Translates a legacy ID (numeric, prefixed, or mock alias) to its canonical ft_ form.
@@ -330,6 +383,13 @@ public static class CanonicalEntityIds
         if (LegacyToCanonicalMap.TryGetValue(clean, out var found))
         {
             canonicalId = found;
+            return true;
+        }
+
+        string stripped = StripLegacyProviderPrefix(clean);
+        if (stripped != clean && LegacyToCanonicalMap.TryGetValue(stripped, out var foundStripped))
+        {
+            canonicalId = foundStripped;
             return true;
         }
 

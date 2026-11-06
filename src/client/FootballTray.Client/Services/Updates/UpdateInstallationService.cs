@@ -318,10 +318,7 @@ public sealed class UpdateInstallationService : IUpdateInstallationService
 
     private static void ExtractZipSecurely(string zipPath, string destinationDirectory)
     {
-        string fullDest = Path.GetFullPath(destinationDirectory);
-        string rootWithSeparator = Path.EndsInDirectorySeparator(fullDest)
-            ? fullDest
-            : fullDest + Path.DirectorySeparatorChar;
+        string fullDestDir = Path.GetFullPath(destinationDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
         // Track all file paths extracted so far (case-insensitive on Windows) to detect collisions.
         var seenFilePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -359,33 +356,33 @@ public sealed class UpdateInstallationService : IUpdateInstallationService
                 throw new SecurityException($"Zip entry '{entry.FullName}' is a special file type (Unix type 0x{unixFileType:X4}) and is rejected.");
             }
 
-            string targetPath = Path.GetFullPath(Path.Combine(fullDest, entry.FullName));
+            string fullEntryPath = Path.GetFullPath(Path.Combine(fullDestDir, entry.FullName));
 
             // Zip Slip protection: must remain beneath destination directory with directory boundary separator
-            if (!targetPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+            if (!fullEntryPath.StartsWith(fullDestDir, StringComparison.OrdinalIgnoreCase))
             {
-                throw new SecurityException($"Zip entry '{entry.FullName}' escapes staging root directory.");
+                throw new SecurityException("Blocked potentially malicious zip entry path traversal.");
             }
 
             if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
             {
-                Directory.CreateDirectory(targetPath);
+                Directory.CreateDirectory(fullEntryPath);
             }
             else
             {
                 // Fail closed on duplicate or case-collision: two entries mapping to the same path
                 // on a case-insensitive filesystem would silently overwrite each other.
-                if (!seenFilePaths.Add(targetPath))
+                if (!seenFilePaths.Add(fullEntryPath))
                 {
                     throw new SecurityException($"Zip entry '{entry.FullName}' collides (case-insensitively) with an already-extracted path.");
                 }
 
-                string? parentDir = Path.GetDirectoryName(targetPath);
+                string? parentDir = Path.GetDirectoryName(fullEntryPath);
                 if (!string.IsNullOrEmpty(parentDir))
                 {
                     Directory.CreateDirectory(parentDir);
                 }
-                entry.ExtractToFile(targetPath, overwrite: false);
+                entry.ExtractToFile(fullEntryPath, overwrite: false);
             }
         }
     }

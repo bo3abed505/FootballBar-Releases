@@ -56,6 +56,7 @@ $ReleaseBaseDir = Join-Path $RootDir "artifacts\releases\v$Version"
 $PublishDir = Join-Path $ReleaseBaseDir "win-x64"
 $ProjectFile = Join-Path $RootDir "src\client\FootballTray.Client\FootballTray.Client.csproj"
 $ArchiveFile = Join-Path $ReleaseBaseDir "FootballTray-v$Version-win-x64.zip"
+$SetupExeFile = Join-Path $ReleaseBaseDir "FootballTray-Setup-v$Version-win-x64.exe"
 $ChecksumFile = Join-Path $ReleaseBaseDir "SHA256SUMS.txt"
 $ManifestFile = Join-Path $ReleaseBaseDir "release-manifest.json"
 
@@ -263,6 +264,41 @@ if (-not $SkipArchive) {
 } else {
     Write-Host "`n[6/8] Skipping archive creation (-SkipArchive was specified)." -ForegroundColor Gray
 }
+# 6b. Build One-Click Setup Executable Installer
+if (-not $SkipArchive -and (Test-Path $ArchiveFile)) {
+    Write-Host "`n[6b/9] Building one-click installer: $SetupExeFile..." -ForegroundColor Yellow
+    $installerProject = Join-Path $RootDir "src\client\FootballTray.Installer\FootballTray.Installer.csproj"
+    $installerStagingDir = Join-Path $ReleaseBaseDir "setup-staging"
+    if (Test-Path $installerStagingDir) {
+        Remove-Item -Path $installerStagingDir -Recurse -Force
+    }
+    
+    & dotnet publish $installerProject -c Release -r win-x64 --self-contained `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:EnableCompressionInSingleFile=true `
+        -p:PayloadZip="$ArchiveFile" `
+        -p:TreatWarningsAsErrors=true `
+        -o $installerStagingDir
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to compile FootballTray-Setup installer executable (exit code $LASTEXITCODE)."
+    }
+
+    $builtSetupExe = Join-Path $installerStagingDir "FootballTray-Setup.exe"
+    if (-not (Test-Path $builtSetupExe)) {
+        throw "Expected setup binary not found at '$builtSetupExe'."
+    }
+
+    Copy-Item -Path $builtSetupExe -Destination $SetupExeFile -Force
+    Remove-Item -Path $installerStagingDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    $setupSizeMb = [math]::Round(((Get-Item $SetupExeFile).Length / 1MB), 2)
+    Write-Host "  One-click installer built successfully ($setupSizeMb MB)." -ForegroundColor Green
+} else {
+    Write-Host "`n[6b/9] Skipping setup installer build (archive missing or -SkipArchive specified)." -ForegroundColor Gray
+}
+
 
 # 7. Generate and Stamp OTA Telemetry Manifest
 $otaSource = Join-Path $ScriptDir "ota-telemetry-manifest.json"
@@ -294,6 +330,12 @@ if (Test-Path $ArchiveFile) {
     $zipHash = (Get-FileHash -Path $ArchiveFile -Algorithm SHA256).Hash.ToLowerInvariant()
     $checksumEntries.Add("$zipHash  $([System.IO.Path]::GetFileName($ArchiveFile))")
     Write-Host "  $zipHash  $([System.IO.Path]::GetFileName($ArchiveFile))" -ForegroundColor Cyan
+}
+
+if (Test-Path $SetupExeFile) {
+    $setupHash = (Get-FileHash -Path $SetupExeFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumEntries.Add("$setupHash  $([System.IO.Path]::GetFileName($SetupExeFile))")
+    Write-Host "  $setupHash  $([System.IO.Path]::GetFileName($SetupExeFile))" -ForegroundColor Cyan
 }
 
 $exeHash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -720,11 +720,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public async Task MoveQueueMatchUpAsync(string matchId)
     {
         if (string.IsNullOrWhiteSpace(matchId)) return;
-        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        string norm = Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(matchId);
         var prefs = _preferencesService.GetPreferences();
         var list = (prefs.CustomTickerQueueMatchIds ?? new List<string>()).ToList();
         int idx = list.FindIndex(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase) ||
-                                       string.Equals(id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+                                       string.Equals(Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(id), norm, StringComparison.OrdinalIgnoreCase));
         if (idx > 0)
         {
             (list[idx - 1], list[idx]) = (list[idx], list[idx - 1]);
@@ -738,11 +738,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public async Task MoveQueueMatchDownAsync(string matchId)
     {
         if (string.IsNullOrWhiteSpace(matchId)) return;
-        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        string norm = Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(matchId);
         var prefs = _preferencesService.GetPreferences();
         var list = (prefs.CustomTickerQueueMatchIds ?? new List<string>()).ToList();
         int idx = list.FindIndex(id => string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase) ||
-                                       string.Equals(id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+                                       string.Equals(Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(id), norm, StringComparison.OrdinalIgnoreCase));
         if (idx >= 0 && idx < list.Count - 1)
         {
             (list[idx + 1], list[idx]) = (list[idx], list[idx + 1]);
@@ -756,11 +756,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public async Task RemoveQueueMatchAsync(string matchId)
     {
         if (string.IsNullOrWhiteSpace(matchId)) return;
-        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        string norm = Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(matchId);
         var prefs = _preferencesService.GetPreferences();
         var list = (prefs.CustomTickerQueueMatchIds ?? new List<string>())
             .Where(id => !string.Equals(id, matchId, StringComparison.OrdinalIgnoreCase) &&
-                         !string.Equals(id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase))
+                         !string.Equals(Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(id), norm, StringComparison.OrdinalIgnoreCase))
             .ToList();
         await _preferencesService.SetCustomTickerQueueMatchIdsAsync(list);
         var updatedPrefs = _preferencesService.GetPreferences();

@@ -48,6 +48,81 @@ public partial class App : Application
     private static System.Windows.Forms.Timer? _trayClickTimer;
     private static bool _isInitialColdStart = true;
 
+    public const string SingleInstanceMutexName = "FootballTray_SingleInstance_Mutex";
+    public const string SingleInstanceEventName = "FootballTray_SingleInstance_Event";
+
+    private static Mutex? _singleInstanceMutex;
+    private static EventWaitHandle? _singleInstanceEvent;
+    private static RegisteredWaitHandle? _registeredWaitHandle;
+
+    public static bool AcquireSingleInstanceMutex(out bool isNewInstance)
+    {
+        try
+        {
+            _singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out isNewInstance);
+            return true;
+        }
+        catch (AbandonedMutexException)
+        {
+            isNewInstance = true;
+            return true;
+        }
+        catch
+        {
+            isNewInstance = false;
+            return false;
+        }
+    }
+
+    public static void SignalExistingInstanceAndExit()
+    {
+        try
+        {
+            using var ev = EventWaitHandle.OpenExisting(SingleInstanceEventName);
+            ev.Set();
+        }
+        catch { }
+    }
+
+    public static void StartSingleInstanceEventListener()
+    {
+        try
+        {
+            _singleInstanceEvent = new EventWaitHandle(false, EventResetMode.AutoReset, SingleInstanceEventName);
+            _registeredWaitHandle = ThreadPool.RegisterWaitForSingleObject(
+                _singleInstanceEvent,
+                (state, timedOut) =>
+                {
+                    OpenMainWindow();
+                },
+                null,
+                -1,
+                false);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("App", "SingleInstanceListenerFailed", $"Failed starting single instance event listener: {ex.Message}");
+        }
+    }
+
+    public static void ReleaseSingleInstanceResources()
+    {
+        try
+        {
+            _registeredWaitHandle?.Unregister(null);
+            _registeredWaitHandle = null;
+            _singleInstanceEvent?.Dispose();
+            _singleInstanceEvent = null;
+            if (_singleInstanceMutex != null)
+            {
+                _singleInstanceMutex.ReleaseMutex();
+                _singleInstanceMutex.Dispose();
+                _singleInstanceMutex = null;
+            }
+        }
+        catch { }
+    }
+
 
     public static TaskbarHost? CurrentTaskbarHost { get; private set; }
     public static TaskbarTickerCoordinator? CurrentTickerCoordinator { get; internal set; }
@@ -107,7 +182,7 @@ public partial class App : Application
 
         // 1. Ensure Local Backend Engine is Active
         _daemonManager = new DaemonLifecycleManager();
-        AppDomain.CurrentDomain.ProcessExit += (s, e) => _daemonManager?.StopDaemon();
+        AppDomain.CurrentDomain.ProcessExit += (s, e) => { _daemonManager?.StopDaemon(); ReleaseSingleInstanceResources(); };
         await _daemonManager.StartDaemonAsync(_preferencesService.Current.ActiveProvider, _appShutdownCts.Token);
 
         // 2. Initialize Core Client Services
@@ -189,24 +264,38 @@ public partial class App : Application
                 }
                 else if (_isInitialColdStart)
                 {
-                    // Silent Startup: Normal cold boot launch keeps MainWindow dormant
                     _isInitialColdStart = false;
-                    AppLogger.Info("App", "SilentStartup", "Cold boot launch: keeping MainWindow dormant in system tray.");
-                    try
+                    bool isBackground = IsBackgroundLaunch(activatedArgs);
+                    if (isBackground)
                     {
-                        if (activationWindow != null)
+                        AppLogger.Info("App", "SilentStartup", "Background/StartupTask cold boot launch: keeping MainWindow dormant in system tray.");
+                        try
                         {
-                            IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(activationWindow);
-                            if (hwnd != IntPtr.Zero)
+                            if (activationWindow != null)
                             {
-                                ShowWindow(hwnd, SW_HIDE);
+                                IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(activationWindow);
+                                if (hwnd != IntPtr.Zero)
+                                {
+                                    ShowWindow(hwnd, SW_HIDE);
+                                }
+                                activationWindow.AppWindow?.Hide();
                             }
-                            activationWindow.AppWindow?.Hide();
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.Warn("App", "SilentStartupHideFailed", $"Failed to ensure window hide on cold boot: {ex.Message}");
                         }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        AppLogger.Warn("App", "SilentStartupHideFailed", $"Failed to ensure window hide on cold boot: {ex.Message}");
+                        AppLogger.Info("App", "NormalStartup", "Normal cold boot launch: activating and showing MainWindow.");
+                        try
+                        {
+                            activationWindow?.Activate();
+                            activationWindow?.AppWindow?.Show();
+                        }
+                        catch { }
+                        BringMainWindowToForeground(activationWindow);
                     }
                 }
                 else
@@ -329,7 +418,7 @@ public partial class App : Application
             {
                 _trayIcon = new System.Windows.Forms.NotifyIcon
                 {
-                    Text = "Footballtray",
+                    Text = "FootballBar",
                     Visible = true
                 };
                 string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
@@ -368,7 +457,7 @@ public partial class App : Application
                 };
 
                 var trayMenu = new System.Windows.Forms.ContextMenuStrip();
-                trayMenu.Items.Add("Open Footballtray", null, (s, e) => OpenMainWindow());
+                trayMenu.Items.Add("Open FootballBar", null, (s, e) => OpenMainWindow());
                 trayMenu.Items.Add("Settings", null, (s, e) => OpenSettings());
 
                 var showHideTickerItem = new System.Windows.Forms.ToolStripMenuItem("Hide Ticker");
@@ -461,9 +550,12 @@ public partial class App : Application
             AppLogger.Info("App", "StartupComplete", "FootballTray client startup sequence completed successfully.");
 
             // 6. Schedule delayed startup update check (isolated from football sync health)
-            _startupUpdateCheckTask = CurrentMainViewModel?.RunStartupUpdateCheckAsync(
-                TimeSpan.FromSeconds(30),
-                _appShutdownCts.Token);
+            if (!FootballTray.Core.AppRuntimeEnvironment.IsPackagedMsix)
+            {
+                _startupUpdateCheckTask = CurrentMainViewModel?.RunStartupUpdateCheckAsync(
+                    TimeSpan.FromSeconds(30),
+                    _appShutdownCts.Token);
+            }
         }
         catch (Exception ex)
         {
@@ -519,6 +611,52 @@ public partial class App : Application
         return kind == ExtendedActivationKind.AppNotification
             ? ActivationDispatchAction.ProcessNotification
             : ActivationDispatchAction.BringToForeground;
+    }
+
+    internal static bool IsBackgroundLaunch(AppActivationArguments? activatedArgs)
+    {
+        try
+        {
+            if (activatedArgs != null)
+            {
+                if (activatedArgs.Kind == ExtendedActivationKind.StartupTask)
+                {
+                    return true;
+                }
+
+                if (activatedArgs.Data is Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs launchArgs)
+                {
+                    string rawArgs = launchArgs.Arguments ?? string.Empty;
+                    if (rawArgs.Contains("--background", StringComparison.OrdinalIgnoreCase) ||
+                        rawArgs.Contains("--minimized", StringComparison.OrdinalIgnoreCase) ||
+                        rawArgs.Contains("--silent", StringComparison.OrdinalIgnoreCase) ||
+                        rawArgs.Contains("/background", StringComparison.OrdinalIgnoreCase) ||
+                        rawArgs.Contains("/minimized", StringComparison.OrdinalIgnoreCase) ||
+                        rawArgs.Contains("/silent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            string[] cmdArgs = Environment.GetCommandLineArgs();
+            for (int i = 1; i < cmdArgs.Length; i++)
+            {
+                string arg = cmdArgs[i];
+                if (arg.Equals("--background", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("--minimized", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("/background", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("/minimized", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("/silent", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch { }
+
+        return false;
     }
 
     private void HandleAppNotificationActivation(AppNotificationActivatedEventArgs notificationArgs, Window? window)
@@ -584,6 +722,7 @@ public partial class App : Application
         {
             try
             {
+                app._window.Activate();
                 app._window.AppWindow.Show();
             }
             catch { }

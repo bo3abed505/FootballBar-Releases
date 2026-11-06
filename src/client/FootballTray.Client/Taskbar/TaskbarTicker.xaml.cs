@@ -68,7 +68,7 @@ public sealed partial class TaskbarTicker : UserControl
     /// <summary>
     /// Explicitly switches taskbar ticker pill to idle/fallback state with logo.
     /// </summary>
-    public void ShowFallback(string text = "FootballTray")
+    public void ShowFallback(string text = "FootballBar")
     {
         UpdateDisplay(null, text, null, null, null, false);
     }
@@ -213,7 +213,7 @@ public sealed partial class TaskbarTicker : UserControl
                         {
                             cleanText = cleanText["⚽".Length..].TrimStart();
                         }
-                        FallbackText.Text = !string.IsNullOrWhiteSpace(cleanText) ? cleanText : "FootballTray";
+                        FallbackText.Text = !string.IsNullOrWhiteSpace(cleanText) ? cleanText : "FootballBar";
                         FallbackText.Visibility = Visibility.Visible;
                     }
                     FallbackPanel.Visibility = Visibility.Visible;
@@ -229,7 +229,7 @@ public sealed partial class TaskbarTicker : UserControl
                     {
                         cleanText = cleanText["⚽".Length..].TrimStart();
                     }
-                    FallbackText.Text = !string.IsNullOrWhiteSpace(cleanText) ? cleanText : "FootballTray";
+                    FallbackText.Text = !string.IsNullOrWhiteSpace(cleanText) ? cleanText : "FootballBar";
                     FallbackText.Visibility = Visibility.Visible;
                 }
             }
@@ -279,7 +279,7 @@ public sealed partial class TaskbarTicker : UserControl
             {
                 FlyoutCompetitionText.Text = !string.IsNullOrWhiteSpace(match.Competition?.Name)
                     ? match.Competition.Name
-                    : "FootballTray";
+                    : "FootballBar";
 
                 // Status and timing
                 if (string.Equals(match.State, "PREMATCH", StringComparison.OrdinalIgnoreCase) ||
@@ -331,7 +331,7 @@ public sealed partial class TaskbarTicker : UserControl
             }
             else
             {
-                FlyoutCompetitionText.Text = "FootballTray";
+                FlyoutCompetitionText.Text = "FootballBar";
                 FlyoutStatusText.Text = "";
                 FlyoutHomeTeamText.Text = "";
                 FlyoutScoreText.Text = fallbackText;

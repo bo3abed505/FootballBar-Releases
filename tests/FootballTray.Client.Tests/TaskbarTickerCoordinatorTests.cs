@@ -639,7 +639,7 @@ public class TaskbarTickerCoordinatorTests
         Assert.IsTrue(xaml.Contains("<MenuFlyout"), "TaskbarTicker.xaml must declare MenuFlyout.");
         Assert.IsTrue(xaml.Contains("Text=\"Open Match Center\""), "MenuFlyout must contain 'Open Match Center'.");
         Assert.IsTrue(xaml.Contains("Text=\"Toggle Pin\""), "MenuFlyout must contain 'Toggle Pin'.");
-        Assert.IsTrue(xaml.Contains("Text=\"Open FootballTray\""), "MenuFlyout must contain 'Open FootballTray'.");
+        Assert.IsTrue(xaml.Contains("Text=\"Open FootballBar\""), "MenuFlyout must contain 'Open FootballBar'.");
         Assert.IsTrue(xaml.Contains("Text=\"Exit\""), "MenuFlyout must contain 'Exit'.");
 
         // 3. PinButton must be removed completely from the ticker UI
@@ -689,7 +689,7 @@ public class TaskbarTickerCoordinatorTests
         // Auto-Rotate is OFF and no match is pinned -> 0 candidates, not cycling, fallback text
         Assert.IsFalse(coordinator.IsCycling);
         Assert.AreEqual(0, coordinator.State.Candidates.Count);
-        Assert.AreEqual("FootballTray", emittedText);
+        Assert.AreEqual("FootballBar", emittedText);
 
         // 2. Toggle Auto-Rotate ON while viewing Yesterday's schedule
         // Must not throw, must re-evaluate candidates cleanly
@@ -698,7 +698,7 @@ public class TaskbarTickerCoordinatorTests
         // All matches are finished and date is yesterday, so 0 live candidates -> cannot cycle, stays graceful
         Assert.IsFalse(coordinator.IsCycling);
         Assert.AreEqual(0, coordinator.State.Candidates.Count);
-        Assert.AreEqual("FootballTray", emittedText);
+        Assert.AreEqual("FootballBar", emittedText);
 
         // 3. Toggle Auto-Rotate OFF again
         coordinator.SetCarouselEnabled(false);

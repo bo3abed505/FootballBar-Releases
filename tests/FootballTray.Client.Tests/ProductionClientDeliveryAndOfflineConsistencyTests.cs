@@ -619,7 +619,7 @@ public class ProductionClientDeliveryAndOfflineConsistencyTests
 
         // Empty
         var textEmpty = TrayTickerFormatter.FormatTicker(null, DataFreshnessState.Empty);
-        Assert.AreEqual("FootballTray · offline", textEmpty);
+        Assert.AreEqual("FootballBar · offline", textEmpty);
     }
 
     // ============================================================

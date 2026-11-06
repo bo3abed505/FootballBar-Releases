@@ -80,7 +80,7 @@ public static class ReleaseManifestValidator
             return ManifestValidationResult.Failure($"Incompatible architecture '{manifest.Architecture}'. Expected '{ExpectedArchitecture}'.");
         }
 
-        // 4. Download URL Check (HTTPS only, absolute URI, no file:// or ordinary http://)
+        // 4. Download URL Check (HTTPS only, absolute URI, no file://, UNC, or ordinary http://)
         if (string.IsNullOrWhiteSpace(manifest.DownloadUrl))
         {
             return ManifestValidationResult.Failure("Manifest 'downloadUrl' is missing or empty.");
@@ -89,9 +89,9 @@ public static class ReleaseManifestValidator
         {
             return ManifestValidationResult.Failure($"Manifest 'downloadUrl' '{manifest.DownloadUrl}' is not a valid absolute URI.");
         }
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        if (!Security.UrlSecurityValidator.IsSafeHttpsUrl(manifest.DownloadUrl))
         {
-            return ManifestValidationResult.Failure($"Manifest 'downloadUrl' must use HTTPS scheme. Insecure or non-web scheme '{uri.Scheme}' is rejected.");
+            return ManifestValidationResult.Failure($"Manifest 'downloadUrl' must use HTTPS scheme. Insecure or non-web scheme in '{manifest.DownloadUrl}' is rejected.");
         }
 
         // 5. SHA-256 Checksum Check (64 hex chars, case-insensitive, normalized to lowercase)

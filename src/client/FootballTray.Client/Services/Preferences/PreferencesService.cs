@@ -866,7 +866,7 @@ public sealed class PreferencesService : IPreferencesService
         return raw with
         {
             PreferencesVersion = UserPreferences.CurrentSchemaVersion,
-            ActiveProvider = "fotmob",
+            ActiveProvider = "live-telemetry",
             FollowedTeams = migratedTeams,
             FollowedCompetitions = migratedComps
         };
@@ -996,7 +996,7 @@ public sealed class PreferencesService : IPreferencesService
         return new UserPreferences
         {
             PreferencesVersion = raw.PreferencesVersion > 0 ? raw.PreferencesVersion : UserPreferences.CurrentSchemaVersion,
-            ActiveProvider = "fotmob",
+            ActiveProvider = "live-telemetry",
             FollowedTeams = normalizedTeams,
             FollowedCompetitions = normalizedComps,
             Notifications = notifs with { EnabledTypes = normalizedTypes },

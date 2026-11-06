@@ -139,14 +139,14 @@ public static class TrayTickerFormatter
     {
         if (connectionState == TickerConnectionState.NoCacheOffline)
         {
-            return "FootballTray · offline";
+            return "FootballBar · offline";
         }
 
         if (match == null)
         {
             return connectionState == TickerConnectionState.OfflineCached
-                ? "FootballTray · offline"
-                : "FootballTray";
+                ? "FootballBar · offline"
+                : "FootballBar";
         }
 
         return FormatMatch(match, connectionState, preferences);

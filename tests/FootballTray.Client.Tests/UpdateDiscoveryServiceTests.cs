@@ -21,7 +21,7 @@ public class UpdateDiscoveryServiceTests
       "version": "1.1.0",
       "publishedAt": "2026-09-15T12:00:00Z",
       "architecture": "win-x64",
-      "downloadUrl": "https://github.com/bo3abed505/FootballTray-Releases/releases/download/v1.1.0/FootballTray-v1.1.0-win-x64.zip",
+      "downloadUrl": "https://github.com/bo3abed505/FootballBar-Releases/releases/download/v1.1.0/FootballTray-v1.1.0-win-x64.zip",
       "sha256": "87df7fa5a49ec2b964e466457dfad6f5c1dba22ed042bd5362627de629e50c54",
       "sizeBytes": 65327531,
       "releaseNotes": "• New ticker improvements\n• Bug fixes"
@@ -34,7 +34,7 @@ public class UpdateDiscoveryServiceTests
       "version": "1.0.0",
       "publishedAt": "2026-09-10T12:00:00Z",
       "architecture": "win-x64",
-      "downloadUrl": "https://github.com/bo3abed505/FootballTray-Releases/releases/download/v1.0.0/FootballTray-v1.0.0-win-x64.zip",
+      "downloadUrl": "https://github.com/bo3abed505/FootballBar-Releases/releases/download/v1.0.0/FootballTray-v1.0.0-win-x64.zip",
       "sha256": "fff330cf8b14038dead109efc5186478f53d95848c5fb4fb3ebc186262bd26dd",
       "sizeBytes": 65514768
     }
@@ -46,7 +46,7 @@ public class UpdateDiscoveryServiceTests
       "version": "0.9.0",
       "publishedAt": "2026-08-10T12:00:00Z",
       "architecture": "win-x64",
-      "downloadUrl": "https://github.com/bo3abed505/FootballTray-Releases/releases/download/v0.9.0/FootballTray-v0.9.0-win-x64.zip",
+      "downloadUrl": "https://github.com/bo3abed505/FootballBar-Releases/releases/download/v0.9.0/FootballTray-v0.9.0-win-x64.zip",
       "sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
       "sizeBytes": 50000000
     }
@@ -58,7 +58,7 @@ public class UpdateDiscoveryServiceTests
       "version": "1.1.0-beta.1",
       "publishedAt": "2026-09-14T12:00:00Z",
       "architecture": "win-x64",
-      "downloadUrl": "https://github.com/bo3abed505/FootballTray-Releases/releases/download/v1.1.0-beta.1/FootballTray-v1.1.0-beta.1-win-x64.zip",
+      "downloadUrl": "https://github.com/bo3abed505/FootballBar-Releases/releases/download/v1.1.0-beta.1/FootballTray-v1.1.0-beta.1-win-x64.zip",
       "sha256": "87df7fa5a49ec2b964e466457dfad6f5c1dba22ed042bd5362627de629e50c54",
       "sizeBytes": 65327531
     }
@@ -678,7 +678,7 @@ public class UpdateDiscoveryServiceTests
     {
         string resolved = UpdateDiscoveryService.ResolveFeedUrl();
         Assert.AreEqual(
-            "https://github.com/bo3abed505/FootballTray-Releases/releases/latest/download/release-manifest.json",
+            "https://github.com/bo3abed505/FootballBar-Releases/releases/latest/download/release-manifest.json",
             resolved);
     }
 
