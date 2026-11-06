@@ -24,6 +24,7 @@ param (
     [string]$OutputFile,
     [string]$IdentityName = "bo3abed505.FootballBarLiveFootballScoresFixturesRe",
     [string]$Publisher = "CN=5DF30F18-9FB3-48BD-8538-AFFEA270896C",
+    [string]$PublisherDisplayName = "bo3abed505",
     [switch]$SkipSign,
     [switch]$SkipPublish
 )
@@ -143,6 +144,18 @@ if (-not [string]::IsNullOrWhiteSpace($IdentityName)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($Publisher)) {
     $identityNode.SetAttribute("Publisher", $Publisher)
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PublisherDisplayName) -and $null -ne $manifestXml.Package.Properties) {
+    $manifestXml.Package.Properties.PublisherDisplayName = $PublisherDisplayName
+}
+
+if ($null -ne $manifestXml.Package.Resources -and $null -ne $manifestXml.Package.Resources.Resource) {
+    foreach ($resNode in @($manifestXml.Package.Resources.Resource)) {
+        if ($resNode.GetAttribute("Language") -eq "x-generate") {
+            $resNode.SetAttribute("Language", "en-US")
+        }
+    }
 }
 
 $targetManifest = Join-Path $stagingDir "AppxManifest.xml"

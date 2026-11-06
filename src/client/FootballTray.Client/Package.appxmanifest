@@ -14,7 +14,7 @@
 
   <Properties>
     <DisplayName>FootballBar</DisplayName>
-    <PublisherDisplayName>FootballBar</PublisherDisplayName>
+    <PublisherDisplayName>bo3abed505</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Live football scores, tactical pitch lineups, standings, and real-time match notifications directly on your Windows 11 taskbar.</Description>
   </Properties>
@@ -24,7 +24,7 @@
   </Dependencies>
 
   <Resources>
-    <Resource Language="x-generate" />
+    <Resource Language="en-US" />
   </Resources>
 
   <Applications>
