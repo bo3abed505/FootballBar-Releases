@@ -246,7 +246,7 @@ public class TrayTickerFormatterTests
     public void FormatTicker_NoCacheAndOffline_ShowsOfflineFallback()
     {
         var result = TrayTickerFormatter.FormatTicker(null, TickerConnectionState.NoCacheOffline);
-        Assert.AreEqual("FootballTray · offline", result);
+        Assert.AreEqual("FootballBar · offline", result);
     }
 
     [TestMethod]
@@ -254,7 +254,7 @@ public class TrayTickerFormatterTests
     {
         var trayData = new TrayDataDto { Matches = new List<TrayMatchDto>() };
         var result = TrayTickerFormatter.FormatTicker(trayData, TickerConnectionState.OnlineFresh);
-        Assert.AreEqual("FootballTray", result);
+        Assert.AreEqual("FootballBar", result);
     }
 
     [TestMethod]
@@ -516,8 +516,8 @@ public class TrayTickerFormatterTests
         }
 
         // Test null match
-        Assert.AreEqual("FootballTray · offline", TrayTickerFormatter.FormatMatchTicker(null, TickerConnectionState.OfflineCached));
-        Assert.AreEqual("FootballTray · offline", TrayTickerFormatter.FormatMatchTicker(null, TickerConnectionState.NoCacheOffline));
-        Assert.AreEqual("FootballTray", TrayTickerFormatter.FormatMatchTicker(null, TickerConnectionState.OnlineFresh));
+        Assert.AreEqual("FootballBar · offline", TrayTickerFormatter.FormatMatchTicker(null, TickerConnectionState.OfflineCached));
+        Assert.AreEqual("FootballBar · offline", TrayTickerFormatter.FormatMatchTicker(null, TickerConnectionState.NoCacheOffline));
+        Assert.AreEqual("FootballBar", TrayTickerFormatter.FormatMatchTicker(null, TickerConnectionState.OnlineFresh));
     }
 }

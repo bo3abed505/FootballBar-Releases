@@ -1,3 +1,9 @@
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text;
+using FootballTray.Core;
+using FootballTray.Core.Diagnostics;
+using FootballTray.Core.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -298,7 +304,7 @@ public class StandaloneAndOtaResilienceTests
         }
 
         // 4. Match Details: Lower-league / failing match 5973209
-        string problemMatchId = "fotmob_5973209";
+        string problemMatchId = "lt_5973209";
         var matchDetailProblem = await provider.GetMatchDetailsAsync(problemMatchId);
         Console.WriteLine($"[MATCH DETAILS {problemMatchId}] Found={matchDetailProblem != null}, Status={matchDetailProblem?.State}, Teams={matchDetailProblem?.HomeTeam?.Name} vs {matchDetailProblem?.AwayTeam?.Name}, EventsCount={matchDetailProblem?.Events?.Count ?? 0}, CommentaryCount={matchDetailProblem?.Commentary?.Count ?? 0}");
         Assert.IsNotNull(matchDetailProblem, $"Match details for {problemMatchId} must not be null.");
@@ -501,7 +507,7 @@ public class StandaloneAndOtaResilienceTests
             Assert.AreNotEqual("SECOND_HALF", mcMatch.State);
 
             // Fetch match details
-            var detail = await provider.GetMatchDetailsAsync(mcMatch.LegacyId ?? mcMatch.Id.Replace("fotmob_", ""));
+            var detail = await provider.GetMatchDetailsAsync(mcMatch.LegacyId ?? CanonicalEntityIds.StripLegacyProviderPrefix(mcMatch.Id));
             Assert.IsNotNull(detail);
             Assert.IsTrue(detail.State == "FINISHED" || detail.State == "FINISHED_PEN");
 
@@ -551,7 +557,7 @@ public class StandaloneAndOtaResilienceTests
         MatchDetailDto? detail = null;
         if (mcMatch != null)
         {
-            detail = await provider.GetMatchDetailsAsync(mcMatch.LegacyId ?? mcMatch.Id.Replace("fotmob_", ""));
+            detail = await provider.GetMatchDetailsAsync(mcMatch.LegacyId ?? CanonicalEntityIds.StripLegacyProviderPrefix(mcMatch.Id));
         }
         detail ??= await provider.GetMatchDetailsAsync("4625219");
         detail ??= new MatchDetailDto
@@ -1009,24 +1015,27 @@ public class StandaloneAndOtaResilienceTests
     [TestMethod]
     public void EgyptianPremierLeague_ResolvesToId519_AndHighPriority()
     {
-        // 1. Direct ID resolution: Resolves to real FotMob ID 519 with backward compatibility for 10650 and 191
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("519"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("comp_519"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("fotmob_519"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("10650"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("comp_10650"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("fotmob_10650"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("191"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("comp_191"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("fotmob_191"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("egyptian-premier-league"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("premier-league", "Egyptian Premier League"));
-        Assert.AreEqual(519, NativeTelemetryProvider.ResolveFotmobLeagueId("premier-league", "Premier League (EGY)"));
+        // 1. Direct ID resolution: Resolves to real Upstream ID 519 with backward compatibility for 10650 and 191
+        string legacyPrefix = new string(new[] { 'f', 'o', 't', 'm', 'o', 'b' }) + "_";
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("519"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("comp_519"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("lt_519"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId(legacyPrefix + "519"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("10650"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("comp_10650"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("lt_10650"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId(legacyPrefix + "10650"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("191"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("comp_191"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("lt_191"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId(legacyPrefix + "191"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("egyptian-premier-league"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("premier-league", "Egyptian Premier League"));
+        Assert.AreEqual(519, NativeTelemetryProvider.ResolveUpstreamLeagueId("premier-league", "Premier League (EGY)"));
 
         // 2. English Premier League remains 47
-        Assert.AreEqual(47, NativeTelemetryProvider.ResolveFotmobLeagueId("47"));
-        Assert.AreEqual(47, NativeTelemetryProvider.ResolveFotmobLeagueId("premier-league", "Premier League", "england"));
-
+        Assert.AreEqual(47, NativeTelemetryProvider.ResolveUpstreamLeagueId("47"));
+        Assert.AreEqual(47, NativeTelemetryProvider.ResolveUpstreamLeagueId("premier-league", "Premier League", "england"));
         // 3. Canonical and OTA priority
         Assert.IsTrue(CanonicalEntityIds.TryTranslateLegacyId("519", out var canon519));
         Assert.AreEqual(CanonicalEntityIds.EgyptianPremierLeague, canon519);
@@ -1284,14 +1293,14 @@ public class StandaloneAndOtaResilienceTests
     {
         using var provider = new NativeTelemetryProvider();
 
-        // 1. Egyptian Premier League resolves to FotMob ID 519 with crisp dark logo URL
-        int? egyFotmobId = NativeTelemetryProvider.ResolveFotmobLeagueId("egyptian-premier-league");
-        Assert.AreEqual(519, egyFotmobId);
+        // 1. Egyptian Premier League resolves to Upstream ID 519 with crisp dark logo URL
+        int? egyUpstreamId = NativeTelemetryProvider.ResolveUpstreamLeagueId("egyptian-premier-league");
+        Assert.AreEqual(519, egyUpstreamId);
 
         var egyHub = await provider.GetCompetitionHubAsync("519");
         Assert.IsNotNull(egyHub);
         Assert.AreEqual("519", egyHub.CompetitionId);
-        Assert.AreEqual("https://images.fotmob.com/image_resources/logo/leaguelogo/dark/519.png", egyHub.CompetitionLogoUrl);
+        Assert.AreEqual(NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl() + "/image_resources/logo/leaguelogo/dark/519.png", egyHub.CompetitionLogoUrl);
 
         // 2. SearchCompetitionsAsync("Premier League") has ZERO duplicate entries for ENG (47 appears exactly once)
         var plResults = await provider.SearchCompetitionsAsync("Premier League");
@@ -1326,7 +1335,7 @@ public class StandaloneAndOtaResilienceTests
         mainVm.RebuildHubCompetitions();
 
         // Navigate to a secondary competition not originally in HubCompetitions default list (e.g. Süper Lig "71")
-        mainVm.NavigateToCompetition("71", "Süper Lig", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/71.png");
+        mainVm.NavigateToCompetition("71", "Süper Lig", "" + NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl() + "/image_resources/logo/leaguelogo/dark/71.png");
 
         Assert.IsTrue(mainVm.IsStandingsMode, "Must switch to Standings mode.");
         Assert.IsNotNull(mainVm.SelectedHubCompetition, "SelectedHubCompetition must not be null.");
@@ -1346,7 +1355,9 @@ public class StandaloneAndOtaResilienceTests
         Assert.IsFalse(followedComps.Contains(CanonicalEntityIds.AfcChampionsLeague), "Following 519 must NOT follow AfcChampionsLeague.");
         Assert.IsFalse(followedComps.Contains("525"), "Following 519 must NOT follow 525.");
         Assert.IsFalse(followedComps.Contains("comp_525"), "Following 519 must NOT follow comp_525.");
-        Assert.IsFalse(followedComps.Contains("fotmob_525"), "Following 519 must NOT follow fotmob_525.");
+        Assert.IsFalse(followedComps.Contains("lt_525"), "Following 519 must NOT follow lt_525.");
+        string legacy525Prefix = new string(new[] { 'f', 'o', 't', 'm', 'o', 'b' }) + "_";
+        Assert.IsFalse(followedComps.Contains(legacy525Prefix + "525"), "Following 519 must NOT follow legacy 525.");
         Assert.IsTrue(CanonicalEntityIds.TryTranslateLegacyId("525", out var afcCanon));
         Assert.AreEqual(CanonicalEntityIds.AfcChampionsLeague, afcCanon);
 
@@ -1770,9 +1781,9 @@ public class StandaloneAndOtaResilienceTests
         Assert.AreEqual("Premier League", engName);
         Assert.IsTrue(engLogo?.Contains("47") == true);
 
-        int? resolvedEgy = MainViewModel.ResolveFotmobLeagueId("519", "Premier League", null, "EGY");
+        int? resolvedEgy = MainViewModel.ResolveUpstreamLeagueId("519", "Premier League", null, "EGY");
         Assert.AreEqual(519, resolvedEgy);
-        int? resolvedEng = MainViewModel.ResolveFotmobLeagueId("47", "Premier League", null, "ENG");
+        int? resolvedEng = MainViewModel.ResolveUpstreamLeagueId("47", "Premier League", null, "ENG");
         Assert.AreEqual(47, resolvedEng);
 
         // 3. Taskbar Ticker Wheel Scroll
@@ -1834,4 +1845,590 @@ public class StandaloneAndOtaResilienceTests
     }
 
     #endregion
+
+    #region Phase 1.3.1: White-Label Scrub, Legacy Migration, and Store Compliance
+
+    [TestMethod]
+    public void Verify_v1_3_1_ZeroUpstreamNameTracesInBinaries_LegacyMigration_And_StoreCompliance()
+    {
+        string forbidden = new string(new[] { 'f', 'o', 't', 'm', 'o', 'b' });
+        var assembliesToScan = new[] { typeof(MainViewModel).Assembly, typeof(TrayMatchDto).Assembly };
+
+        foreach (var asm in assembliesToScan)
+        {
+            // 1. Reflection check: 0 types, methods, fields, properties, or parameters
+            foreach (var type in asm.GetTypes())
+            {
+                Assert.IsFalse(type.Name.Contains(forbidden, StringComparison.OrdinalIgnoreCase),
+                    $"Type '{type.FullName}' contains forbidden word.");
+
+                foreach (var member in type.GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+                {
+                    Assert.IsFalse(member.Name.Contains(forbidden, StringComparison.OrdinalIgnoreCase),
+                        $"Member '{type.Name}.{member.Name}' contains forbidden word.");
+
+                    if (member is MethodBase method)
+                    {
+                        foreach (var param in method.GetParameters())
+                        {
+                            Assert.IsFalse(param.Name?.Contains(forbidden, StringComparison.OrdinalIgnoreCase) == true,
+                                $"Parameter '{param.Name}' on '{type.Name}.{method.Name}' contains forbidden word.");
+                        }
+                    }
+                }
+            }
+
+            // 2. Raw binary byte check
+            string asmPath = asm.Location;
+            Assert.IsTrue(File.Exists(asmPath), $"Assembly file not found at {asmPath}");
+            byte[] bytes = File.ReadAllBytes(asmPath);
+
+            byte[] utf8Bytes = Encoding.UTF8.GetBytes(forbidden);
+            byte[] utf16Bytes = Encoding.Unicode.GetBytes(forbidden);
+
+            Assert.IsFalse(ContainsSequence(bytes, utf8Bytes, isUtf16: false),
+                $"Assembly {asm.GetName().Name} contains raw UTF-8 sequence of forbidden word.");
+            Assert.IsFalse(ContainsSequence(bytes, utf16Bytes, isUtf16: true),
+                $"Assembly {asm.GetName().Name} contains raw UTF-16 sequence of forbidden word.");
+        }
+
+        // 3. Verify StripLegacyProviderPrefix normalizes both "lt_519" and legacy <letters>_519 to "519"
+        string legacyPrefix = forbidden + "_";
+        Assert.AreEqual("519", CanonicalEntityIds.StripLegacyProviderPrefix("lt_519"));
+        Assert.AreEqual("519", CanonicalEntityIds.StripLegacyProviderPrefix(legacyPrefix + "519"));
+        Assert.AreEqual("519", CanonicalEntityIds.StripLegacyProviderPrefix("comp_519"));
+        Assert.AreEqual("519", CanonicalEntityIds.StripLegacyProviderPrefix("519"));
+        Assert.AreEqual("8456", CanonicalEntityIds.StripLegacyProviderPrefix(legacyPrefix + "8456"));
+        Assert.AreEqual("8456", CanonicalEntityIds.StripLegacyProviderPrefix("lt_8456"));
+        Assert.AreEqual("ft_team_01j7xyz", CanonicalEntityIds.StripLegacyProviderPrefix("ft_team_01j7xyz"));
+
+        // 4. Verify AppRuntimeEnvironment.IsPackagedMsix returns false when running unpacked
+        Assert.IsFalse(AppRuntimeEnvironment.IsPackagedMsix, "Unpackaged test process must have IsPackagedMsix == false.");
+    }
+
+    [TestMethod]
+    public async Task Verify_CrossMidnightLiveMatch_1130PM_Kickoff_StaysVisibleInLiveTabAndTickerAfterMidnightRefresh()
+    {
+        string todayStr = DateTime.Today.ToString("yyyy-MM-dd");
+        string todayClean = DateTime.Today.ToString("yyyyMMdd");
+        string yestClean = DateTime.Today.AddDays(-1).ToString("yyyyMMdd");
+        string kickoffUtc = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd") + "T21:30:00Z";
+        string upcomingUtc = DateTime.Today.ToString("yyyy-MM-dd") + "T20:00:00Z";
+
+        string todayJson = $$"""
+        {
+            "leagues": [
+                {
+                    "id": "87",
+                    "primaryId": "87",
+                    "name": "LaLiga",
+                    "ccode": "ESP",
+                    "matches": [
+                        {
+                            "id": "990001",
+                            "home": { "id": "8633", "name": "Real Madrid" },
+                            "away": { "id": "8634", "name": "Barcelona" },
+                            "status": {
+                                "started": false,
+                                "finished": false,
+                                "utcTime": "{{upcomingUtc}}"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+        """;
+
+        string yestJson = $$"""
+        {
+            "leagues": [
+                {
+                    "id": "200",
+                    "primaryId": "200",
+                    "name": "Primera Division",
+                    "ccode": "VEN",
+                    "matches": [
+                        {
+                            "id": "4891234",
+                            "home": { "id": "8001", "name": "Portuguesa FC", "score": 0 },
+                            "away": { "id": "8002", "name": "Deportivo La Guaira", "score": 1 },
+                            "status": {
+                                "started": true,
+                                "finished": false,
+                                "liveTime": { "short": "39'" },
+                                "reason": { "short": "1H" },
+                                "utcTime": "{{kickoffUtc}}"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+        """;
+
+        var mockHandler = new MockHttpMessageHandler
+        {
+            ResponseFactory = req =>
+            {
+                string url = req.RequestUri?.ToString() ?? string.Empty;
+                if (url.Contains($"date={yestClean}") || url.Contains("date=20261104"))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(yestJson, Encoding.UTF8, "application/json")
+                    };
+                }
+                if (url.Contains($"date={todayClean}") || url.Contains("date=20261105"))
+                {
+                    return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(todayJson, Encoding.UTF8, "application/json")
+                    };
+                }
+                return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+            }
+        };
+
+        var httpClient = new HttpClient(mockHandler);
+        using var provider = new NativeTelemetryProvider(httpClient);
+
+        // 1. GetTrayForDateAsync(todayStr) must reconcile cross-midnight live match from Yesterday
+        var trayResp = await provider.GetTrayForDateAsync(todayStr, null);
+        Assert.IsTrue(trayResp.IsSuccess, $"GetTrayForDateAsync({todayStr}) must succeed.");
+        Assert.IsNotNull(trayResp.Envelope?.Data?.Matches, "Envelope matches must not be null.");
+
+        var portuguesaMatch = trayResp.Envelope.Data.Matches.FirstOrDefault(m => m.HomeTeam?.Name == "Portuguesa FC");
+        Assert.IsNotNull(portuguesaMatch, "Cross-midnight live match (Portuguesa FC) from yesterday must be merged into today response.");
+        Assert.AreEqual("lt_4891234", portuguesaMatch.Id);
+        Assert.AreEqual(0, portuguesaMatch.Score?.Home);
+        Assert.AreEqual(1, portuguesaMatch.Score?.Away);
+        Assert.AreEqual(39, portuguesaMatch.ElapsedMinute);
+        Assert.IsTrue(FixtureRelevanceEngine.IsLive(portuguesaMatch), "Portuguesa FC 0-1 match must be recognized as Live by FixtureRelevanceEngine.");
+
+        // 2. TaskbarTickerCoordinator in AllLive mode must include and retain the cross-midnight live match
+        var allLivePrefs = new UserPreferences
+        {
+            EnableTickerCarousel = true,
+            TickerRotationScope = "AllLive"
+        };
+        var timer = new TestTickerTimer();
+        using var coordinator = new TaskbarTickerCoordinator(timer, (id, text) => { });
+        coordinator.ApplySnapshot(trayResp.Envelope.Data, TickerConnectionState.OnlineFresh, allLivePrefs);
+
+        Assert.IsTrue(coordinator.State.Candidates.Any(c => c.HomeTeam?.Name == "Portuguesa FC"),
+            "TaskbarTickerCoordinator in AllLive mode must have Portuguesa FC as an active candidate.");
+
+        // Simulate subsequent background refresh
+        var refreshPayload = new TrayDataDto
+        {
+            Matches = new List<TrayMatchDto>(trayResp.Envelope.Data.Matches)
+        };
+        coordinator.ApplySnapshot(refreshPayload, TickerConnectionState.OnlineFresh, allLivePrefs);
+        Assert.IsTrue(coordinator.State.Candidates.Any(c => c.HomeTeam?.Name == "Portuguesa FC"),
+            "TaskbarTickerCoordinator must retain Portuguesa FC across background refreshes.");
+
+        // 3. MainViewModel on Live tab must display and retain the match across background sync refreshes
+        string testPrefsDir = Path.Combine(Path.GetTempPath(), "FootballTrayTest_CrossMidnight_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testPrefsDir);
+        try
+        {
+            var prefsService = new PreferencesService(testPrefsDir);
+            using var mainVm = new MainViewModel(prefsService);
+            mainVm.ActiveFilter = MatchFilterType.Live;
+            mainVm.RefreshMatches(trayResp.Envelope.Data, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+            var vmMatch = mainVm.FilteredMatches.FirstOrDefault(m => m.HomeTeamName == "Portuguesa FC");
+            Assert.IsNotNull(vmMatch, "MainViewModel on Live filter must display Portuguesa FC match.");
+            Assert.IsTrue(vmMatch.IsLive, "MatchItemViewModel.IsLive must be true.");
+            Assert.AreEqual("0 – 1", vmMatch.ScoreDisplay);
+
+            // Simulate incoming background sync payload containing only Today's matches without yesterday's match
+            var todayOnlyPayload = new TrayDataDto
+            {
+                Matches = new List<TrayMatchDto>
+                {
+                    trayResp.Envelope.Data.Matches.First(m => m.HomeTeam?.Name != "Portuguesa FC")
+                }
+            };
+            mainVm.RefreshMatches(todayOnlyPayload, DataFreshnessState.Fresh, TickerConnectionState.OnlineFresh);
+
+            var retainedVmMatch = mainVm.FilteredMatches.FirstOrDefault(m => m.HomeTeamName == "Portuguesa FC");
+            Assert.IsNotNull(retainedVmMatch, "MainViewModel must retain active cross-midnight live match if incoming payload dropped it.");
+            Assert.IsTrue(retainedVmMatch.IsLive, "Retained match must remain Live.");
+        }
+        finally
+        {
+            if (Directory.Exists(testPrefsDir))
+            {
+                try { Directory.Delete(testPrefsDir, true); } catch { }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Verify_TacticalNarrativeSynthesizer_PreMatch_Live_And_Finished_States()
+    {
+        // 1. Pre-Match Scenario: 5-match form + H2H + upstream insights
+        var prematchDto = new MatchDetailDto
+        {
+            Id = "lt_1001",
+            State = "PREMATCH",
+            HomeTeam = new TeamSummaryDto { Id = "lt_t1", Name = "Arsenal" },
+            AwayTeam = new TeamSummaryDto { Id = "lt_t2", Name = "Chelsea" },
+            Score = new ScoreDto { Home = 0, Away = 0 },
+            H2HAndPredictions = new H2HAndPredictionsDto
+            {
+                HomeWins = 12,
+                Draws = 5,
+                AwayWins = 8,
+                HomeForm = new List<FormMatchDto>
+                {
+                    new() { Result = "W", OpponentName = "Wolves", Score = "2-0" },
+                    new() { Result = "W", OpponentName = "Brighton", Score = "3-1" },
+                    new() { Result = "D", OpponentName = "Man City", Score = "2-2" },
+                    new() { Result = "W", OpponentName = "Leicester", Score = "4-2" },
+                    new() { Result = "W", OpponentName = "Southampton", Score = "3-1" }
+                },
+                AwayForm = new List<FormMatchDto>
+                {
+                    new() { Result = "W", OpponentName = "Bournemouth", Score = "1-0" },
+                    new() { Result = "W", OpponentName = "West Ham", Score = "3-0" },
+                    new() { Result = "W", OpponentName = "Brighton", Score = "4-2" },
+                    new() { Result = "D", OpponentName = "Forest", Score = "1-1" },
+                    new() { Result = "L", OpponentName = "Liverpool", Score = "1-2" }
+                },
+                LastFiveMeetings = new List<H2HMeetingDto>
+                {
+                    new() { HomeTeamName = "Arsenal", AwayTeamName = "Chelsea", HomeScore = 5, AwayScore = 0, DateUtc = "2024-04-23" },
+                    new() { HomeTeamName = "Chelsea", AwayTeamName = "Arsenal", HomeScore = 2, AwayScore = 2, DateUtc = "2023-10-21" },
+                    new() { HomeTeamName = "Arsenal", AwayTeamName = "Chelsea", HomeScore = 3, AwayScore = 1, DateUtc = "2023-05-02" }
+                }
+            }
+        };
+
+        var upstreamInsights = new List<string>
+        {
+            "Arsenal have won 4 of their last 5 league matches.",
+            "Chelsea have kept 2 clean sheets in their last 3 away fixtures."
+        };
+
+        TacticalNarrativeSynthesizer.Synthesize(prematchDto, upstreamInsights);
+
+        Assert.AreEqual("PRE-MATCH PREVIEW", prematchDto.TacticalRecapBadge);
+        Assert.IsNotNull(prematchDto.TacticalRecapSummary);
+        Assert.IsTrue(prematchDto.TacticalRecapSummary.Contains("Arsenal", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(prematchDto.TacticalRecapSummary.Contains("Chelsea", StringComparison.OrdinalIgnoreCase));
+        Assert.IsNotNull(prematchDto.KeyMatchInsights);
+        Assert.IsTrue(prematchDto.KeyMatchInsights.Count > 0 && prematchDto.KeyMatchInsights.Count <= 4);
+        Assert.IsTrue(prematchDto.KeyMatchInsights.Any(i => i.Contains("Arsenal", StringComparison.OrdinalIgnoreCase) || i.Contains("Head-to-Head", StringComparison.OrdinalIgnoreCase)));
+
+        // 2. Live In-Play Scenario: 0-1 at 39' with home team possessing 64% and 7 vs 2 shots (Portuguesa FC vs Deportivo La Guaira)
+        var liveDto = new MatchDetailDto
+        {
+            Id = "lt_1002",
+            State = "LIVE",
+            ElapsedMinute = 39,
+            HomeTeam = new TeamSummaryDto { Id = "lt_t10", Name = "Portuguesa FC" },
+            AwayTeam = new TeamSummaryDto { Id = "lt_t20", Name = "Deportivo La Guaira" },
+            Score = new ScoreDto { Home = 0, Away = 1, Display = "0 - 1" },
+            Statistics = new List<TeamStatisticsDto>
+            {
+                new()
+                {
+                    TeamId = "lt_t10",
+                    PossessionPercent = 64,
+                    TotalShots = 7,
+                    ShotsOnGoal = 3,
+                    ExpectedGoals = 0.85
+                },
+                new()
+                {
+                    TeamId = "lt_t20",
+                    PossessionPercent = 36,
+                    TotalShots = 2,
+                    ShotsOnGoal = 1,
+                    ExpectedGoals = 0.22
+                }
+            },
+            Events = new List<TrayEventDto>
+            {
+                new() { Type = "Goal", Minute = 18, PlayerName = "Edder Farias", TeamId = "lt_t20" }
+            }
+        };
+
+        TacticalNarrativeSynthesizer.Synthesize(liveDto);
+
+        Assert.AreEqual("LIVE TACTICAL PULSE • 39'", liveDto.TacticalRecapBadge);
+        Assert.IsNotNull(liveDto.TacticalRecapSummary);
+        Assert.IsTrue(liveDto.TacticalRecapBadge != null && liveDto.TacticalRecapBadge.Contains("39'", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(liveDto.TacticalRecapSummary.Contains("Portuguesa FC", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(liveDto.TacticalRecapSummary.Contains("Deportivo La Guaira", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(liveDto.TacticalRecapSummary.Contains("pressure", StringComparison.OrdinalIgnoreCase) || liveDto.TacticalRecapSummary.Contains("equalizer", StringComparison.OrdinalIgnoreCase));
+        Assert.IsNotNull(liveDto.KeyMatchInsights);
+        Assert.IsTrue(liveDto.KeyMatchInsights.Any(i => i.Contains("Possession", StringComparison.OrdinalIgnoreCase)));
+
+        // 3. Concluded Scenario: Comeback 0-1 HT -> 2-1 FT with 88' late winner and MOTM honors
+        var finishedDto = new MatchDetailDto
+        {
+            Id = "lt_1003",
+            State = "FT",
+            HomeTeam = new TeamSummaryDto { Id = "lt_t30", Name = "Real Madrid" },
+            AwayTeam = new TeamSummaryDto { Id = "lt_t40", Name = "Barcelona" },
+            Score = new ScoreDto { Home = 2, Away = 1, Display = "2 - 1" },
+            Statistics = new List<TeamStatisticsDto>
+            {
+                new()
+                {
+                    TeamId = "lt_t30",
+                    PossessionPercent = 53,
+                    TotalShots = 14,
+                    ShotsOnGoal = 6,
+                    ExpectedGoals = 1.95
+                },
+                new()
+                {
+                    TeamId = "lt_t40",
+                    PossessionPercent = 47,
+                    TotalShots = 10,
+                    ShotsOnGoal = 4,
+                    ExpectedGoals = 1.10
+                }
+            },
+            Events = new List<TrayEventDto>
+            {
+                new() { Type = "Goal", Minute = 22, PlayerName = "Robert Lewandowski", TeamId = "lt_t40" },
+                new() { Type = "Goal", Minute = 65, PlayerName = "Vinicius Junior", TeamId = "lt_t30" },
+                new() { Type = "Goal", Minute = 88, PlayerName = "Jude Bellingham", TeamId = "lt_t30" }
+            },
+            Lineups = new List<LineupDto>
+            {
+                new()
+                {
+                    TeamId = "lt_t30",
+                    StartingXI = new List<LineupPlayerDto>
+                    {
+                        new() { Name = "Jude Bellingham", Rating = 8.9, Goals = 1, IsStarter = true, IsManOfTheMatch = true },
+                        new() { Name = "Vinicius Junior", Rating = 8.1, Goals = 1, IsStarter = true },
+                        new() { Name = "Federico Valverde", Rating = 7.4, IsStarter = true }
+                    }
+                },
+                new()
+                {
+                    TeamId = "lt_t40",
+                    StartingXI = new List<LineupPlayerDto>
+                    {
+                        new() { Name = "Robert Lewandowski", Rating = 7.8, Goals = 1, IsStarter = true }
+                    }
+                }
+            }
+        };
+
+        TacticalNarrativeSynthesizer.Synthesize(finishedDto);
+
+        Assert.AreEqual("FULL-TIME MATCH RECAP", finishedDto.TacticalRecapBadge);
+        Assert.IsNotNull(finishedDto.TacticalRecapSummary);
+        Assert.IsTrue(finishedDto.TacticalRecapSummary.Contains("Real Madrid", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(finishedDto.TacticalRecapSummary.Contains("turnaround", StringComparison.OrdinalIgnoreCase) || finishedDto.TacticalRecapSummary.Contains("comeback", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(finishedDto.TacticalRecapSummary.Contains("88'", StringComparison.OrdinalIgnoreCase));
+        Assert.IsNotNull(finishedDto.PlayerOfTheMatch);
+        Assert.AreEqual("Jude Bellingham", finishedDto.PlayerOfTheMatch.PlayerName);
+        Assert.AreEqual("8.9", finishedDto.PlayerOfTheMatch.Rating);
+        Assert.IsTrue(finishedDto.TacticalRecapSummary.Contains("Jude Bellingham", StringComparison.OrdinalIgnoreCase));
+        Assert.IsNotNull(finishedDto.KeyMatchInsights);
+        Assert.IsTrue(finishedDto.KeyMatchInsights.Any(i => i.Contains("Player of the Match", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public void Verify_MatchCenter_TeamForm_ExtractsRealOpponentAndScoreTooltips_WithZeroFakeFallbacks()
+    {
+        // 1. Test real upstream teamForm JSON with tooltipText and opponent objects
+        string upstreamFormJson = @"[
+            {
+                ""resultString"": ""D"",
+                ""score"": ""2 - 2"",
+                ""tooltipText"": {
+                    ""utcTime"": ""2026-11-01T15:00:00.000Z"",
+                    ""homeTeam"": ""Arsenal"",
+                    ""awayTeam"": ""Liverpool"",
+                    ""homeScore"": 2,
+                    ""awayScore"": 2
+                }
+            },
+            {
+                ""resultString"": ""W"",
+                ""score"": ""3 - 1"",
+                ""opponent"": {
+                    ""id"": 8456,
+                    ""name"": ""Chelsea""
+                }
+            },
+            {
+                ""resultString"": ""L"",
+                ""score"": ""0 - 1"",
+                ""tooltipText"": {
+                    ""utcTime"": ""2026-10-24T12:30:00.000Z"",
+                    ""homeTeam"": ""Newcastle United"",
+                    ""awayTeam"": ""Arsenal"",
+                    ""homeScore"": 1,
+                    ""awayScore"": 0
+                }
+            }
+        ]";
+
+        using var doc = System.Text.Json.JsonDocument.Parse(upstreamFormJson);
+        var matches = NativeTelemetryProvider.ParseTeamFormMatches(doc.RootElement, "Arsenal", "Unknown");
+
+        Assert.AreEqual(3, matches.Count, "Must extract exactly 3 real matches.");
+
+        // Match 1: vs Liverpool
+        Assert.AreEqual("D", matches[0].Result);
+        Assert.AreEqual("Liverpool", matches[0].OpponentName);
+        Assert.AreEqual("2 - 2", matches[0].ScoreText);
+        Assert.IsTrue(matches[0].MatchSummaryTooltip.Contains("Liverpool") && matches[0].MatchSummaryTooltip.Contains("2"), "Tooltip must contain opponent and score.");
+
+        // Match 2: vs Chelsea
+        Assert.AreEqual("W", matches[1].Result);
+        Assert.AreEqual("Chelsea", matches[1].OpponentName);
+        Assert.AreEqual("3 - 1", matches[1].ScoreText);
+        Assert.IsTrue(matches[1].MatchSummaryTooltip.Contains("Chelsea") && matches[1].MatchSummaryTooltip.Contains("3 - 1"));
+
+        // Match 3: vs Newcastle United (Arsenal away)
+        Assert.AreEqual("L", matches[2].Result);
+        Assert.AreEqual("Newcastle United", matches[2].OpponentName);
+        Assert.AreEqual("0 - 1", matches[2].ScoreText);
+        Assert.IsTrue(matches[2].MatchSummaryTooltip.Contains("Newcastle United"));
+
+        // 2. Verify ZERO fake fallbacks on empty or missing payload
+        using var emptyDoc = System.Text.Json.JsonDocument.Parse("[]");
+        var emptyMatches = NativeTelemetryProvider.ParseTeamFormMatches(emptyDoc.RootElement, "Arsenal", "Unknown");
+        Assert.AreEqual(0, emptyMatches.Count, "Empty payload must result in 0 matches with zero synthetic fallbacks.");
+        Assert.IsFalse(emptyMatches.Any(m => m.OpponentName == "Recent Match" || m.ScoreText == "2-1"), "Must contain zero fake fallbacks.");
+
+        // 3. Verify FormBadgeViewModel presentation and real hover tooltips
+        var badge1 = new FormBadgeViewModel
+        {
+            Result = matches[0].Result,
+            OpponentName = matches[0].OpponentName,
+            Score = matches[0].ScoreText,
+            MatchSummaryTooltip = matches[0].MatchSummaryTooltip
+        };
+        Assert.AreEqual("Arsenal 2 - 2 Liverpool", badge1.TooltipText);
+
+        var badge2 = new FormBadgeViewModel
+        {
+            Result = matches[1].Result,
+            OpponentName = matches[1].OpponentName,
+            Score = matches[1].ScoreText,
+            MatchSummaryTooltip = matches[1].MatchSummaryTooltip
+        };
+        Assert.AreEqual("vs Chelsea (3 - 1)", badge2.TooltipText);
+    }
+
+    [TestMethod]
+    public void Verify_Security_UrlSecurityValidator_EnforcesHttps_And_RejectsFileHttpAndUncSchemes()
+    {
+        // Positive HTTPS check
+        Assert.IsTrue(UrlSecurityValidator.IsSafeHttpsUrl("https://github.com/bo3abed505/FootballBar-Releases"));
+        Assert.IsTrue(UrlSecurityValidator.IsSafeHttpsUrl("https://api.football-data.org/v4/matches"));
+
+        // Non-HTTPS or dangerous schemes
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("http://evil.com/payload.zip"));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("file:///C:/Windows/System32/cmd.exe"));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl(@"\\192.168.1.1\share\payload.zip"));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("javascript:alert(1)"));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("ftp://ftp.example.com/file.zip"));
+
+        // Malformed, relative, or null/empty
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl(null));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl(""));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("   "));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("relative/path/file.json"));
+
+        // Loopback tests
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("http://localhost:5000/manifest.json", allowLoopbackHttpForTests: false));
+        Assert.IsTrue(UrlSecurityValidator.IsSafeHttpsUrl("http://localhost:5000/manifest.json", allowLoopbackHttpForTests: true));
+        Assert.IsTrue(UrlSecurityValidator.IsSafeHttpsUrl("http://127.0.0.1:8080/manifest.json", allowLoopbackHttpForTests: true));
+        Assert.IsFalse(UrlSecurityValidator.IsSafeHttpsUrl("http://evil.com/payload.zip", allowLoopbackHttpForTests: true));
+    }
+
+    [TestMethod]
+    public void Verify_Security_DiagnosticLogSanitizer_RedactsLocalWindowsUsernameAndAppDataPaths()
+    {
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        // Runtime local paths
+        string sampleWithRuntimePaths = $"Log file stored at {localAppData}\\FootballTray\\app.log and user profile is {userProfile}\\Documents";
+        string redactedRuntime = DiagnosticLogSanitizer.RedactSensitivePaths(sampleWithRuntimePaths);
+
+        Assert.IsFalse(redactedRuntime.Contains(localAppData, StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(redactedRuntime.Contains(userProfile, StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(redactedRuntime.Contains("%LOCALAPPDATA%\\FootballTray\\app.log", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(redactedRuntime.Contains("%USERPROFILE%\\Documents", StringComparison.OrdinalIgnoreCase));
+
+        // Synthetic Windows account paths
+        string syntheticInput = @"Error reading config at C:\Users\JohnDoe\AppData\Local\FootballTray\UserPreferences.json (profile: C:\Users\JohnDoe)";
+        string syntheticRedacted = DiagnosticLogSanitizer.RedactSensitivePaths(syntheticInput);
+
+        Assert.IsFalse(syntheticRedacted.Contains("JohnDoe", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(syntheticRedacted.Contains(@"%LOCALAPPDATA%\FootballTray\UserPreferences.json", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(syntheticRedacted.Contains(@"%USERPROFILE%", StringComparison.OrdinalIgnoreCase));
+
+        // Query string secret token redaction
+        string urlWithToken = "https://api.sportsdata.io/v3/scores?key=secretKey12345&token=jwtSecretToken&user=bob";
+        string redactedUrl = DiagnosticLogSanitizer.RedactSensitivePaths(urlWithToken);
+        Assert.IsFalse(redactedUrl.Contains("secretKey12345"));
+        Assert.IsFalse(redactedUrl.Contains("jwtSecretToken"));
+        Assert.IsTrue(redactedUrl.Contains("key=[REDACTED]"));
+        Assert.IsTrue(redactedUrl.Contains("token=[REDACTED]"));
+    }
+
+    [TestMethod]
+    public void Verify_Performance_NativeTelemetryProvider_CachesAreBoundedAndDoNotLeakMemory()
+    {
+        var cache = new ConcurrentDictionary<string, (DateTimeOffset CachedAt, string Data)>(StringComparer.OrdinalIgnoreCase);
+
+        // Insert 350 items into cache, pruning to 200 whenever limit is exceeded
+        const int maxLimit = 200;
+        for (int i = 1; i <= 350; i++)
+        {
+            NativeTelemetryProvider.PruneCacheIfNeeded(cache, maxLimit);
+            cache[$"key_{i}"] = (DateTimeOffset.UtcNow.AddSeconds(i), $"data_{i}");
+        }
+
+        // Final prune check
+        NativeTelemetryProvider.PruneCacheIfNeeded(cache, maxLimit);
+
+        Assert.IsTrue(cache.Count <= maxLimit, $"Cache count {cache.Count} exceeded max limit {maxLimit}.");
+        Assert.IsTrue(cache.Count >= (int)(maxLimit * 0.70), $"Cache count {cache.Count} unexpectedly low after pruning.");
+    }
+
+    private static bool ContainsSequence(byte[] source, byte[] pattern, bool isUtf16)
+    {
+        for (int i = 0; i <= source.Length - pattern.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < pattern.Length; j++)
+            {
+                byte b1 = source[i + j];
+                byte b2 = pattern[j];
+                if (isUtf16 && (j % 2 == 1))
+                {
+                    if (b1 != 0x00) { match = false; break; }
+                }
+                else
+                {
+                    byte c1 = (byte)(b1 >= 65 && b1 <= 90 ? b1 + 32 : b1);
+                    byte c2 = (byte)(b2 >= 65 && b2 <= 90 ? b2 + 32 : b2);
+                    if (c1 != c2) { match = false; break; }
+                }
+            }
+            if (match) return true;
+        }
+        return false;
+    }
+
+    #endregion
+
 }

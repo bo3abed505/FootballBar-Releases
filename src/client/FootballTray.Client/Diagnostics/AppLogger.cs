@@ -127,8 +127,10 @@ public static class AppLogger
     {
         if (string.IsNullOrEmpty(input)) return string.Empty;
 
+        // Apply path, username PII, and token redaction
+        string sanitized = FootballTray.Core.Diagnostics.DiagnosticLogSanitizer.RedactSensitivePaths(input);
+
         // Redact API keys, tokens, postgres connection strings
-        string sanitized = input;
         sanitized = Regex.Replace(sanitized, @"key=[a-zA-Z0-9_-]+", "key=[REDACTED]", RegexOptions.IgnoreCase);
         sanitized = Regex.Replace(sanitized, @"(x-apisports" + @"-key):\s*[a-zA-Z0-9_-]+", "$1: [REDACTED]", RegexOptions.IgnoreCase);
         sanitized = Regex.Replace(sanitized, @"(postgres" + @"ql://)[^@]+@", "$1[REDACTED]@", RegexOptions.IgnoreCase);

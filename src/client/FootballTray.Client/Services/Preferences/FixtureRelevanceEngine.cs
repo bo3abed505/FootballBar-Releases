@@ -36,13 +36,31 @@ public static class FixtureRelevanceEngine
         "PREMATCH", "NS", "TBD", "TIMED", "SCHEDULED", "NOT_STARTED"
     };
 
+    public static bool IsLiveState(string? state)
+    {
+        if (string.IsNullOrWhiteSpace(state)) return false;
+        return LiveStates.Contains(state.Trim());
+    }
+
+    public static bool IsFinishedState(string? state)
+    {
+        if (string.IsNullOrWhiteSpace(state)) return false;
+        return FinishedStates.Contains(state.Trim());
+    }
+
+    public static bool IsPrematchState(string? state)
+    {
+        if (string.IsNullOrWhiteSpace(state)) return false;
+        return PrematchStates.Contains(state.Trim());
+    }
+
     /// <summary>
     /// Guards canonical league identification against false positives (e.g. non-English competitions sharing ID 47,
     /// or Spanish second division sharing ID 140/87).
     /// </summary>
-    public static bool IsValidCanonicalCompetition(int fotmobId, string? name, string? country)
+    public static bool IsValidCanonicalCompetition(int upstreamId, string? name, string? country)
     {
-        if (fotmobId == 47) // Premier League (England)
+        if (upstreamId == 47) // Premier League (England)
         {
             if (name?.Contains("Frauen", StringComparison.OrdinalIgnoreCase) == true ||
                 name?.Contains("Women", StringComparison.OrdinalIgnoreCase) == true)
@@ -59,7 +77,7 @@ public static class FixtureRelevanceEngine
 
             return true;
         }
-        if (fotmobId == 87) // LaLiga (Spain)
+        if (upstreamId == 87) // LaLiga (Spain)
         {
             if (name?.Contains("2", StringComparison.OrdinalIgnoreCase) == true ||
                 name?.Contains("Segunda", StringComparison.OrdinalIgnoreCase) == true ||
@@ -78,7 +96,7 @@ public static class FixtureRelevanceEngine
 
             return true;
         }
-        if (fotmobId == 519) // Egyptian Premier League
+        if (upstreamId == 519) // Egyptian Premier League
         {
             if (!string.IsNullOrWhiteSpace(country) &&
                 !string.Equals(country, "EGY", StringComparison.OrdinalIgnoreCase))
@@ -102,20 +120,20 @@ public static class FixtureRelevanceEngine
         }
 
         if (string.Equals(canonicalOrNumericId, CanonicalEntityIds.PremierLeague, StringComparison.OrdinalIgnoreCase) ||
-            canonicalOrNumericId == "47" || canonicalOrNumericId == "comp_47" || canonicalOrNumericId == "fotmob_47")
+            canonicalOrNumericId == "47" || canonicalOrNumericId == "comp_47" || canonicalOrNumericId == "lt_47")
         {
             return IsValidCanonicalCompetition(47, name, country);
         }
 
         if (string.Equals(canonicalOrNumericId, CanonicalEntityIds.LaLiga, StringComparison.OrdinalIgnoreCase) ||
-            canonicalOrNumericId == "87" || canonicalOrNumericId == "comp_87" || canonicalOrNumericId == "fotmob_87")
+            canonicalOrNumericId == "87" || canonicalOrNumericId == "comp_87" || canonicalOrNumericId == "lt_87")
         {
             return IsValidCanonicalCompetition(87, name, country);
         }
 
         if (string.Equals(canonicalOrNumericId, CanonicalEntityIds.EgyptianPremierLeague, StringComparison.OrdinalIgnoreCase) ||
-            canonicalOrNumericId == "519" || canonicalOrNumericId == "comp_519" || canonicalOrNumericId == "fotmob_519" ||
-            canonicalOrNumericId == "10650" || canonicalOrNumericId == "comp_10650" || canonicalOrNumericId == "fotmob_10650")
+            canonicalOrNumericId == "519" || canonicalOrNumericId == "comp_519" || canonicalOrNumericId == "lt_519" ||
+            canonicalOrNumericId == "10650" || canonicalOrNumericId == "comp_10650" || canonicalOrNumericId == "lt_10650")
         {
             return IsValidCanonicalCompetition(519, name, country);
         }
@@ -148,9 +166,9 @@ public static class FixtureRelevanceEngine
             return true;
         }
 
-        // Al Ahly SC (FotMob: 101745)
+        // Al Ahly SC (Upstream: 101745)
         if (string.Equals(cleanId, CanonicalEntityIds.AlAhly, StringComparison.OrdinalIgnoreCase) ||
-            cleanId == "101745" || cleanId == "team_101745" || cleanId == "fotmob_101745" || cleanId == "team_alahly" || cleanId == "team_1029")
+            cleanId == "101745" || cleanId == "team_101745" || cleanId == "lt_101745" || cleanId == "team_alahly" || cleanId == "team_1029")
         {
             if (nameLower.Contains("lyon") || nameLower.Contains("lyonnais") || nameLower.Contains("samsun"))
             {
@@ -159,9 +177,9 @@ public static class FixtureRelevanceEngine
             return nameLower.Contains("ahly") || nameLower.Contains("ahli") || nameLower.Contains("أهلي") || nameLower.Contains("ahl");
         }
 
-        // Zamalek SC (FotMob: 80591)
+        // Zamalek SC (Upstream: 80591)
         if (string.Equals(cleanId, CanonicalEntityIds.Zamalek, StringComparison.OrdinalIgnoreCase) ||
-            cleanId == "80591" || cleanId == "team_80591" || cleanId == "fotmob_80591" || cleanId == "team_zamalek" || cleanId == "team_1028")
+            cleanId == "80591" || cleanId == "team_80591" || cleanId == "lt_80591" || cleanId == "team_zamalek" || cleanId == "team_1028")
         {
             if (nameLower.Contains("samsun") || nameLower.Contains("lyon"))
             {
@@ -170,30 +188,30 @@ public static class FixtureRelevanceEngine
             return nameLower.Contains("zamalek") || nameLower.Contains("زمالك") || nameLower.Contains("zam");
         }
 
-        // FC Barcelona (FotMob: 8634)
+        // FC Barcelona (Upstream: 8634)
         if (string.Equals(cleanId, CanonicalEntityIds.Barcelona, StringComparison.OrdinalIgnoreCase) ||
-            cleanId == "8634" || cleanId == "team_8634" || cleanId == "fotmob_8634" || cleanId == "team_barcelona" || cleanId == "team_529" || cleanId == "529")
+            cleanId == "8634" || cleanId == "team_8634" || cleanId == "lt_8634" || cleanId == "team_barcelona" || cleanId == "team_529" || cleanId == "529")
         {
             return nameLower.Contains("barcelona") || nameLower.Contains("barça") || nameLower.Contains("barca");
         }
 
-        // Real Madrid (FotMob: 8633)
+        // Real Madrid (Upstream: 8633)
         if (string.Equals(cleanId, CanonicalEntityIds.RealMadrid, StringComparison.OrdinalIgnoreCase) ||
-            cleanId == "8633" || cleanId == "team_8633" || cleanId == "fotmob_8633" || cleanId == "team_realmadrid" || cleanId == "team_541")
+            cleanId == "8633" || cleanId == "team_8633" || cleanId == "lt_8633" || cleanId == "team_realmadrid" || cleanId == "team_541")
         {
             return nameLower.Contains("madrid");
         }
 
-        // Arsenal (FotMob: 9825)
+        // Arsenal (Upstream: 9825)
         if (string.Equals(cleanId, CanonicalEntityIds.Arsenal, StringComparison.OrdinalIgnoreCase) ||
-            cleanId == "9825" || cleanId == "team_9825" || cleanId == "fotmob_9825" || cleanId == "team_arsenal" || cleanId == "team_42")
+            cleanId == "9825" || cleanId == "team_9825" || cleanId == "lt_9825" || cleanId == "team_arsenal" || cleanId == "team_42")
         {
             return nameLower.Contains("arsenal");
         }
 
-        // Egypt (FotMob: 32)
+        // Egypt (Upstream: 32)
         if (string.Equals(cleanId, CanonicalEntityIds.Egypt, StringComparison.OrdinalIgnoreCase) ||
-            cleanId == "32" || cleanId == "team_32" || cleanId == "fotmob_32" || cleanId == "team_egypt")
+            cleanId == "32" || cleanId == "team_32" || cleanId == "lt_32" || cleanId == "team_egypt")
         {
             return nameLower.Contains("egypt") || nameLower.Contains("مصر");
         }

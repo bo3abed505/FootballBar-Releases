@@ -261,12 +261,12 @@ public sealed class TaskbarTickerCoordinator : IDisposable
     {
         if (string.IsNullOrWhiteSpace(matchId)) return null;
         if (_customQueueMatchSnapshots.TryGetValue(matchId, out var direct)) return direct;
-        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        string norm = CanonicalEntityIds.StripLegacyProviderPrefix(matchId);
         if (_customQueueMatchSnapshots.TryGetValue(norm, out var byNorm)) return byNorm;
         return _customQueueMatchSnapshots.Values.FirstOrDefault(m =>
             string.Equals(m.Id, matchId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(m.LegacyId, matchId, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(m.Id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+            string.Equals(CanonicalEntityIds.StripLegacyProviderPrefix(m.Id), norm, StringComparison.OrdinalIgnoreCase));
     }
 
     public TrayMatchDto? GetActiveMatch() => _state.CurrentCandidate;
@@ -287,7 +287,7 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             {
                 _customQueueMatchSnapshots[match.LegacyId] = match;
             }
-            string norm = match.Id.Replace("fotmob_", "").Replace("match_", "");
+            string norm = CanonicalEntityIds.StripLegacyProviderPrefix(match.Id);
             _customQueueMatchSnapshots[norm] = match;
         }
     }
@@ -618,12 +618,12 @@ public sealed class TaskbarTickerCoordinator : IDisposable
             foreach (var qId in queueIds)
             {
                 if (string.IsNullOrWhiteSpace(qId)) continue;
-                string norm = qId.Replace("fotmob_", "").Replace("match_", "");
+                string norm = CanonicalEntityIds.StripLegacyProviderPrefix(qId);
 
                 TrayMatchDto? found = trayData?.Matches?.FirstOrDefault(m =>
                     string.Equals(m.Id, qId, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(m.LegacyId, qId, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(m.Id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(CanonicalEntityIds.StripLegacyProviderPrefix(m.Id), norm, StringComparison.OrdinalIgnoreCase));
 
                 found ??= GetQueuedMatchSnapshot(qId);
 

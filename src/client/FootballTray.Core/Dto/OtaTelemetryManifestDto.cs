@@ -11,37 +11,37 @@ namespace FootballTray.Core.Dto;
 public class OtaTelemetryEndpointsDto
 {
     [JsonPropertyName("matchesByDateUrlTemplate")]
-    public string MatchesByDateUrlTemplate { get; set; } = "https://www.fotmob.com/api/data/matches?date={date}";
+    public string MatchesByDateUrlTemplate { get; set; } = "/api/data/matches?date={date}";
 
     [JsonPropertyName("matchesByDateFallbackUrlTemplate")]
-    public string MatchesByDateFallbackUrlTemplate { get; set; } = "https://www.fotmob.com/api/matches?date={date}";
+    public string MatchesByDateFallbackUrlTemplate { get; set; } = "/api/matches?date={date}";
 
     [JsonPropertyName("matchDetailsUrlTemplate")]
-    public string MatchDetailsUrlTemplate { get; set; } = "https://www.fotmob.com/api/data/matchDetails?matchId={matchId}";
+    public string MatchDetailsUrlTemplate { get; set; } = "/api/data/matchDetails?matchId={matchId}";
 
     [JsonPropertyName("matchDetailsFallbackUrlTemplate")]
-    public string MatchDetailsFallbackUrlTemplate { get; set; } = "https://www.fotmob.com/api/matchDetails?matchId={matchId}";
+    public string MatchDetailsFallbackUrlTemplate { get; set; } = "/api/matchDetails?matchId={matchId}";
 
     [JsonPropertyName("leagueHubUrlTemplate")]
-    public string LeagueHubUrlTemplate { get; set; } = "https://www.fotmob.com/api/data/leagues?id={leagueId}";
+    public string LeagueHubUrlTemplate { get; set; } = "/api/data/leagues?id={leagueId}";
 
     [JsonPropertyName("leagueHubFallbackUrlTemplate")]
-    public string LeagueHubFallbackUrlTemplate { get; set; } = "https://www.fotmob.com/api/leagues?id={leagueId}";
+    public string LeagueHubFallbackUrlTemplate { get; set; } = "/api/leagues?id={leagueId}";
 
     [JsonPropertyName("teamHubUrlTemplate")]
-    public string TeamHubUrlTemplate { get; set; } = "https://www.fotmob.com/api/data/teams?id={teamId}";
+    public string TeamHubUrlTemplate { get; set; } = "/api/data/teams?id={teamId}";
 
     [JsonPropertyName("teamHubFallbackUrlTemplate")]
-    public string TeamHubFallbackUrlTemplate { get; set; } = "https://www.fotmob.com/api/teams?id={teamId}";
+    public string TeamHubFallbackUrlTemplate { get; set; } = "/api/teams?id={teamId}";
 
     [JsonPropertyName("searchSuggestUrlTemplate")]
-    public string SearchSuggestUrlTemplate { get; set; } = "https://www.fotmob.com/api/search/suggest?term={term}";
+    public string SearchSuggestUrlTemplate { get; set; } = "/api/data/search/suggest?term={term}";
 
     [JsonPropertyName("teamLogoUrlTemplate")]
-    public string TeamLogoUrlTemplate { get; set; } = "https://images.fotmob.com/image_resources/logo/teamlogo/{teamId}.png";
+    public string TeamLogoUrlTemplate { get; set; } = "/image_resources/logo/teamlogo/{teamId}.png";
 
     [JsonPropertyName("leagueLogoUrlTemplate")]
-    public string LeagueLogoUrlTemplate { get; set; } = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{leagueId}.png";
+    public string LeagueLogoUrlTemplate { get; set; } = "/image_resources/logo/leaguelogo/dark/{leagueId}.png";
 }
 
 /// <summary>
@@ -54,7 +54,7 @@ public class OtaTelemetryManifestDto
     public string SchemaVersion { get; set; } = "1.0";
 
     [JsonPropertyName("manifestVersion")]
-    public string ManifestVersion { get; set; } = "1.3.0";
+    public string ManifestVersion { get; set; } = "1.3.1";
 
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = "live-telemetry";

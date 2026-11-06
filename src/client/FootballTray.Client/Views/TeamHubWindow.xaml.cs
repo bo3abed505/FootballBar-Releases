@@ -40,11 +40,20 @@ public sealed partial class TeamHubWindow : Window
             }
         };
 
+        Closed += OnWindowClosed;
+
         if (!string.IsNullOrWhiteSpace(teamId))
         {
             Title = !string.IsNullOrWhiteSpace(initialName) ? $"{initialName} - Team Hub" : "Team Hub";
             _ = ViewModel.LoadAsync(teamId, initialName, initialLogo);
         }
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        Closed -= OnWindowClosed;
+        ViewModel.Dispose();
+        RootGrid.DataContext = null;
     }
 
     private void UpdateTabStyles()

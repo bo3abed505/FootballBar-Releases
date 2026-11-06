@@ -69,6 +69,6 @@ public record ClientHealthSnapshot
         }
         sb.AppendLine("============================================================");
 
-        return sb.ToString();
+        return FootballTray.Core.Diagnostics.DiagnosticLogSanitizer.RedactSensitivePaths(sb.ToString());
     }
 }

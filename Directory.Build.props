@@ -1,14 +1,15 @@
 <Project>
   <PropertyGroup>
-    <VersionPrefix>1.3.0</VersionPrefix>
+    <VersionPrefix>1.3.1</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <Version Condition="'$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
     <Version Condition="'$(VersionSuffix)' == ''">$(VersionPrefix)</Version>
-    <AssemblyVersion>1.3.0.0</AssemblyVersion>
-    <FileVersion>1.3.0.0</FileVersion>
+    <AssemblyVersion>1.3.1.0</AssemblyVersion>
+    <FileVersion>1.3.1.0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
-    <Product>FootballTray</Product>
-    <Company>FootballTray</Company>
-    <Copyright>Copyright © 2026 FootballTray</Copyright>
+    <Product>FootballBar</Product>
+    <AssemblyTitle>FootballBar</AssemblyTitle>
+    <Company>FootballBar</Company>
+    <Copyright>Copyright © 2026 FootballBar</Copyright>
   </PropertyGroup>
 </Project>

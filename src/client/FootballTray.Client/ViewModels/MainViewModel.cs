@@ -394,7 +394,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HasUpdateCapability => _updateDiscoveryService != null;
     public SettingsViewModel Settings { get; }
 
-    public string DiagnosticsVersionText => $"Version {_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
+    public string DiagnosticsVersionText => $"FootballBar v{_diagnosticsService.GetCurrentSnapshot().Version} ({_diagnosticsService.GetCurrentSnapshot().Architecture})";
     public string DiagnosticsHealthStatusText => $"{_diagnosticsService.GetCurrentSnapshot().HealthState} ({_diagnosticsService.GetCurrentSnapshot().FreshnessState})";
     public string DiagnosticsLastSyncText => _diagnosticsService.GetCurrentSnapshot().LastSuccessfulServerResponseTime?.ToString("HH:mm:ss 'UTC'") ?? "Never";
     public string DiagnosticsTaskbarText => _diagnosticsService.GetCurrentSnapshot().TaskbarHostStatus;
@@ -687,14 +687,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     }
                     if (_selectedCalendarDate.Date != DateTime.Today)
                     {
-                        _selectedCalendarDate = DateTime.Today;
-                        UpdateCalendarSelection();
-                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDate)));
-                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateOffset)));
-                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedCalendarDateDisplay)));
+                        SelectedCalendarDate = DateTime.Today;
                     }
-                    _syncService?.TriggerImmediateSync();
-                    ApplyCurrentFilter();
+                    else
+                    {
+                        if (_syncService != null && _syncService.TargetDate.Date != DateTime.Today)
+                        {
+                            _syncService.TargetDate = DateTime.Today;
+                        }
+                        _syncService?.TriggerImmediateSync();
+                        ApplyCurrentFilter();
+                    }
                 }
                 else if (value == MatchFilterType.All)
                 {
@@ -1227,16 +1230,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             }
 
-            // 3. The Default Leagues (always ensure top leagues are available with crisp FotMob logos)
+            // 3. The Default Leagues (always ensure top leagues are available with crisp upstream logos)
             var defaultTopLeagues = new[]
             {
-                new { Id = "87", Name = "LaLiga", Country = "Spain", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/87.png" },
-                new { Id = "47", Name = "Premier League", Country = "England", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/47.png" },
-                new { Id = "42", Name = "UEFA Champions League", Country = "Europe", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/42.png" },
-                new { Id = "55", Name = "Serie A", Country = "Italy", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/55.png" },
-                new { Id = "54", Name = "Bundesliga", Country = "Germany", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/54.png" },
-                new { Id = "53", Name = "Ligue 1", Country = "France", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/53.png" },
-                new { Id = "519", Name = "Egyptian Premier League", Country = "Egypt", LogoUrl = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/519.png" },
+                new { Id = "87", Name = "LaLiga", Country = "Spain", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/87.png" },
+                new { Id = "47", Name = "Premier League", Country = "England", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/47.png" },
+                new { Id = "42", Name = "UEFA Champions League", Country = "Europe", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/42.png" },
+                new { Id = "55", Name = "Serie A", Country = "Italy", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/55.png" },
+                new { Id = "54", Name = "Bundesliga", Country = "Germany", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/54.png" },
+                new { Id = "53", Name = "Ligue 1", Country = "France", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/53.png" },
+                new { Id = "519", Name = "Egyptian Premier League", Country = "Egypt", LogoUrl = $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/519.png" },
             };
 
             foreach (var dl in defaultTopLeagues)
@@ -1309,7 +1312,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }, nameof(RebuildHubCompetitions));
     }
 
-    public static string? ExtractFotmobLeagueIdFromLogoUrl(string? logoUrl)
+    public static string? ExtractUpstreamLeagueIdFromLogoUrl(string? logoUrl)
     {
         if (string.IsNullOrWhiteSpace(logoUrl)) return null;
         var match = System.Text.RegularExpressions.Regex.Match(logoUrl, @"/leaguelogo/(?:dark|light)/(\d+)\.png", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -1323,20 +1326,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (HubCompetitions.Count == 0) return null;
 
-        var numericFromLogo = ExtractFotmobLeagueIdFromLogoUrl(logoUrl);
+        var numericFromLogo = ExtractUpstreamLeagueIdFromLogoUrl(logoUrl);
         var numericFromId = ExtractNumericDigits(id);
 
-        int? targetResolvedId = ResolveFotmobLeagueId(id, name, logoUrl, country);
+        int? targetResolvedId = ResolveUpstreamLeagueId(id, name, logoUrl, country);
 
         return HubCompetitions.FirstOrDefault(c =>
         {
             if (!string.IsNullOrWhiteSpace(id) && c.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            var chipNumericLogo = ExtractFotmobLeagueIdFromLogoUrl(c.LogoUrl);
+            var chipNumericLogo = ExtractUpstreamLeagueIdFromLogoUrl(c.LogoUrl);
             var chipNumericId = ExtractNumericDigits(c.Id);
 
-            int? chipResolvedId = ResolveFotmobLeagueId(c.Id, c.Name, c.LogoUrl);
+            int? chipResolvedId = ResolveUpstreamLeagueId(c.Id, c.Name, c.LogoUrl);
 
             // If both have resolved numeric IDs, they MUST match
             if (targetResolvedId.HasValue && chipResolvedId.HasValue)
@@ -1406,13 +1409,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var digits = ExtractNumericDigits(id);
         if (!string.IsNullOrEmpty(digits))
         {
-            return $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{digits}.png";
+            return $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/{digits}.png";
         }
 
-        int? fotmobId = ResolveFotmobLeagueId(id, name);
-        if (fotmobId.HasValue && fotmobId.Value > 0)
+        int? upstreamId = ResolveUpstreamLeagueId(id, name);
+        if (upstreamId.HasValue && upstreamId.Value > 0)
         {
-            return $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{fotmobId.Value}.png";
+            return $"{NativeTelemetryProvider.GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/{upstreamId.Value}.png";
         }
 
         return existingLogoUrl;
@@ -1438,7 +1441,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (!string.IsNullOrWhiteSpace(name) &&
             !name.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) &&
-            !name.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase) &&
+            !name.StartsWith("lt_", StringComparison.OrdinalIgnoreCase) &&
             !name.StartsWith("comp_", StringComparison.OrdinalIgnoreCase) &&
             !int.TryParse(name, out _))
         {
@@ -1469,9 +1472,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return !string.IsNullOrWhiteSpace(name) ? name : "Competition";
     }
 
-    public static int? ResolveFotmobLeagueId(string? id, string? name, string? logoUrl = null, string? country = null)
+    public static int? ResolveUpstreamLeagueId(string? id, string? name, string? logoUrl = null, string? country = null)
     {
-        var logoDigits = ExtractFotmobLeagueIdFromLogoUrl(logoUrl);
+        var logoDigits = ExtractUpstreamLeagueIdFromLogoUrl(logoUrl);
         if (int.TryParse(logoDigits, out int logoNum) && logoNum > 0)
         {
             if (logoNum == 10650 || logoNum == 191) return 519;
@@ -1540,14 +1543,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             // Extract numeric ID from logoUrl if available (e.g. /leaguelogo/dark/73.png -> 73) or resolve from name/id
             string effectiveId = competitionId;
-            var logoDigits = ExtractFotmobLeagueIdFromLogoUrl(targetLogoUrl);
+            var logoDigits = ExtractUpstreamLeagueIdFromLogoUrl(targetLogoUrl);
             if (!string.IsNullOrEmpty(logoDigits))
             {
                 effectiveId = logoDigits;
             }
             else
             {
-                var resolvedId = ResolveFotmobLeagueId(competitionId, targetName, targetLogoUrl);
+                var resolvedId = ResolveUpstreamLeagueId(competitionId, targetName, targetLogoUrl);
                 if (resolvedId.HasValue && resolvedId.Value > 0)
                 {
                     effectiveId = resolvedId.Value.ToString();
@@ -1572,7 +1575,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 {
                     if (cts.IsCancellationRequested) return;
 
-                    var resolvedName = !string.IsNullOrWhiteSpace(targetName) && !targetName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase) && !targetName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !targetName.StartsWith("comp_", StringComparison.OrdinalIgnoreCase)
+                    var resolvedName = !string.IsNullOrWhiteSpace(targetName) && !targetName.StartsWith("lt_", StringComparison.OrdinalIgnoreCase) && !targetName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !targetName.StartsWith("comp_", StringComparison.OrdinalIgnoreCase)
                         ? targetName
                         : (!string.IsNullOrWhiteSpace(hub.CompetitionName) && hub.CompetitionName != "Competition" ? hub.CompetitionName : ResolveCompetitionFriendlyName(hub.CompetitionId, hub.CompetitionName));
 
@@ -1700,14 +1703,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var match = FindMatchingHubCompetition(group.CompetitionId, group.CompetitionName, group.LogoUrl, group.Country);
         var resolvedLogo = ResolveCompetitionLogoUrl(group.CompetitionId, group.CompetitionName, group.LogoUrl);
-        var resolvedName = !string.IsNullOrWhiteSpace(group.CompetitionName) && !group.CompetitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !group.CompetitionName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase)
+        var resolvedName = !string.IsNullOrWhiteSpace(group.CompetitionName) && !group.CompetitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !group.CompetitionName.StartsWith("lt_", StringComparison.OrdinalIgnoreCase)
             ? group.CompetitionName
             : ResolveCompetitionFriendlyName(group.CompetitionId, group.CompetitionName);
 
         if (match == null)
         {
-            int? numericFotmobId = ResolveFotmobLeagueId(group.CompetitionId, resolvedName, resolvedLogo, group.Country);
-            string chipId = numericFotmobId.HasValue ? numericFotmobId.Value.ToString() : group.CompetitionId;
+            int? numericUpstreamId = ResolveUpstreamLeagueId(group.CompetitionId, resolvedName, resolvedLogo, group.Country);
+            string chipId = numericUpstreamId.HasValue ? numericUpstreamId.Value.ToString() : group.CompetitionId;
             var newChip = new HubCompetitionItemViewModel
             {
                 Id = chipId,
@@ -1746,14 +1749,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var match = FindMatchingHubCompetition(competitionId, competitionName, logoUrl, country);
         var resolvedLogo = ResolveCompetitionLogoUrl(competitionId, competitionName, logoUrl);
-        var resolvedName = !string.IsNullOrWhiteSpace(competitionName) && !competitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !competitionName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase)
+        var resolvedName = !string.IsNullOrWhiteSpace(competitionName) && !competitionName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !competitionName.StartsWith("lt_", StringComparison.OrdinalIgnoreCase)
             ? competitionName
             : ResolveCompetitionFriendlyName(competitionId, competitionName);
 
         if (match == null)
         {
-            int? numericFotmobId = ResolveFotmobLeagueId(competitionId, resolvedName, resolvedLogo, country);
-            string chipId = numericFotmobId.HasValue ? numericFotmobId.Value.ToString() : competitionId;
+            int? numericUpstreamId = ResolveUpstreamLeagueId(competitionId, resolvedName, resolvedLogo, country);
+            string chipId = numericUpstreamId.HasValue ? numericUpstreamId.Value.ToString() : competitionId;
             var newChip = new HubCompetitionItemViewModel
             {
                 Id = chipId,
@@ -1843,7 +1846,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 var compVm = AvailableCompetitions.FirstOrDefault(c => c.Id.Equals(compId, StringComparison.OrdinalIgnoreCase));
-                var friendlyName = !string.IsNullOrWhiteSpace(compName) && !compName.StartsWith("fotmob_", StringComparison.OrdinalIgnoreCase) && !compName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !int.TryParse(compName, out _)
+                var friendlyName = !string.IsNullOrWhiteSpace(compName) && !compName.StartsWith("lt_", StringComparison.OrdinalIgnoreCase) && !compName.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase) && !int.TryParse(compName, out _)
                     ? compName
                     : ResolveCompetitionFriendlyName(compId, compName);
 
@@ -2130,6 +2133,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         if (trayData != null)
         {
+            if (_latestTrayData?.Matches != null && trayData.Matches != null && _latestTrayData != trayData)
+            {
+                foreach (var prevMatch in _latestTrayData.Matches)
+                {
+                    bool isCrossMidnightLive = FixtureRelevanceEngine.IsLive(prevMatch) &&
+                        prevMatch.KickoffTime != default &&
+                        prevMatch.KickoffTime.ToLocalTime().Date < _selectedCalendarDate.Date;
+
+                    if (isCrossMidnightLive &&
+                        !trayData.Matches.Any(m => string.Equals(m.Id, prevMatch.Id, StringComparison.OrdinalIgnoreCase) ||
+                            (!string.IsNullOrEmpty(m.LegacyId) && !string.IsNullOrEmpty(prevMatch.LegacyId) && string.Equals(m.LegacyId, prevMatch.LegacyId, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        trayData.Matches.Add(prevMatch);
+                    }
+                }
+            }
             _latestTrayData = trayData;
         }
         else if (_latestTrayData == null && _syncService?.CurrentTrayData != null)
@@ -2166,7 +2185,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var localDate = m.KickoffTime.ToLocalTime().Date;
             var utcDate = m.KickoffTime.UtcDateTime.Date;
             var rawDate = m.KickoffTime.Date;
-            return localDate == _selectedCalendarDate.Date || utcDate == _selectedCalendarDate.Date || rawDate == _selectedCalendarDate.Date || m.KickoffTime.DateTime.Date == _selectedCalendarDate.Date;
+            bool dateMatches = localDate == _selectedCalendarDate.Date || utcDate == _selectedCalendarDate.Date || rawDate == _selectedCalendarDate.Date || m.KickoffTime.DateTime.Date == _selectedCalendarDate.Date;
+            if (dateMatches) return true;
+            if (_selectedCalendarDate.Date == DateTime.Today && (m.KickoffTime == default || m.KickoffTime.Year < 2000 || FixtureRelevanceEngine.IsLive(m))) return true;
+            if (_activeFilter == MatchFilterType.Live && FixtureRelevanceEngine.IsLive(m)) return true;
+            return false;
         }) ?? 0;
 
         if (matchesOnSelectedDate == 0 && (isSyncingResponse || _isDateSynchronizing))
@@ -2328,13 +2351,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public TrayMatchDto? GetMatchDtoById(string matchId)
     {
         if (string.IsNullOrWhiteSpace(matchId)) return null;
-        string norm = matchId.Replace("fotmob_", "").Replace("match_", "");
+        string norm = matchId.Replace("lt_", "").Replace("match_", "");
 
         bool IsMatchTarget(TrayMatchDto? m) =>
             m != null && (
                 string.Equals(m.Id, matchId, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(m.LegacyId, matchId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(m.Id?.Replace("fotmob_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
+                string.Equals(m.Id?.Replace("lt_", "").Replace("match_", ""), norm, StringComparison.OrdinalIgnoreCase));
 
         var found = _latestTrayData?.Matches?.FirstOrDefault(IsMatchTarget)
             ?? FilteredMatches?.FirstOrDefault(vm => IsMatchTarget(vm.RawDto))?.RawDto

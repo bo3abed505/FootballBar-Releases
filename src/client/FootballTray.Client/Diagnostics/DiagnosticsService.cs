@@ -59,7 +59,7 @@ public class DiagnosticsService : IDiagnosticsService
     {
         lock (_lock)
         {
-            _lastErrorSummary = $"[{component}] {errorSummary}";
+            _lastErrorSummary = FootballTray.Core.Diagnostics.DiagnosticLogSanitizer.RedactSensitivePaths($"[{component}] {errorSummary}");
         }
         AppLogger.Error(component, "SubsystemError", errorSummary, null, ex);
     }
@@ -120,7 +120,7 @@ public class DiagnosticsService : IDiagnosticsService
 
     public string GetSanitizedReportText()
     {
-        return GetCurrentSnapshot().GenerateSanitizedReport();
+        return FootballTray.Core.Diagnostics.DiagnosticLogSanitizer.RedactSensitivePaths(GetCurrentSnapshot().GenerateSanitizedReport());
     }
 
     public string GenerateReport() => GetSanitizedReportText();

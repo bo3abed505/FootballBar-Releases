@@ -422,7 +422,7 @@
             <StackPanel Grid.Column="0" Spacing="6">
                 <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                     <TextBlock
-                        Text="FootballTray"
+                        Text="FootballBar"
                         Style="{ThemeResource TitleTextBlockStyle}"
                         FontSize="22"
                         FontWeight="Bold"

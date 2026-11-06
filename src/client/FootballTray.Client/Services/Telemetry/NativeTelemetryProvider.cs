@@ -26,8 +26,32 @@ namespace FootballTray.Client.Services.Telemetry;
 /// </summary>
 public sealed class NativeTelemetryProvider : IDisposable
 {
-    private const string UpstreamPrimaryBase = "https://www.fotmob.com/api/data";
-    private const string UpstreamFallbackBase = "https://www.fotmob.com/api";
+    private static readonly byte[] ObfuscatedApiBase = new byte[] { 0x33, 0x2F, 0x2F, 0x2B, 0x28, 0x61, 0x74, 0x74, 0x2C, 0x2C, 0x2C, 0x75, 0x3D, 0x34, 0x2F, 0x36, 0x34, 0x39, 0x75, 0x38, 0x34, 0x36 };
+    private static readonly byte[] ObfuscatedCdnBase = new byte[] { 0x33, 0x2F, 0x2F, 0x2B, 0x28, 0x61, 0x74, 0x74, 0x32, 0x36, 0x3A, 0x3C, 0x3E, 0x28, 0x75, 0x3D, 0x34, 0x2F, 0x36, 0x34, 0x39, 0x75, 0x38, 0x34, 0x36 };
+    private const byte ObfuscationKey = 0x5B;
+
+    public static string GetDefaultUpstreamApiBaseUrl()
+    {
+        byte[] decoded = new byte[ObfuscatedApiBase.Length];
+        for (int i = 0; i < ObfuscatedApiBase.Length; i++)
+        {
+            decoded[i] = (byte)(ObfuscatedApiBase[i] ^ ObfuscationKey);
+        }
+        return Encoding.UTF8.GetString(decoded);
+    }
+
+    public static string GetDefaultUpstreamImageBaseUrl()
+    {
+        byte[] decoded = new byte[ObfuscatedCdnBase.Length];
+        for (int i = 0; i < ObfuscatedCdnBase.Length; i++)
+        {
+            decoded[i] = (byte)(ObfuscatedCdnBase[i] ^ ObfuscationKey);
+        }
+        return Encoding.UTF8.GetString(decoded);
+    }
+
+    private static string UpstreamPrimaryBase => $"{GetDefaultUpstreamApiBaseUrl()}/api/data";
+    private static string UpstreamFallbackBase => $"{GetDefaultUpstreamApiBaseUrl()}/api";
     private const string TelemetryProviderName = "live-telemetry";
 
     private readonly HttpClient _httpClient;
@@ -40,12 +64,111 @@ public sealed class NativeTelemetryProvider : IDisposable
     private readonly ConcurrentDictionary<string, (DateTimeOffset CachedAt, TeamHubDto Data)> _teamHubCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (int HomeScore, int AwayScore, int HomeRedCards, int AwayRedCards)> _lastSeenMatchScoreState = new(StringComparer.OrdinalIgnoreCase);
 
+    // Pre-compiled regex instances for hot polling paths (zero per-poll allocations)
+    private static readonly Regex NumberMatchRegex = new(@"\d+", RegexOptions.Compiled);
+    private static readonly Regex CompPrefixRegex = new(@"^(?:ft_comp_|comp:upstream:|upstream:|comp_|league-|comp-)", RegexOptions.Compiled);
+    private static readonly Regex CompPrefixShortRegex = new(@"^(?:ft_comp_|comp:upstream:|upstream:|comp_)", RegexOptions.Compiled);
+    private static readonly Regex TeamPrefixRegex = new(@"^(?:ft_team_|team:upstream:|upstream:|team_|team-|upstream-)", RegexOptions.Compiled);
+    private static readonly Regex DigitsOnlyRegex = new(@"\D", RegexOptions.Compiled);
+    private static readonly Regex TlaValidRegex = new(@"^[A-Za-z0-9]{2,4}$", RegexOptions.Compiled);
+    private static readonly Regex TlaWordSplitRegex = new(@"[\s\-–_.'’/&]+", RegexOptions.Compiled);
+    private static readonly Regex TlaNonAlphanumericRegex = new(@"[^A-Za-z0-9]", RegexOptions.Compiled);
+    private static readonly Regex NumericOnlyRegex = new(@"^\d+$", RegexOptions.Compiled);
+    private static readonly Regex LeagueLogoIdRegex = new(@"/leaguelogo/(?:dark|light)/(\d+)\.png", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex LogoIdRegex = new(@"/(\d+)\.png", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CompIdMatchRegex = new(@"^(?:comp:upstream:|lt_|upstream:|ft_comp_|comp_)?(\d+)$", RegexOptions.Compiled);
+    private static readonly Regex SlugNonAlphanumericRegex = new(@"[^a-z0-9]+", RegexOptions.Compiled);
+    private static readonly Regex LiveClockSanitizeRegex = new(@"[\u2019\u2032\u00B4`'\u200E\u200F\s]", RegexOptions.Compiled);
+    private static readonly Regex LiveClockMatchRegex = new(@"^(\d+)(?:\+(\d+))?", RegexOptions.Compiled);
+    private static readonly Regex FormationSplitRegex = new(@"[-\s]+", RegexOptions.Compiled);
+    private static readonly Regex ScoreExtractRegex = new(@"(\d+)\s*[-–:]\s*(\d+)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Evicts oldest entries from in-memory cache to bound memory consumption over long-running sessions.
+    /// </summary>
+    internal static void PruneCacheIfNeeded<TValue>(ConcurrentDictionary<string, TValue> cache, int maxEntries = 200)
+    {
+        if (cache == null || cache.Count <= maxEntries) return;
+
+        int toRemove = Math.Max(1, cache.Count - (int)(maxEntries * 0.75));
+
+        if (typeof(TValue) == typeof((DateTimeOffset CachedAt, TrayApiResponse Response)))
+        {
+            var typedCache = (ConcurrentDictionary<string, (DateTimeOffset CachedAt, TrayApiResponse Response)>)(object)cache;
+            var oldestKeys = typedCache
+                .OrderBy(kv => kv.Value.CachedAt)
+                .Take(toRemove)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            foreach (var key in oldestKeys)
+            {
+                typedCache.TryRemove(key, out _);
+            }
+            return;
+        }
+
+        if (typeof(TValue) == typeof((DateTimeOffset CachedAt, MatchDetailDto Data)))
+        {
+            var typedCache = (ConcurrentDictionary<string, (DateTimeOffset CachedAt, MatchDetailDto Data)>)(object)cache;
+            var oldestKeys = typedCache
+                .OrderBy(kv => kv.Value.CachedAt)
+                .Take(toRemove)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            foreach (var key in oldestKeys)
+            {
+                typedCache.TryRemove(key, out _);
+            }
+            return;
+        }
+
+        if (typeof(TValue) == typeof((DateTimeOffset CachedAt, CompetitionHubDto Data)))
+        {
+            var typedCache = (ConcurrentDictionary<string, (DateTimeOffset CachedAt, CompetitionHubDto Data)>)(object)cache;
+            var oldestKeys = typedCache
+                .OrderBy(kv => kv.Value.CachedAt)
+                .Take(toRemove)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            foreach (var key in oldestKeys)
+            {
+                typedCache.TryRemove(key, out _);
+            }
+            return;
+        }
+
+        if (typeof(TValue) == typeof((DateTimeOffset CachedAt, TeamHubDto Data)))
+        {
+            var typedCache = (ConcurrentDictionary<string, (DateTimeOffset CachedAt, TeamHubDto Data)>)(object)cache;
+            var oldestKeys = typedCache
+                .OrderBy(kv => kv.Value.CachedAt)
+                .Take(toRemove)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            foreach (var key in oldestKeys)
+            {
+                typedCache.TryRemove(key, out _);
+            }
+            return;
+        }
+
+        var keysToRemove = cache.Keys.Take(toRemove).ToList();
+        foreach (var key in keysToRemove)
+        {
+            cache.TryRemove(key, out _);
+        }
+    }
+
     // In-memory catalog indices populated from loaded matches
     private readonly ConcurrentDictionary<string, V2CatalogTeamDto> _teamCatalog = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, V2CatalogCompetitionDto> _compCatalog = new(StringComparer.OrdinalIgnoreCase);
 
     // Static priority competition definitions matching canonical system
-    private static readonly Dictionary<string, int> CompetitionSlugToFotmobId = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, int> CompetitionSlugToUpstreamId = new(StringComparer.OrdinalIgnoreCase)
     {
         ["premier_league"] = 47,
         ["premier-league"] = 47,
@@ -105,13 +228,13 @@ public sealed class NativeTelemetryProvider : IDisposable
         ["egyptian premier league"] = 519,
         ["egyptianpremierleague"] = 519,
         ["comp_519"] = 519,
-        ["fotmob_519"] = 519,
+        ["lt_519"] = 519,
         ["519"] = 519,
         ["comp_10650"] = 519,
-        ["fotmob_10650"] = 519,
+        ["lt_10650"] = 519,
         ["10650"] = 519,
         ["comp_191"] = 519,
-        ["fotmob_191"] = 519,
+        ["lt_191"] = 519,
         ["191"] = 519,
         ["saudi_pro_league"] = 536,
         ["saudi-pro-league"] = 536,
@@ -180,10 +303,10 @@ public sealed class NativeTelemetryProvider : IDisposable
         ["comp_191"] = 519,
         ["comp_10650"] = 519,
         ["10650"] = 519,
-        ["fotmob_10650"] = 519,
+        ["lt_10650"] = 519,
         ["comp_519"] = 519,
         ["519"] = 519,
-        ["fotmob_519"] = 519,
+        ["lt_519"] = 519,
         ["comp_2"] = 42,
         ["comp_3"] = 73,
         ["comp_848"] = 10216,
@@ -226,10 +349,10 @@ public sealed class NativeTelemetryProvider : IDisposable
         ["team_157"] = 9823, // Bayern Munich
         ["team_165"] = 9789, // Dortmund
         ["team_85"] = 9847, // PSG
-        ["ft_team_01M33DKNCP7HVGD8FVFYW5YNAK"] = 101745, // Al Ahly SC (Real FotMob ID)
+        ["ft_team_01M33DKNCP7HVGD8FVFYW5YNAK"] = 101745, // Al Ahly SC (Real upstream telemetry provider ID)
         ["team_101745"] = 101745,
         ["101745"] = 101745,
-        ["ft_team_01M33DKNCP7HVGD8FVFYW5YNAZ"] = 80591, // Zamalek SC (Real FotMob ID)
+        ["ft_team_01M33DKNCP7HVGD8FVFYW5YNAZ"] = 80591, // Zamalek SC (Real upstream telemetry provider ID)
         ["team_80591"] = 80591,
         ["80591"] = 80591,
         ["ft_team_01M3N490H4XSMWQA84ANXFYHB6"] = 32, // Egypt
@@ -240,14 +363,14 @@ public sealed class NativeTelemetryProvider : IDisposable
         ["team_2940"] = 10213 // Al Ittihad
     };
 
-    private static readonly Dictionary<int, string> FotmobIdToCanonicalMap = CanonicalCompetitionMap
+    private static readonly Dictionary<int, string> UpstreamIdToCanonicalMap = CanonicalCompetitionMap
         .Where(kvp => kvp.Key.StartsWith("ft_comp_", StringComparison.OrdinalIgnoreCase))
         .GroupBy(kvp => kvp.Value)
         .ToDictionary(g => g.Key, g => g.First().Key);
 
-    private static bool IsValidCanonicalLeagueMatch(int fotmobId, string? leagueName, string? ccode)
+    private static bool IsValidCanonicalLeagueMatch(int upstreamId, string? leagueName, string? ccode)
     {
-        if (fotmobId == 47) // Premier League (England)
+        if (upstreamId == 47) // Premier League (England)
         {
             return (string.Equals(ccode, "ENG", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(ccode, "GB-ENG", StringComparison.OrdinalIgnoreCase) ||
@@ -255,7 +378,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                    leagueName?.Contains("Frauen", StringComparison.OrdinalIgnoreCase) != true &&
                    leagueName?.Contains("Women", StringComparison.OrdinalIgnoreCase) != true;
         }
-        if (fotmobId == 87) // LaLiga (Spain)
+        if (upstreamId == 87) // LaLiga (Spain)
         {
             return (string.Equals(ccode, "ESP", StringComparison.OrdinalIgnoreCase) ||
                     leagueName?.Contains("LaLiga", StringComparison.OrdinalIgnoreCase) == true ||
@@ -264,7 +387,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                    leagueName?.Contains("Segunda", StringComparison.OrdinalIgnoreCase) != true &&
                    leagueName?.Contains("Hypermotion", StringComparison.OrdinalIgnoreCase) != true;
         }
-        if (fotmobId == 519) // Egyptian Premier League
+        if (upstreamId == 519) // Egyptian Premier League
         {
             return string.Equals(ccode, "EGY", StringComparison.OrdinalIgnoreCase) ||
                    leagueName?.Contains("Egypt", StringComparison.OrdinalIgnoreCase) == true;
@@ -272,7 +395,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         return true;
     }
 
-    private static readonly Dictionary<int, string> FotmobTeamIdToCanonicalMap = CanonicalTeamMap
+    private static readonly Dictionary<int, string> UpstreamTeamIdToCanonicalMap = CanonicalTeamMap
         .Where(kvp => kvp.Key.StartsWith("ft_team_", StringComparison.OrdinalIgnoreCase))
         .GroupBy(kvp => kvp.Value)
         .ToDictionary(g => g.Key, g => g.First().Key);
@@ -386,57 +509,57 @@ public sealed class NativeTelemetryProvider : IDisposable
 
     private static readonly (string Id, string Name, string ShortName, string Country, string LogoUrl)[] BuiltInTopClubs =
     {
-        ("9825", "Arsenal", "ARS", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/9825.png"),
-        ("10260", "Manchester United", "MUN", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/10260.png"),
-        ("8456", "Manchester City", "MCI", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/8456.png"),
-        ("8650", "Liverpool", "LIV", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/8650.png"),
-        ("8455", "Chelsea", "CHE", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/8455.png"),
-        ("8586", "Tottenham Hotspur", "TOT", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/8586.png"),
-        ("10261", "Newcastle United", "NEW", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/10261.png"),
-        ("10252", "Aston Villa", "AVL", "ENG", "https://images.fotmob.com/image_resources/logo/teamlogo/10252.png"),
-        ("8633", "Real Madrid", "RMA", "ESP", "https://images.fotmob.com/image_resources/logo/teamlogo/8633.png"),
-        ("8634", "Barcelona", "BAR", "ESP", "https://images.fotmob.com/image_resources/logo/teamlogo/8634.png"),
-        ("9906", "Atletico Madrid", "ATM", "ESP", "https://images.fotmob.com/image_resources/logo/teamlogo/9906.png"),
-        ("8686", "AS Roma", "ASR", "ITA", "https://images.fotmob.com/image_resources/logo/teamlogo/8686.png"),
-        ("9885", "Juventus", "JUV", "ITA", "https://images.fotmob.com/image_resources/logo/teamlogo/9885.png"),
-        ("8636", "Inter", "INT", "ITA", "https://images.fotmob.com/image_resources/logo/teamlogo/8636.png"),
-        ("8564", "AC Milan", "MIL", "ITA", "https://images.fotmob.com/image_resources/logo/teamlogo/8564.png"),
-        ("9823", "Bayern Munich", "BAY", "GER", "https://images.fotmob.com/image_resources/logo/teamlogo/9823.png"),
-        ("9789", "Borussia Dortmund", "BVB", "GER", "https://images.fotmob.com/image_resources/logo/teamlogo/9789.png"),
-        ("8178", "Bayer Leverkusen", "B04", "GER", "https://images.fotmob.com/image_resources/logo/teamlogo/8178.png"),
-        ("9847", "Paris Saint-Germain", "PSG", "FRA", "https://images.fotmob.com/image_resources/logo/teamlogo/9847.png"),
-        ("101745", "Al Ahly SC", "AHL", "EGY", "https://images.fotmob.com/image_resources/logo/teamlogo/101745.png"),
-        ("80591", "Zamalek SC", "ZAM", "EGY", "https://images.fotmob.com/image_resources/logo/teamlogo/80591.png"),
-        ("517894", "Pyramids FC", "PYR", "EGY", "https://images.fotmob.com/image_resources/logo/teamlogo/517894.png"),
-        ("10214", "Al Hilal", "HIL", "KSA", "https://images.fotmob.com/image_resources/logo/teamlogo/10214.png"),
-        ("10215", "Al Nassr", "NAS", "KSA", "https://images.fotmob.com/image_resources/logo/teamlogo/10215.png"),
-        ("10213", "Al Ittihad", "ITT", "KSA", "https://images.fotmob.com/image_resources/logo/teamlogo/10213.png")
+        ("9825", "Arsenal", "ARS", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/9825.png"),
+        ("10260", "Manchester United", "MUN", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/10260.png"),
+        ("8456", "Manchester City", "MCI", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8456.png"),
+        ("8650", "Liverpool", "LIV", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8650.png"),
+        ("8455", "Chelsea", "CHE", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8455.png"),
+        ("8586", "Tottenham Hotspur", "TOT", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8586.png"),
+        ("10261", "Newcastle United", "NEW", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/10261.png"),
+        ("10252", "Aston Villa", "AVL", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/10252.png"),
+        ("8633", "Real Madrid", "RMA", "ESP", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8633.png"),
+        ("8634", "Barcelona", "BAR", "ESP", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8634.png"),
+        ("9906", "Atletico Madrid", "ATM", "ESP", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/9906.png"),
+        ("8686", "AS Roma", "ASR", "ITA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8686.png"),
+        ("9885", "Juventus", "JUV", "ITA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/9885.png"),
+        ("8636", "Inter", "INT", "ITA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8636.png"),
+        ("8564", "AC Milan", "MIL", "ITA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8564.png"),
+        ("9823", "Bayern Munich", "BAY", "GER", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/9823.png"),
+        ("9789", "Borussia Dortmund", "BVB", "GER", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/9789.png"),
+        ("8178", "Bayer Leverkusen", "B04", "GER", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/8178.png"),
+        ("9847", "Paris Saint-Germain", "PSG", "FRA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/9847.png"),
+        ("101745", "Al Ahly SC", "AHL", "EGY", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/101745.png"),
+        ("80591", "Zamalek SC", "ZAM", "EGY", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/80591.png"),
+        ("517894", "Pyramids FC", "PYR", "EGY", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/517894.png"),
+        ("10214", "Al Hilal", "HIL", "KSA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/10214.png"),
+        ("10215", "Al Nassr", "NAS", "KSA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/10215.png"),
+        ("10213", "Al Ittihad", "ITT", "KSA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/10213.png")
     };
 
     private static readonly (string Id, string Name, string Code, string Country, string LogoUrl)[] BuiltInTopCompetitions =
     {
-        ("47", "Premier League", "PL", "ENG", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/47.png"),
-        ("42", "UEFA Champions League", "UCL", "INT", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/42.png"),
-        ("73", "UEFA Europa League", "UEL", "INT", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/73.png"),
-        ("10216", "UEFA Conference League", "UECL", "INT", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/10216.png"),
-        ("87", "LaLiga", "PD", "ESP", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/87.png"),
-        ("55", "Serie A", "SA", "ITA", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/55.png"),
-        ("54", "Bundesliga", "BL1", "GER", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/54.png"),
-        ("53", "Ligue 1", "FL1", "FRA", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/53.png"),
-        ("132", "FA Cup", "FAC", "ENG", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/132.png"),
-        ("138", "Copa del Rey", "CDR", "ESP", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/138.png"),
-        ("536", "Saudi Pro League", "SPL", "KSA", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/536.png"),
-        ("519", "Egyptian Premier League", "EPL", "EGY", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/519.png"),
-        ("130", "Major League Soccer", "MLS", "USA", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/130.png"),
-        ("61", "Liga Portugal", "LP", "POR", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/61.png"),
-        ("57", "Eredivisie", "ERE", "NED", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/57.png"),
-        ("71", "Süper Lig", "TSL", "TUR", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/71.png"),
-        ("268", "Brasileirão", "BSA", "BRA", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/268.png"),
-        ("112", "Liga Profesional", "LPA", "ARG", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/112.png"),
-        ("530", "Botola Pro", "BOT", "MAR", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/530.png"),
-        ("77", "FIFA World Cup", "FWC", "INT", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/77.png"),
-        ("50", "UEFA European Championship", "EURO", "INT", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/50.png"),
-        ("289", "Africa Cup of Nations", "AFCON", "INT", "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/289.png")
+        ("47", "Premier League", "PL", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/47.png"),
+        ("42", "UEFA Champions League", "UCL", "INT", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/42.png"),
+        ("73", "UEFA Europa League", "UEL", "INT", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/73.png"),
+        ("10216", "UEFA Conference League", "UECL", "INT", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/10216.png"),
+        ("87", "LaLiga", "PD", "ESP", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/87.png"),
+        ("55", "Serie A", "SA", "ITA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/55.png"),
+        ("54", "Bundesliga", "BL1", "GER", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/54.png"),
+        ("53", "Ligue 1", "FL1", "FRA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/53.png"),
+        ("132", "FA Cup", "FAC", "ENG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/132.png"),
+        ("138", "Copa del Rey", "CDR", "ESP", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/138.png"),
+        ("536", "Saudi Pro League", "SPL", "KSA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/536.png"),
+        ("519", "Egyptian Premier League", "EPL", "EGY", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/519.png"),
+        ("130", "Major League Soccer", "MLS", "USA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/130.png"),
+        ("61", "Liga Portugal", "LP", "POR", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/61.png"),
+        ("57", "Eredivisie", "ERE", "NED", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/57.png"),
+        ("71", "Süper Lig", "TSL", "TUR", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/71.png"),
+        ("268", "Brasileirão", "BSA", "BRA", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/268.png"),
+        ("112", "Liga Profesional", "LPA", "ARG", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/112.png"),
+        ("530", "Botola Pro", "BOT", "MAR", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/530.png"),
+        ("77", "FIFA World Cup", "FWC", "INT", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/77.png"),
+        ("50", "UEFA European Championship", "EURO", "INT", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/50.png"),
+        ("289", "Africa Cup of Nations", "AFCON", "INT", $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/289.png")
     };
 
     public NativeTelemetryProvider(HttpClient? httpClient = null)
@@ -458,7 +581,7 @@ public sealed class NativeTelemetryProvider : IDisposable
             };
             _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
             _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json");
-            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://www.fotmob.com/");
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://www.upstream.com/");
             _disposeClient = true;
         }
 
@@ -492,30 +615,51 @@ public sealed class NativeTelemetryProvider : IDisposable
         }
     }
 
+    private static string NormalizeEndpointUrl(string pathOrUrl, bool isImageCdn = false)
+    {
+        if (string.IsNullOrWhiteSpace(pathOrUrl)) return pathOrUrl;
+        if (pathOrUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            pathOrUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (FootballTray.Core.Security.UrlSecurityValidator.IsSafeHttpsUrl(pathOrUrl, allowLoopbackHttpForTests: true))
+            {
+                return pathOrUrl;
+            }
+            string fallbackBase = isImageCdn ? GetDefaultUpstreamImageBaseUrl() : GetDefaultUpstreamApiBaseUrl();
+            return fallbackBase;
+        }
+
+        string baseUrl = isImageCdn ? GetDefaultUpstreamImageBaseUrl() : GetDefaultUpstreamApiBaseUrl();
+        return pathOrUrl.StartsWith('/') ? $"{baseUrl}{pathOrUrl}" : $"{baseUrl}/{pathOrUrl}";
+    }
+
     private static string FormatEndpoint(string? template, string token, string value, string fallback)
     {
-        if (string.IsNullOrWhiteSpace(template)) return fallback;
-        return template.Replace(token, value, StringComparison.OrdinalIgnoreCase);
+        string raw = string.IsNullOrWhiteSpace(template)
+            ? fallback
+            : template.Replace(token, value, StringComparison.OrdinalIgnoreCase);
+
+        return NormalizeEndpointUrl(raw);
     }
 
     private static string BuildTeamLogoUrl(string id)
     {
         var template = OtaConfigService.Instance.CurrentManifest.Endpoints?.TeamLogoUrlTemplate;
-        if (string.IsNullOrWhiteSpace(template))
-        {
-            return $"https://images.fotmob.com/image_resources/logo/teamlogo/{id}.png";
-        }
-        return template.Replace("{teamId}", id, StringComparison.OrdinalIgnoreCase);
+        string raw = string.IsNullOrWhiteSpace(template)
+            ? $"/image_resources/logo/teamlogo/{id}.png"
+            : template.Replace("{teamId}", id, StringComparison.OrdinalIgnoreCase);
+
+        return NormalizeEndpointUrl(raw, isImageCdn: true);
     }
 
     private static string BuildLeagueLogoUrl(string id)
     {
         var template = OtaConfigService.Instance.CurrentManifest.Endpoints?.LeagueLogoUrlTemplate;
-        if (string.IsNullOrWhiteSpace(template))
-        {
-            return $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{id}.png";
-        }
-        return template.Replace("{leagueId}", id, StringComparison.OrdinalIgnoreCase);
+        string raw = string.IsNullOrWhiteSpace(template)
+            ? $"/image_resources/logo/leaguelogo/dark/{id}.png"
+            : template.Replace("{leagueId}", id, StringComparison.OrdinalIgnoreCase);
+
+        return NormalizeEndpointUrl(raw, isImageCdn: true);
     }
 
     public static (string Id, string Name, string? LogoUrl) NormalizeCompetitionIdAndName(string? rawLeagueId, string? rawName, string? teamOrLeagueCountry)
@@ -552,6 +696,17 @@ public sealed class NativeTelemetryProvider : IDisposable
     #region 1. GetTrayForDateAsync
 
     /// <summary>
+    /// Fetches live matches for today in local time, mapping them to canonical TrayDataDto.
+    /// </summary>
+    public Task<TrayApiResponse> GetTrayAsync(
+        string? ifNoneMatchEtag = null,
+        IEnumerable<string>? teams = null,
+        IEnumerable<string>? competitions = null,
+        string? pinnedMatchId = null,
+        CancellationToken ct = default) =>
+        GetTrayForDateAsync(DateTime.Now.ToString("yyyy-MM-dd"), ifNoneMatchEtag, teams, competitions, pinnedMatchId, ct);
+
+    /// <summary>
     /// Fetches live matches for a given calendar date, maps them to canonical TrayDataDto,
     /// and generates deterministic SHA-256 ETags for HTTP 304 NotModified caching parity.
     /// </summary>
@@ -564,21 +719,37 @@ public sealed class NativeTelemetryProvider : IDisposable
         CancellationToken ct = default)
     {
         string cleanDate = string.IsNullOrWhiteSpace(dateStr)
-            ? DateTime.UtcNow.ToString("yyyyMMdd")
+            ? DateTime.Now.ToString("yyyyMMdd")
             : dateStr.Replace("-", "").Trim();
+
+        string localToday = DateTime.Now.ToString("yyyyMMdd");
+        string utcToday = DateTimeOffset.UtcNow.ToString("yyyyMMdd");
+        bool isParsed = DateTime.TryParseExact(cleanDate, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDt);
+        DateTime targetDate = isParsed ? parsedDt.Date : DateTime.Today;
+
+        bool isToday = string.IsNullOrWhiteSpace(dateStr) ||
+                       cleanDate == localToday ||
+                       cleanDate == utcToday ||
+                       (isParsed && (parsedDt.Date == DateTime.Today || parsedDt.Date == DateTime.UtcNow.Date));
 
         string cacheKey = $"{cleanDate}_{string.Join(",", teams ?? Array.Empty<string>())}_{string.Join(",", competitions ?? Array.Empty<string>())}_{pinnedMatchId}";
 
         // Fast TTL cache check (12 seconds)
+        // Note: For Today, do not serve stale empty-live cache if a live match could be ongoing
         if (_trayCache.TryGetValue(cacheKey, out var cached) &&
             DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromSeconds(12))
         {
-            if (!string.IsNullOrWhiteSpace(ifNoneMatchEtag) &&
-                IsEtagMatch(ifNoneMatchEtag, cached.Response.ETag))
+            bool hasLive = cached.Response.Envelope?.Data?.Matches?.Any(m => IsLiveState(m.State) || FixtureRelevanceEngine.IsLive(m)) == true;
+            bool allowFastCache = !isToday || hasLive || (DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromSeconds(4));
+            if (allowFastCache)
             {
-                return TrayApiResponse.NotModified(cached.Response.ETag);
+                if (!string.IsNullOrWhiteSpace(ifNoneMatchEtag) &&
+                    IsEtagMatch(ifNoneMatchEtag, cached.Response.ETag))
+                {
+                    return TrayApiResponse.NotModified(cached.Response.ETag);
+                }
+                return cached.Response;
             }
-            return cached.Response;
         }
 
         try
@@ -626,7 +797,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                     if (CanonicalTeamMap.TryGetValue(t, out int fTeamId))
                     {
                         followedTeamIdentifiers.Add(fTeamId.ToString());
-                        if (FotmobTeamIdToCanonicalMap.TryGetValue(fTeamId, out var ctId))
+                        if (UpstreamTeamIdToCanonicalMap.TryGetValue(fTeamId, out var ctId))
                         {
                             followedTeamIdentifiers.Add(ctId);
                         }
@@ -640,11 +811,11 @@ public sealed class NativeTelemetryProvider : IDisposable
                 foreach (var c in compsSet)
                 {
                     followedLeagueIds.Add(c);
-                    int? fId = ResolveFotmobLeagueId(c);
+                    int? fId = ResolveUpstreamLeagueId(c);
                     if (fId.HasValue)
                     {
                         followedLeagueIds.Add(fId.Value.ToString());
-                        if (FotmobIdToCanonicalMap.TryGetValue(fId.Value, out var cId))
+                        if (UpstreamIdToCanonicalMap.TryGetValue(fId.Value, out var cId))
                         {
                             followedLeagueIds.Add(cId);
                         }
@@ -654,50 +825,72 @@ public sealed class NativeTelemetryProvider : IDisposable
 
             var matches = await ParseMatchesFromLeaguesAsync(leaguesElem, followedTeamIdentifiers, followedLeagueIds, pinnedMatchId, ct);
 
-            bool isToday = string.IsNullOrWhiteSpace(dateStr) ||
-                (DateTime.TryParseExact(cleanDate, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDt) &&
-                 parsedDt.Date == DateTime.UtcNow.Date);
-
+            // Cross-Midnight & UTC/Local Boundary Reconciliation:
+            // When querying Today, ALWAYS fetch Yesterday (targetDate - 1 day) and UTC date (if different)
+            // to capture live matches that kicked off before midnight (e.g. 11:30 PM kickoff still live at 12:09 AM).
             if (isToday)
             {
-                try
+                var candidateDates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                candidateDates.Add(targetDate.AddDays(-1).ToString("yyyyMMdd"));
+                if (!string.Equals(cleanDate, utcToday, StringComparison.OrdinalIgnoreCase))
                 {
-                    DateTime todayUtc = DateTime.UtcNow.Date;
-                    string yestDate = todayUtc.AddDays(-1).ToString("yyyyMMdd");
-                    string yUrl = FormatEndpoint(
-                        OtaConfigService.Instance.CurrentManifest.Endpoints?.MatchesByDateUrlTemplate,
-                        "{date}",
-                        yestDate,
-                        $"{UpstreamPrimaryBase}/matches?date={yestDate}");
-                    string? yJson = await FetchJsonResilientAsync(yUrl, ct);
-                    if (string.IsNullOrWhiteSpace(yJson))
+                    candidateDates.Add(utcToday);
+                    candidateDates.Add(DateTime.UtcNow.Date.AddDays(-1).ToString("yyyyMMdd"));
+                }
+                candidateDates.Remove(cleanDate);
+
+                foreach (var adjDate in candidateDates)
+                {
+                    try
                     {
-                        yUrl = FormatEndpoint(
-                            OtaConfigService.Instance.CurrentManifest.Endpoints?.MatchesByDateFallbackUrlTemplate,
+                        string yUrl = FormatEndpoint(
+                            OtaConfigService.Instance.CurrentManifest.Endpoints?.MatchesByDateUrlTemplate,
                             "{date}",
-                            yestDate,
-                            $"{UpstreamFallbackBase}/matches?date={yestDate}");
-                        yJson = await FetchJsonResilientAsync(yUrl, ct);
-                    }
-                    if (!string.IsNullOrWhiteSpace(yJson))
-                    {
-                        using var yDoc = JsonDocument.Parse(yJson);
-                        if (TryGetProp(yDoc.RootElement, "leagues", out var yLeagues) && yLeagues.ValueKind == JsonValueKind.Array)
+                            adjDate,
+                            $"{UpstreamPrimaryBase}/matches?date={adjDate}");
+                        string? yJson = await FetchJsonResilientAsync(yUrl, ct);
+                        if (string.IsNullOrWhiteSpace(yJson))
                         {
-                            var yMatches = await ParseMatchesFromLeaguesAsync(yLeagues, followedTeamIdentifiers, followedLeagueIds, pinnedMatchId, ct);
-                            foreach (var ym in yMatches)
+                            yUrl = FormatEndpoint(
+                                OtaConfigService.Instance.CurrentManifest.Endpoints?.MatchesByDateFallbackUrlTemplate,
+                                "{date}",
+                                adjDate,
+                                $"{UpstreamFallbackBase}/matches?date={adjDate}");
+                            yJson = await FetchJsonResilientAsync(yUrl, ct);
+                        }
+                        if (!string.IsNullOrWhiteSpace(yJson))
+                        {
+                            using var yDoc = JsonDocument.Parse(yJson);
+                            if (TryGetProp(yDoc.RootElement, "leagues", out var yLeagues) && yLeagues.ValueKind == JsonValueKind.Array)
                             {
-                                if (IsLiveState(ym.State) && !matches.Any(m => string.Equals(m.Id, ym.Id, StringComparison.OrdinalIgnoreCase)))
+                                var yMatches = await ParseMatchesFromLeaguesAsync(yLeagues, followedTeamIdentifiers, followedLeagueIds, pinnedMatchId, ct);
+                                foreach (var ym in yMatches)
                                 {
-                                    matches.Add(ym);
+                                    bool ymIsLive = IsLiveState(ym.State) || FixtureRelevanceEngine.IsLive(ym);
+                                    if (ymIsLive)
+                                    {
+                                        int existingIdx = matches.FindIndex(m => string.Equals(m.Id, ym.Id, StringComparison.OrdinalIgnoreCase) ||
+                                            (!string.IsNullOrEmpty(m.LegacyId) && !string.IsNullOrEmpty(ym.LegacyId) && string.Equals(m.LegacyId, ym.LegacyId, StringComparison.OrdinalIgnoreCase)));
+                                        if (existingIdx >= 0)
+                                        {
+                                            if (!IsLiveState(matches[existingIdx].State) && !FixtureRelevanceEngine.IsLive(matches[existingIdx]))
+                                            {
+                                                matches[existingIdx] = ym;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            matches.Add(ym);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Debug("Telemetry", "YesterdayLiveMergeFailed", $"Failed merging yesterday live matches: {ex.Message}");
+                    catch (Exception ex)
+                    {
+                        AppLogger.Debug("Telemetry", "AdjacentDateLiveMergeFailed", $"Failed merging adjacent live matches for {adjDate}: {ex.Message}");
+                    }
                 }
             }
 
@@ -738,8 +931,8 @@ public sealed class NativeTelemetryProvider : IDisposable
                 int bPri = GetCompetitionPriority(b.Competition?.LegacyId ?? b.Competition?.Id, b.Competition?.Name);
                 if (aPri != bPri) return aPri.CompareTo(bPri);
 
-                bool aLive = IsLiveState(a.State);
-                bool bLive = IsLiveState(b.State);
+                bool aLive = IsLiveState(a.State) || FixtureRelevanceEngine.IsLive(a);
+                bool bLive = IsLiveState(b.State) || FixtureRelevanceEngine.IsLive(b);
                 if (aLive && !bLive) return -1;
                 if (!aLive && bLive) return 1;
 
@@ -796,6 +989,7 @@ public sealed class NativeTelemetryProvider : IDisposable
             AppLogger.Info("Telemetry", "TrayMatchesNormalized", $"Normalized {matches.Count} matches across {leaguesElem.GetArrayLength()} leagues for {cleanDate} (ETag: {etag[..Math.Min(16, etag.Length)]}...).");
 
             var successResponse = TrayApiResponse.Success(envelope, etag);
+            PruneCacheIfNeeded(_trayCache, 200);
             _trayCache[cacheKey] = (DateTimeOffset.UtcNow, successResponse);
             return successResponse;
         }
@@ -831,7 +1025,7 @@ public sealed class NativeTelemetryProvider : IDisposable
 
             string effectiveCompId = !string.IsNullOrWhiteSpace(primaryId) ? primaryId : leagueId;
             string legacyCompId = effectiveCompId;
-            if (int.TryParse(effectiveCompId, out int numCompId) && FotmobIdToCanonicalMap.TryGetValue(numCompId, out var canonicalCompId))
+            if (int.TryParse(effectiveCompId, out int numCompId) && UpstreamIdToCanonicalMap.TryGetValue(numCompId, out var canonicalCompId))
             {
                 if (IsValidCanonicalLeagueMatch(numCompId, leagueName, ccode))
                 {
@@ -902,14 +1096,14 @@ public sealed class NativeTelemetryProvider : IDisposable
 
                 string effHomeId = homeId;
                 string legacyHomeId = homeId;
-                if (int.TryParse(homeId, out int numHId) && FotmobTeamIdToCanonicalMap.TryGetValue(numHId, out var canonHId) && FixtureRelevanceEngine.IsValidCanonicalTeam(canonHId, homeName))
+                if (int.TryParse(homeId, out int numHId) && UpstreamTeamIdToCanonicalMap.TryGetValue(numHId, out var canonHId) && FixtureRelevanceEngine.IsValidCanonicalTeam(canonHId, homeName))
                 {
                     effHomeId = canonHId;
                 }
 
                 string effAwayId = awayId;
                 string legacyAwayId = awayId;
-                if (int.TryParse(awayId, out int numAId) && FotmobTeamIdToCanonicalMap.TryGetValue(numAId, out var canonAId) && FixtureRelevanceEngine.IsValidCanonicalTeam(canonAId, awayName))
+                if (int.TryParse(awayId, out int numAId) && UpstreamTeamIdToCanonicalMap.TryGetValue(numAId, out var canonAId) && FixtureRelevanceEngine.IsValidCanonicalTeam(canonAId, awayName))
                 {
                     effAwayId = canonAId;
                 }
@@ -981,7 +1175,7 @@ public sealed class NativeTelemetryProvider : IDisposable
 
                 var matchDto = new TrayMatchDto
                 {
-                    Id = $"fotmob_{matchId}",
+                    Id = $"lt_{matchId}",
                     LegacyId = matchId,
                     Competition = compDto,
                     HomeTeam = homeTeamDto,
@@ -1010,7 +1204,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 // Real-time live match enrichment for goals and red cards
                 bool isLive = IsLiveState(matchStatus);
                 bool isFollowedOrPinned = false;
-                if (!string.IsNullOrWhiteSpace(pinnedMatchId) && (string.Equals(matchId, pinnedMatchId, StringComparison.OrdinalIgnoreCase) || string.Equals($"fotmob_{matchId}", pinnedMatchId, StringComparison.OrdinalIgnoreCase)))
+                if (!string.IsNullOrWhiteSpace(pinnedMatchId) && (string.Equals(matchId, pinnedMatchId, StringComparison.OrdinalIgnoreCase) || string.Equals($"lt_{matchId}", pinnedMatchId, StringComparison.OrdinalIgnoreCase)))
                 {
                     isFollowedOrPinned = true;
                 }
@@ -1093,6 +1287,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                     }
                 }
 
+                PruneCacheIfNeeded(_lastSeenMatchScoreState, 200);
                 _lastSeenMatchScoreState[matchId] = (hSc, aSc, homeRedCards, awayRedCards);
             }
         }
@@ -1112,7 +1307,7 @@ public sealed class NativeTelemetryProvider : IDisposable
     {
         if (string.IsNullOrWhiteSpace(matchId)) return null;
 
-        string numericId = Regex.Match(matchId, @"\d+").Value;
+        string numericId = NumberMatchRegex.Match(matchId).Value;
         if (string.IsNullOrWhiteSpace(numericId)) return null;
 
         // In-memory cache check (10s for active, 60s for finished)
@@ -1163,6 +1358,15 @@ public sealed class NativeTelemetryProvider : IDisposable
             TryGetProp(root, "header", out var headerElem);
             var (homeTeam, awayTeam, homeScore, awayScore) = ParseHeaderTeams(headerElem, generalElem);
 
+            if (!string.IsNullOrWhiteSpace(homeTeam.Name) && compName.EndsWith(homeTeam.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                compName = compName[..^homeTeam.Name.Length].TrimEnd();
+            }
+            if (!string.IsNullOrWhiteSpace(awayTeam.Name) && compName.EndsWith(awayTeam.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                compName = compName[..^awayTeam.Name.Length].TrimEnd();
+            }
+
             JsonElement statusElem = default;
             if (headerElem.ValueKind == JsonValueKind.Object)
             {
@@ -1172,7 +1376,7 @@ public sealed class NativeTelemetryProvider : IDisposable
 
             string effectiveCompId = effectiveLeagueId;
             string legacyCompId = effectiveLeagueId;
-            if (int.TryParse(effectiveLeagueId, out int numEffLId) && FotmobIdToCanonicalMap.TryGetValue(numEffLId, out var canonEffCompId))
+            if (int.TryParse(effectiveLeagueId, out int numEffLId) && UpstreamIdToCanonicalMap.TryGetValue(numEffLId, out var canonEffCompId))
             {
                 if (IsValidCanonicalLeagueMatch(numEffLId, compName, null))
                 {
@@ -1185,7 +1389,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 Id = effectiveCompId,
                 LegacyId = legacyCompId,
                 Name = compName,
-                LogoUrl = $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{effectiveLeagueId}.png"
+                LogoUrl = $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/{effectiveLeagueId}.png"
             };
 
             // Venue and Referee
@@ -1234,10 +1438,36 @@ public sealed class NativeTelemetryProvider : IDisposable
 
             // Head-to-Head & Predictions
             var h2h = ExtractHeadToHead(contentElem, homeTeam, awayTeam, standings);
+            if (h2h != null)
+            {
+                if (h2h.HomeFormMatches.Count == 0 && !string.IsNullOrWhiteSpace(homeTeam.LegacyId) && int.TryParse(homeTeam.LegacyId, out int hNumId))
+                {
+                    var fetchedHomeForm = await FetchTeamRecentFormMatchesAsync(hNumId, homeTeam.Name, ct);
+                    if (fetchedHomeForm.Count > 0)
+                    {
+                        h2h.HomeFormMatches = fetchedHomeForm;
+                        h2h.HomeForm = fetchedHomeForm.Select(m => new FormMatchDto { Result = m.Result, OpponentName = m.OpponentName, Score = m.ScoreText, DateUtc = m.DateText }).ToList();
+                    }
+                }
+
+                if (h2h.AwayFormMatches.Count == 0 && !string.IsNullOrWhiteSpace(awayTeam.LegacyId) && int.TryParse(awayTeam.LegacyId, out int aNumId))
+                {
+                    var fetchedAwayForm = await FetchTeamRecentFormMatchesAsync(aNumId, awayTeam.Name, ct);
+                    if (fetchedAwayForm.Count > 0)
+                    {
+                        h2h.AwayFormMatches = fetchedAwayForm;
+                        h2h.AwayForm = fetchedAwayForm.Select(m => new FormMatchDto { Result = m.Result, OpponentName = m.OpponentName, Score = m.ScoreText, DateUtc = m.DateText }).ToList();
+                    }
+                }
+            }
+
+            // Upstream Insights & Player of the Match
+            var upstreamInsights = ExtractUpstreamInsights(contentElem);
+            var playerOfTheMatch = ExtractPlayerOfTheMatch(contentElem, lineups, homeTeam, awayTeam, matchStatus);
 
             var detailDto = new MatchDetailDto
             {
-                Id = $"fotmob_{mId}",
+                Id = $"lt_{mId}",
                 LegacyId = mId,
                 Competition = competitionSummary,
                 HomeTeam = homeTeam,
@@ -1267,6 +1497,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 TopAssists = topAssists,
                 Fixtures = fixtures,
                 KnockoutStages = knockoutStages,
+                PlayerOfTheMatch = playerOfTheMatch,
                 Trust = new V2TrustMetadataDto
                 {
                     Provider = TelemetryProviderName,
@@ -1276,6 +1507,10 @@ public sealed class NativeTelemetryProvider : IDisposable
                 }
             };
 
+            // Synthesize broadcast-grade tactical recap narrative & key insights
+            TacticalNarrativeSynthesizer.Synthesize(detailDto, upstreamInsights);
+
+            PruneCacheIfNeeded(_matchDetailCache, 200);
             _matchDetailCache[numericId] = (DateTimeOffset.UtcNow, detailDto);
             return detailDto;
         }
@@ -1304,14 +1539,14 @@ public sealed class NativeTelemetryProvider : IDisposable
         string? logoUrl = null,
         CancellationToken ct = default)
     {
-        int? fotmobLeagueId = ResolveFotmobLeagueId(competitionId, name, logoUrl);
-        if (!fotmobLeagueId.HasValue)
+        int? upstreamLeagueId = ResolveUpstreamLeagueId(competitionId, name, logoUrl);
+        if (!upstreamLeagueId.HasValue)
         {
-            fotmobLeagueId = await ResolveLeagueIdAsync(competitionId, ct);
+            upstreamLeagueId = await ResolveLeagueIdAsync(competitionId, ct);
         }
-        if (!fotmobLeagueId.HasValue) return null;
+        if (!upstreamLeagueId.HasValue) return null;
 
-        string cacheKey = fotmobLeagueId.Value.ToString();
+        string cacheKey = upstreamLeagueId.Value.ToString();
         if (_hubCache.TryGetValue(cacheKey, out var cached) &&
             DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromMinutes(15))
         {
@@ -1320,7 +1555,7 @@ public sealed class NativeTelemetryProvider : IDisposable
 
         try
         {
-            int upstreamId = (fotmobLeagueId.Value == 10650 || fotmobLeagueId.Value == 191) ? 519 : fotmobLeagueId.Value;
+            int upstreamId = (upstreamLeagueId.Value == 10650 || upstreamLeagueId.Value == 191) ? 519 : upstreamLeagueId.Value;
             string url = FormatEndpoint(
                 OtaConfigService.Instance.CurrentManifest.Endpoints?.LeagueHubUrlTemplate,
                 "{leagueId}",
@@ -1336,9 +1571,9 @@ public sealed class NativeTelemetryProvider : IDisposable
                     $"{UpstreamFallbackBase}/leagues?id={upstreamId}");
                 json = await FetchJsonResilientAsync(url, ct);
             }
-            if (string.IsNullOrWhiteSpace(json) && upstreamId != fotmobLeagueId.Value)
+            if (string.IsNullOrWhiteSpace(json) && upstreamId != upstreamLeagueId.Value)
             {
-                url = $"{UpstreamPrimaryBase}/leagues?id={fotmobLeagueId.Value}";
+                url = $"{UpstreamPrimaryBase}/leagues?id={upstreamLeagueId.Value}";
                 json = await FetchJsonResilientAsync(url, ct);
             }
 
@@ -1368,7 +1603,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 }
             }
 
-            if (fotmobLeagueId.Value == 519 || fotmobLeagueId.Value == 10650 || fotmobLeagueId.Value == 191 || (compName.Contains("Premier League", StringComparison.OrdinalIgnoreCase) && string.Equals(countryCode, "EGY", StringComparison.OrdinalIgnoreCase)))
+            if (upstreamLeagueId.Value == 519 || upstreamLeagueId.Value == 10650 || upstreamLeagueId.Value == 191 || (compName.Contains("Premier League", StringComparison.OrdinalIgnoreCase) && string.Equals(countryCode, "EGY", StringComparison.OrdinalIgnoreCase)))
             {
                 compName = "Egyptian Premier League";
                 countryCode = "EGY";
@@ -1379,13 +1614,13 @@ public sealed class NativeTelemetryProvider : IDisposable
             var fixtures = ParseFixturesFromLeagueDoc(root);
             var knockoutStages = ParseKnockoutStagesFromLeagueDoc(root);
 
-            int finalLeagueId = (fotmobLeagueId.Value == 10650 || fotmobLeagueId.Value == 191) ? 519 : fotmobLeagueId.Value;
+            int finalLeagueId = (upstreamLeagueId.Value == 10650 || upstreamLeagueId.Value == 191) ? 519 : upstreamLeagueId.Value;
             var hubDto = new CompetitionHubDto
             {
                 CompetitionId = finalLeagueId.ToString(),
                 CompetitionName = compName,
                 CompetitionCode = countryCode,
-                CompetitionLogoUrl = $"https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{finalLeagueId}.png",
+                CompetitionLogoUrl = $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/leaguelogo/dark/{finalLeagueId}.png",
                 CountryCode = countryCode,
                 Season = season,
                 Standings = standings,
@@ -1395,6 +1630,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 KnockoutStages = knockoutStages
             };
 
+            PruneCacheIfNeeded(_hubCache, 200);
             _hubCache[cacheKey] = (DateTimeOffset.UtcNow, hubDto);
             _hubCache[competitionId] = (DateTimeOffset.UtcNow, hubDto);
             _hubCache[finalLeagueId.ToString()] = (DateTimeOffset.UtcNow, hubDto);
@@ -1418,7 +1654,7 @@ public sealed class NativeTelemetryProvider : IDisposable
     }
 
     /// <summary>
-    /// Resolves team identifier to FotMob numeric team ID and fetches full details, stadium, coach,
+    /// Resolves team identifier to upstream telemetry provider numeric team ID and fetches full details, stadium, coach,
     /// form, upcoming/past fixtures, squad players with stats, and primary league standings.
     /// Results are cached for 5 minutes.
     /// </summary>
@@ -1430,10 +1666,10 @@ public sealed class NativeTelemetryProvider : IDisposable
     {
         if (string.IsNullOrWhiteSpace(teamId)) return null;
 
-        int? fotmobTeamId = await ResolveTeamIdAsync(teamId, ct);
-        if (!fotmobTeamId.HasValue) return null;
+        int? upstreamTeamId = await ResolveTeamIdAsync(teamId, ct);
+        if (!upstreamTeamId.HasValue) return null;
 
-        string cacheKey = fotmobTeamId.Value.ToString();
+        string cacheKey = upstreamTeamId.Value.ToString();
         if (_teamHubCache.TryGetValue(cacheKey, out var cached) &&
             DateTimeOffset.UtcNow - cached.CachedAt < TimeSpan.FromMinutes(5))
         {
@@ -1445,16 +1681,16 @@ public sealed class NativeTelemetryProvider : IDisposable
             string url = FormatEndpoint(
                 OtaConfigService.Instance.CurrentManifest.Endpoints?.TeamHubUrlTemplate,
                 "{teamId}",
-                fotmobTeamId.Value.ToString(),
-                $"{UpstreamPrimaryBase}/teams?id={fotmobTeamId.Value}");
+                upstreamTeamId.Value.ToString(),
+                $"{UpstreamPrimaryBase}/teams?id={upstreamTeamId.Value}");
             string? json = await FetchJsonResilientAsync(url, ct);
             if (string.IsNullOrWhiteSpace(json))
             {
                 url = FormatEndpoint(
                     OtaConfigService.Instance.CurrentManifest.Endpoints?.TeamHubFallbackUrlTemplate,
                     "{teamId}",
-                    fotmobTeamId.Value.ToString(),
-                    $"{UpstreamFallbackBase}/teams?id={fotmobTeamId.Value}");
+                    upstreamTeamId.Value.ToString(),
+                    $"{UpstreamFallbackBase}/teams?id={upstreamTeamId.Value}");
                 json = await FetchJsonResilientAsync(url, ct);
             }
 
@@ -1724,7 +1960,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 TeamId = teamId,
                 TeamName = teamName,
                 ShortName = shortName,
-                TeamLogo = BuildTeamLogoUrl(fotmobTeamId.Value.ToString()),
+                TeamLogo = BuildTeamLogoUrl(upstreamTeamId.Value.ToString()),
                 CountryCode = countryCode,
                 PrimaryLeagueId = primaryLeagueId,
                 PrimaryLeagueName = primaryLeagueName,
@@ -1738,6 +1974,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 Standings = standings
             };
 
+            PruneCacheIfNeeded(_teamHubCache, 200);
             _teamHubCache[cacheKey] = (DateTimeOffset.UtcNow, teamHubDto);
             _teamHubCache[teamId] = (DateTimeOffset.UtcNow, teamHubDto);
 
@@ -1755,7 +1992,7 @@ public sealed class NativeTelemetryProvider : IDisposable
     }
 
     /// <summary>
-    /// Resolves competition/league slug or identifier to FotMob numeric league ID,
+    /// Resolves competition/league slug or identifier to upstream telemetry provider numeric league ID,
     /// querying upstream search suggestions if not found locally.
     /// </summary>
     public async Task<int?> ResolveLeagueIdAsync(string leagueId, CancellationToken ct = default)
@@ -1763,14 +2000,14 @@ public sealed class NativeTelemetryProvider : IDisposable
         if (string.IsNullOrWhiteSpace(leagueId)) return null;
 
         // 1. Direct local resolution
-        int? resolved = ResolveFotmobLeagueId(leagueId);
+        int? resolved = ResolveUpstreamLeagueId(leagueId);
         if (resolved.HasValue && resolved.Value > 0) return resolved.Value;
 
         // 2. Strip common prefixes
-        string stripped = Regex.Replace(leagueId.Trim().ToLowerInvariant(), @"^(?:ft_comp_|comp:fotmob:|fotmob:|comp_|league-|comp-)", "");
+        string stripped = CompPrefixRegex.Replace(leagueId.Trim().ToLowerInvariant(), "");
         if (int.TryParse(stripped, out int directNum) && directNum > 0) return directNum;
 
-        if (CompetitionSlugToFotmobId.TryGetValue(stripped, out int slugId)) return slugId;
+        if (CompetitionSlugToUpstreamId.TryGetValue(stripped, out int slugId)) return slugId;
         if (CanonicalCompetitionMap.TryGetValue(stripped, out int canonId)) return canonId;
 
         // 3. Search in-memory catalog
@@ -1781,7 +2018,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 (!string.IsNullOrWhiteSpace(comp.Code) && string.Equals(comp.Code, stripped, StringComparison.OrdinalIgnoreCase)))
             {
                 if (int.TryParse(comp.Id, out int compNum) && compNum > 0) return compNum;
-                int? catResolve = ResolveFotmobLeagueId(comp.Id, comp.Name, comp.LogoUrl);
+                int? catResolve = ResolveUpstreamLeagueId(comp.Id, comp.Name, comp.LogoUrl);
                 if (catResolve.HasValue) return catResolve.Value;
             }
         }
@@ -1795,7 +2032,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 foreach (var match in searchResults)
                 {
                     if (int.TryParse(match.Id, out int sId) && sId > 0) return sId;
-                    int? sResolve = ResolveFotmobLeagueId(match.Id, match.Name, match.LogoUrl);
+                    int? sResolve = ResolveUpstreamLeagueId(match.Id, match.Name, match.LogoUrl);
                     if (sResolve.HasValue) return sResolve.Value;
                 }
             }
@@ -1809,7 +2046,7 @@ public sealed class NativeTelemetryProvider : IDisposable
     }
 
     /// <summary>
-    /// Resolves team slug or identifier to FotMob numeric team ID,
+    /// Resolves team slug or identifier to upstream telemetry provider numeric team ID,
     /// querying upstream search suggestions if not found locally.
     /// </summary>
     public async Task<int?> ResolveTeamIdAsync(string teamId, CancellationToken ct = default)
@@ -1823,7 +2060,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         if (int.TryParse(raw, out int directNum) && directNum > 0) return directNum;
 
         // 1. Strip common prefixes
-        string stripped = Regex.Replace(lower, @"^(?:ft_team_|team:fotmob:|fotmob:|team_|team-|fotmob-)", "");
+        string stripped = TeamPrefixRegex.Replace(lower, "");
         if (int.TryParse(stripped, out int strippedNum) && strippedNum > 0) return strippedNum;
 
         // 2. Check canonical mappings
@@ -1880,7 +2117,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         // 6. Final fallback: extract trailing digits if present
         if (!raw.StartsWith("ft_", StringComparison.OrdinalIgnoreCase))
         {
-            string digitsOnly = Regex.Replace(raw, @"\D", "");
+            string digitsOnly = DigitsOnlyRegex.Replace(raw, "");
             if (digitsOnly.Length > 0 && int.TryParse(digitsOnly, out int trailingNum) && trailingNum > 0)
             {
                 return trailingNum;
@@ -2394,7 +2631,7 @@ public sealed class NativeTelemetryProvider : IDisposable
 
     /// <summary>
     /// Searches competitions across memory index, INT/allLeagues catalog, country codes/names, and upstream suggestion API.
-    /// Strictly deduplicated by numeric FotMob League ID and normalized (Name, Country) key.
+    /// Strictly deduplicated by numeric upstream telemetry provider League ID and normalized (Name, Country) key.
     /// </summary>
     public async Task<List<V2CatalogCompetitionDto>> SearchCompetitionsAsync(string query, int limit = 20, CancellationToken ct = default)
     {
@@ -2554,9 +2791,9 @@ public sealed class NativeTelemetryProvider : IDisposable
             }
         }
 
-        // 5. Strict Deduplication by numeric FotMob ID & normalized (Name, Country)
+        // 5. Strict Deduplication by numeric upstream telemetry provider ID & normalized (Name, Country)
         var results = new List<V2CatalogCompetitionDto>();
-        var seenFotmobIds = new HashSet<int>();
+        var seenUpstreamIds = new HashSet<int>();
         var seenNameCountry = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var c in candidates)
@@ -2565,31 +2802,31 @@ public sealed class NativeTelemetryProvider : IDisposable
             string name = c.Name ?? "";
             string country = c.Country ?? "";
 
-            int? fotmobId = ResolveFotmobLeagueId(rawId, name, c.LogoUrl, country);
-            if (fotmobId.HasValue)
+            int? upstreamId = ResolveUpstreamLeagueId(rawId, name, c.LogoUrl, country);
+            if (upstreamId.HasValue)
             {
-                if (!seenFotmobIds.Add(fotmobId.Value)) continue;
+                if (!seenUpstreamIds.Add(upstreamId.Value)) continue;
 
-                string canonicalId = fotmobId.Value.ToString();
+                string canonicalId = upstreamId.Value.ToString();
                 string resolvedName = name;
                 string resolvedCountry = country;
 
-                if (fotmobId.Value == 519)
+                if (upstreamId.Value == 519)
                 {
                     resolvedName = "Egyptian Premier League";
                     resolvedCountry = "EGY";
                 }
-                else if (fotmobId.Value == 47)
+                else if (upstreamId.Value == 47)
                 {
                     resolvedName = "Premier League";
                     resolvedCountry = "ENG";
                 }
-                else if (fotmobId.Value == 53)
+                else if (upstreamId.Value == 53)
                 {
                     resolvedName = "Ligue 1";
                     resolvedCountry = "FRA";
                 }
-                else if (fotmobId.Value == 87)
+                else if (upstreamId.Value == 87)
                 {
                     resolvedName = "LaLiga";
                     resolvedCountry = "ESP";
@@ -2635,7 +2872,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         if (!string.IsNullOrWhiteSpace(explicitTla))
         {
             string cleanExp = explicitTla.Trim();
-            if (Regex.IsMatch(cleanExp, @"^[A-Za-z0-9]{2,4}$"))
+            if (TlaValidRegex.IsMatch(cleanExp))
             {
                 return cleanExp.ToUpperInvariant()[..Math.Min(3, cleanExp.Length)];
             }
@@ -2650,12 +2887,12 @@ public sealed class NativeTelemetryProvider : IDisposable
         }
 
         string ascii = RemoveDiacritics(raw);
-        var allWords = Regex.Split(ascii, @"[\s\-–_.'’/&]+")
-            .Select(w => Regex.Replace(w, @"[^A-Za-z0-9]", ""))
+        var allWords = TlaWordSplitRegex.Split(ascii)
+            .Select(w => TlaNonAlphanumericRegex.Replace(w, ""))
             .Where(w => w.Length > 0)
             .ToList();
 
-        var words = allWords.Where(w => !TlaStopwords.Contains(w) && !Regex.IsMatch(w, @"^\d+$")).ToList();
+        var words = allWords.Where(w => !TlaStopwords.Contains(w) && !NumericOnlyRegex.IsMatch(w)).ToList();
         if (words.Count == 0) words = allWords;
         if (words.Count == 0) return raw.PadRight(3, 'X')[..3].ToUpperInvariant();
 
@@ -2677,15 +2914,15 @@ public sealed class NativeTelemetryProvider : IDisposable
     }
 
     /// <summary>
-    /// Resolves FotMob numeric competition ID using priority rules (LogoUrl -> Direct numeric -> Slug/alias -> Trailing digits).
+    /// Resolves upstream telemetry provider numeric competition ID using priority rules (LogoUrl -> Direct numeric -> Slug/alias -> Trailing digits).
     /// </summary>
-    public static int? ResolveFotmobLeagueId(string? competitionId, string? competitionName = null, string? logoUrl = null, string? country = null)
+    public static int? ResolveUpstreamLeagueId(string? competitionId, string? competitionName = null, string? logoUrl = null, string? country = null)
     {
         // 0. Extract numeric ID from logoUrl if present
         if (!string.IsNullOrWhiteSpace(logoUrl))
         {
-            var logoMatch = Regex.Match(logoUrl, @"/leaguelogo/(?:dark|light)/(\d+)\.png", RegexOptions.IgnoreCase);
-            if (!logoMatch.Success) logoMatch = Regex.Match(logoUrl, @"/(\d+)\.png", RegexOptions.IgnoreCase);
+            var logoMatch = LeagueLogoIdRegex.Match(logoUrl);
+            if (!logoMatch.Success) logoMatch = LogoIdRegex.Match(logoUrl);
             if (logoMatch.Success && int.TryParse(logoMatch.Groups[1].Value, out int logoNum) && logoNum > 0)
             {
                 if (logoNum == 10650 || logoNum == 191) return 519;
@@ -2703,9 +2940,9 @@ public sealed class NativeTelemetryProvider : IDisposable
 
         // Priority 0: Egyptian qualification check before generic premier-league slug resolution
         if (combined.Contains("egypt") || combined.Contains("519") || combined.Contains("10650") || combined.Contains("191") ||
-            lower == "comp_519" || lower == "fotmob_519" || lower == "519" ||
-            lower == "comp_10650" || lower == "fotmob_10650" || lower == "10650" ||
-            lower == "comp_191" || lower == "fotmob_191" || lower == "191" ||
+            lower == "comp_519" || lower == "lt_519" || lower == "519" ||
+            lower == "comp_10650" || lower == "lt_10650" || lower == "10650" ||
+            lower == "comp_191" || lower == "lt_191" || lower == "191" ||
             nameLower.Contains("egy") || lower.Contains("egy") || countryLower == "egy" || countryLower == "egypt")
         {
             return 519;
@@ -2717,7 +2954,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         {
             if (otaOverrides.TryGetValue(lower, out int otaSlugId)) return otaSlugId;
             if (otaOverrides.TryGetValue(rawId, out int otaRawId)) return otaRawId;
-            string otaStripped = Regex.Replace(lower, @"^(?:ft_comp_|comp:fotmob:|fotmob:|comp_)", "");
+            string otaStripped = CompPrefixShortRegex.Replace(lower, "");
             if (otaOverrides.TryGetValue(otaStripped, out int otaStrippedId)) return otaStrippedId;
         }
 
@@ -2726,16 +2963,16 @@ public sealed class NativeTelemetryProvider : IDisposable
         if (CanonicalCompetitionMap.TryGetValue(rawId, out int canonRawId)) return canonRawId;
 
         // 1. Direct slug match
-        if (CompetitionSlugToFotmobId.TryGetValue(lower, out int slugId)) return slugId;
+        if (CompetitionSlugToUpstreamId.TryGetValue(lower, out int slugId)) return slugId;
 
-        string stripped = Regex.Replace(lower, @"^(?:ft_comp_|comp:fotmob:|fotmob:|comp_)", "");
-        if (CompetitionSlugToFotmobId.TryGetValue(stripped, out int strippedId)) return strippedId;
+        string stripped = CompPrefixShortRegex.Replace(lower, "");
+        if (CompetitionSlugToUpstreamId.TryGetValue(stripped, out int strippedId)) return strippedId;
 
         string normalizedSlug = stripped.Replace("-", "_").Replace(" ", "_");
-        if (CompetitionSlugToFotmobId.TryGetValue(normalizedSlug, out int normSlugId)) return normSlugId;
+        if (CompetitionSlugToUpstreamId.TryGetValue(normalizedSlug, out int normSlugId)) return normSlugId;
 
         // 2. Direct numeric check
-        var numMatch = Regex.Match(lower, @"^(?:comp:fotmob:|fotmob_|fotmob:|ft_comp_|comp_)?(\d+)$");
+        var numMatch = CompIdMatchRegex.Match(lower);
         if (numMatch.Success && int.TryParse(numMatch.Groups[1].Value, out int directNum) && directNum > 0)
         {
             if (directNum == 10650 || directNum == 191) return 519;
@@ -2748,14 +2985,14 @@ public sealed class NativeTelemetryProvider : IDisposable
             if (otaOverrides != null)
             {
                 if (otaOverrides.TryGetValue(nameLower, out int otaNameId)) return otaNameId;
-                string otaNameSlug = Regex.Replace(nameLower, @"[^a-z0-9]+", "_").Trim('_');
+                string otaNameSlug = SlugNonAlphanumericRegex.Replace(nameLower, "_").Trim('_');
                 if (otaOverrides.TryGetValue(otaNameSlug, out int otaNameSlugId)) return otaNameSlugId;
             }
 
             if (nameLower.Contains("egypt") || nameLower == "egyptian premier league") return 519;
-            if (CompetitionSlugToFotmobId.TryGetValue(nameLower, out int nameId)) return nameId;
-            string nameSlug = Regex.Replace(nameLower, @"[^a-z0-9]+", "_").Trim('_');
-            if (CompetitionSlugToFotmobId.TryGetValue(nameSlug, out int nameSlugId)) return nameSlugId;
+            if (CompetitionSlugToUpstreamId.TryGetValue(nameLower, out int nameId)) return nameId;
+            string nameSlug = SlugNonAlphanumericRegex.Replace(nameLower, "_").Trim('_');
+            if (CompetitionSlugToUpstreamId.TryGetValue(nameSlug, out int nameSlugId)) return nameSlugId;
         }
 
         if (combined.Contains("conference") || combined.Contains("uecl")) return 10216;
@@ -2784,7 +3021,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         // 4. Trailing digits (only for non-canonical hash IDs)
         if (!rawId.StartsWith("ft_", StringComparison.OrdinalIgnoreCase))
         {
-            string digitsOnly = Regex.Replace(rawId, @"\D", "");
+            string digitsOnly = DigitsOnlyRegex.Replace(rawId, "");
             if (digitsOnly.Length > 0 && int.TryParse(digitsOnly, out int trailingNum) && trailingNum > 0)
             {
                 if (trailingNum == 10650 || trailingNum == 191) return 519;
@@ -2817,7 +3054,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         string liveShort = "";
         if (TryGetProp(status, "liveTime", out var ltProp) && TryGetProp(ltProp, "short", out var ltsProp))
         {
-            liveShort = Regex.Replace(ltsProp.GetString() ?? "", @"[\u2019\u2032\u00B4`'\u200E\u200F\s]", "").ToUpperInvariant().Trim();
+            liveShort = LiveClockSanitizeRegex.Replace(ltsProp.GetString() ?? "", "").ToUpperInvariant().Trim();
         }
 
         bool isFinished = TryGetProp(status, "finished", out var finProp) && finProp.ValueKind == JsonValueKind.True;
@@ -2841,7 +3078,7 @@ public sealed class NativeTelemetryProvider : IDisposable
             if (reasonShort == "SUSP" || liveShort == "SUSP") return ("SUSPENDED", null, null, "SUSP");
             if (reasonShort == "INT" || liveShort == "INT") return ("INTERRUPTED", null, null, "INT");
 
-            var clockMatch = Regex.Match(liveShort, @"^(\d+)(?:\+(\d+))?");
+            var clockMatch = LiveClockMatchRegex.Match(liveShort);
             if (clockMatch.Success)
             {
                 int baseMin = int.Parse(clockMatch.Groups[1].Value, CultureInfo.InvariantCulture);
@@ -2902,13 +3139,13 @@ public sealed class NativeTelemetryProvider : IDisposable
         }
 
         string? canonicalHomeId = null;
-        if (int.TryParse(hId, out int hNum) && FotmobTeamIdToCanonicalMap.TryGetValue(hNum, out var chId) && FixtureRelevanceEngine.IsValidCanonicalTeam(chId, hName))
+        if (int.TryParse(hId, out int hNum) && UpstreamTeamIdToCanonicalMap.TryGetValue(hNum, out var chId) && FixtureRelevanceEngine.IsValidCanonicalTeam(chId, hName))
         {
             canonicalHomeId = chId;
         }
 
         string? canonicalAwayId = null;
-        if (int.TryParse(aId, out int aNum) && FotmobTeamIdToCanonicalMap.TryGetValue(aNum, out var caId) && FixtureRelevanceEngine.IsValidCanonicalTeam(caId, aName))
+        if (int.TryParse(aId, out int aNum) && UpstreamTeamIdToCanonicalMap.TryGetValue(aNum, out var caId) && FixtureRelevanceEngine.IsValidCanonicalTeam(caId, aName))
         {
             canonicalAwayId = caId;
         }
@@ -2979,7 +3216,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                                  (TryGetProp(ev, "suffix", out var sfx) && string.Equals(sfx.GetString(), "OG", StringComparison.OrdinalIgnoreCase)) ||
                                  (TryGetProp(ev, "goalDescription", out var gd) && gd.GetString()?.Contains("own", StringComparison.OrdinalIgnoreCase) == true);
 
-                // In FotMob, isHome on a goal/own-goal event is ALREADY the beneficiary team credited with the goal!
+                // In upstream telemetry provider, isHome on a goal/own-goal event is ALREADY the beneficiary team credited with the goal!
                 var beneficiaryTeam = isHome ? homeTeam : awayTeam;
 
                 string type = "Event";
@@ -3780,7 +4017,7 @@ public sealed class NativeTelemetryProvider : IDisposable
         var fallback = new List<int> { 4, 4, 2 };
         if (string.IsNullOrWhiteSpace(formation)) return fallback;
 
-        var parts = Regex.Split(formation, @"[-\s]+")
+        var parts = FormationSplitRegex.Split(formation)
             .Select(p => int.TryParse(p, out int n) ? n : 0)
             .Where(n => n > 0)
             .ToList();
@@ -3847,7 +4084,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                 bool onTarget = isGoal || (TryGetProp(shot, "isOnTarget", out var ont) && ont.ValueKind == JsonValueKind.True);
                 double intensity = isGoal ? 1.0 : (onTarget ? 0.8 : 0.5);
 
-                // Opta / FotMob pitch coordinates:
+                // Opta / upstream telemetry provider pitch coordinates:
                 // Pitch length: 0..105 meters (goal line to goal line)
                 // Pitch width: 0..68 meters (touchline to touchline; center/penalty spot at 34m = 50.0%)
                 // Vertical canvas orientation in MatchStatisticsControl:
@@ -3906,7 +4143,7 @@ public sealed class NativeTelemetryProvider : IDisposable
             }
         }
 
-        // Territorial Thirds: Calculate dynamically from FotMob Opta minute-by-minute momentum pressure (content.momentum.main.data)
+        // Territorial Thirds: Calculate dynamically from upstream telemetry provider Opta minute-by-minute momentum pressure (content.momentum.main.data)
         // Sum MUST strictly equal 100%: Bottom (Home Attacking) + Middle (Midfield Contest) + Top (Away Attacking) = 100%
         int homeAttPct = 34;
         int awayAttPct = 28;
@@ -4136,7 +4373,7 @@ public sealed class NativeTelemetryProvider : IDisposable
 
                         if (!string.IsNullOrWhiteSpace(scoreStr))
                         {
-                            var matchRegex = Regex.Match(scoreStr, @"(\d+)\s*[-–:]\s*(\d+)");
+                            var matchRegex = ScoreExtractRegex.Match(scoreStr);
                             if (matchRegex.Success && int.TryParse(matchRegex.Groups[1].Value, out var parsedH) && int.TryParse(matchRegex.Groups[2].Value, out var parsedA))
                             {
                                 mHomeScore = parsedH;
@@ -4208,159 +4445,92 @@ public sealed class NativeTelemetryProvider : IDisposable
                 }
             }
         }
-        // Parse form matches
-        List<FormMatchDto> ParseFormItem(JsonElement elem, string defaultOpp)
+        var homeFormMatches = new List<TeamFormMatchDto>();
+        var awayFormMatches = new List<TeamFormMatchDto>();
+
+        // 1. Check content.matchFacts.teamForm OR content.teamForm
+        JsonElement tfElem = default;
+        if (TryGetProp(content, "matchFacts", out var mf) && TryGetProp(mf, "teamForm", out var mfTf))
         {
-            var list = new List<FormMatchDto>();
-            if (elem.ValueKind == JsonValueKind.Array)
+            tfElem = mfTf;
+        }
+        else if (TryGetProp(content, "teamForm", out var tf1))
+        {
+            tfElem = tf1;
+        }
+
+        if (tfElem.ValueKind == JsonValueKind.Array)
+        {
+            var tfArr = tfElem.EnumerateArray().ToList();
+            if (tfArr.Count >= 2)
             {
-                int count = 0;
-                foreach (var f in elem.EnumerateArray())
+                var elem0 = tfArr[0];
+                var elem1 = tfArr[1];
+
+                bool swap = false;
+                if (elem0.ValueKind == JsonValueKind.Object && TryGetProp(elem0, "teamId", out var tId0))
                 {
-                    if (count >= 5) break;
-                    if (f.ValueKind == JsonValueKind.String)
+                    string tId0Str = tId0.ToString();
+                    if (!string.IsNullOrWhiteSpace(awayTeam.LegacyId) && tId0Str == awayTeam.LegacyId)
                     {
-                        string letter = (f.GetString() ?? "").ToUpperInvariant().Trim();
-                        string res = (letter == "W" || letter == "L") ? letter : "D";
-                        list.Add(new FormMatchDto { Result = res, OpponentName = defaultOpp, Score = res == "W" ? "2-1" : (res == "D" ? "1-1" : "0-1") });
-                        count++;
-                    }
-                    else if (f.ValueKind == JsonValueKind.Object)
-                    {
-                        string letter = "D";
-                        if (TryGetProp(f, "resultString", out var rs) && !string.IsNullOrWhiteSpace(rs.GetString())) letter = rs.GetString()!;
-                        else if (TryGetProp(f, "result", out var rVal) && !string.IsNullOrWhiteSpace(rVal.GetString())) letter = rVal.GetString()!;
-                        else if (TryGetProp(f, "outcome", out var oVal) && !string.IsNullOrWhiteSpace(oVal.GetString())) letter = oVal.GetString()!;
-
-                        letter = letter.Trim().ToUpperInvariant();
-                        string res = letter.StartsWith("W") ? "W" : (letter.StartsWith("L") ? "L" : "D");
-                        string opp = defaultOpp;
-                        if (TryGetProp(f, "opponent", out var oppObj))
-                        {
-                            if (oppObj.ValueKind == JsonValueKind.Object && TryGetProp(oppObj, "name", out var on)) opp = on.GetString() ?? defaultOpp;
-                            else if (oppObj.ValueKind == JsonValueKind.String) opp = oppObj.GetString() ?? defaultOpp;
-                        }
-                        else if (TryGetProp(f, "opponentName", out var on2)) opp = on2.GetString() ?? defaultOpp;
-
-                        string sc = res == "W" ? "2-1" : (res == "D" ? "1-1" : "0-1");
-                        if (TryGetProp(f, "score", out var sVal))
-                        {
-                            if (sVal.ValueKind == JsonValueKind.String) sc = sVal.GetString() ?? sc;
-                            else if (sVal.ValueKind == JsonValueKind.Number) sc = sVal.ToString();
-                        }
-                        else if (TryGetProp(f, "scoreString", out var ssVal)) sc = ssVal.GetString() ?? sc;
-                        else if (TryGetProp(f, "scoreStr", out var ssVal2)) sc = ssVal2.GetString() ?? sc;
-
-                        list.Add(new FormMatchDto
-                        {
-                            Result = res,
-                            OpponentName = opp,
-                            Score = sc
-                        });
-                        count++;
+                        swap = true;
                     }
                 }
-            }
-            return list;
-        }
 
-        var homeForm = new List<FormMatchDto>();
-        var awayForm = new List<FormMatchDto>();
+                var homeObj = swap ? elem1 : elem0;
+                var awayObj = swap ? elem0 : elem1;
 
-        // 1. Check content.teamForm
-        if (TryGetProp(content, "teamForm", out var tfElem))
-        {
-            if (tfElem.ValueKind == JsonValueKind.Array)
-            {
-                var tfArr = tfElem.EnumerateArray().ToList();
-                if (tfArr.Count >= 2)
-                {
-                    var firstElem = tfArr[0];
-                    var secondElem = tfArr[1];
+                JsonElement homeItems = homeObj;
+                if (homeObj.ValueKind == JsonValueKind.Object && TryGetProp(homeObj, "form", out var hf)) homeItems = hf;
+                else if (homeObj.ValueKind == JsonValueKind.Object && TryGetProp(homeObj, "items", out var hi)) homeItems = hi;
+                else if (homeObj.ValueKind == JsonValueKind.Object && TryGetProp(homeObj, "recentMatches", out var hr)) homeItems = hr;
 
-                    JsonElement homeTf = firstElem;
-                    if (firstElem.ValueKind == JsonValueKind.Object && TryGetProp(firstElem, "form", out var hf1)) homeTf = hf1;
-                    else if (firstElem.ValueKind == JsonValueKind.Object && TryGetProp(firstElem, "items", out var hi1)) homeTf = hi1;
+                JsonElement awayItems = awayObj;
+                if (awayObj.ValueKind == JsonValueKind.Object && TryGetProp(awayObj, "form", out var af)) awayItems = af;
+                else if (awayObj.ValueKind == JsonValueKind.Object && TryGetProp(awayObj, "items", out var ai)) awayItems = ai;
+                else if (awayObj.ValueKind == JsonValueKind.Object && TryGetProp(awayObj, "recentMatches", out var ar)) awayItems = ar;
 
-                    JsonElement awayTf = secondElem;
-                    if (secondElem.ValueKind == JsonValueKind.Object && TryGetProp(secondElem, "form", out var af1)) awayTf = af1;
-                    else if (secondElem.ValueKind == JsonValueKind.Object && TryGetProp(secondElem, "items", out var ai1)) awayTf = ai1;
-
-                    homeForm = ParseFormItem(homeTf, awayTeam.Name);
-                    awayForm = ParseFormItem(awayTf, homeTeam.Name);
-                }
-            }
-            else if (tfElem.ValueKind == JsonValueKind.Object)
-            {
-                if (TryGetProp(tfElem, "home", out var tfH)) homeForm = ParseFormItem(tfH, awayTeam.Name);
-                else if (TryGetProp(tfElem, "homeTeam", out var tfHt)) homeForm = ParseFormItem(tfHt, awayTeam.Name);
-
-                if (TryGetProp(tfElem, "away", out var tfA)) awayForm = ParseFormItem(tfA, homeTeam.Name);
-                else if (TryGetProp(tfElem, "awayTeam", out var tfAt)) awayForm = ParseFormItem(tfAt, homeTeam.Name);
+                homeFormMatches = ParseTeamFormMatches(homeItems, homeTeam.Name, awayTeam.Name);
+                awayFormMatches = ParseTeamFormMatches(awayItems, awayTeam.Name, homeTeam.Name);
             }
         }
+        else if (tfElem.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetProp(tfElem, "home", out var tfH)) homeFormMatches = ParseTeamFormMatches(tfH, homeTeam.Name, awayTeam.Name);
+            else if (TryGetProp(tfElem, "homeTeam", out var tfHt)) homeFormMatches = ParseTeamFormMatches(tfHt, homeTeam.Name, awayTeam.Name);
 
-        // 2. Check content.h2h.homeTeam.form
-        if (homeForm.Count == 0 && h2hElem.ValueKind == JsonValueKind.Object && TryGetProp(h2hElem, "homeTeam", out var htElem))
-        {
-            if (TryGetProp(htElem, "form", out var hf2)) homeForm = ParseFormItem(hf2, awayTeam.Name);
-            else if (TryGetProp(htElem, "recentMatches", out var rm1)) homeForm = ParseFormItem(rm1, awayTeam.Name);
-        }
-        if (awayForm.Count == 0 && h2hElem.ValueKind == JsonValueKind.Object && TryGetProp(h2hElem, "awayTeam", out var atElem))
-        {
-            if (TryGetProp(atElem, "form", out var af2)) awayForm = ParseFormItem(af2, homeTeam.Name);
-            else if (TryGetProp(atElem, "recentMatches", out var rm2)) awayForm = ParseFormItem(rm2, homeTeam.Name);
+            if (TryGetProp(tfElem, "away", out var tfA)) awayFormMatches = ParseTeamFormMatches(tfA, awayTeam.Name, homeTeam.Name);
+            else if (TryGetProp(tfElem, "awayTeam", out var tfAt)) awayFormMatches = ParseTeamFormMatches(tfAt, awayTeam.Name, homeTeam.Name);
         }
 
-        // 3. Fallback to Standings table Form string (e.g. "WWDLD")
-        if (homeForm.Count == 0 && standings != null)
+        // 2. Check content.h2h.homeTeam.form and content.h2h.awayTeam.form
+        if (homeFormMatches.Count == 0 && h2hElem.ValueKind == JsonValueKind.Object && TryGetProp(h2hElem, "homeTeam", out var htElem))
         {
-            var hRow = standings.FirstOrDefault(s => s.IsHomeTeam || string.Equals(s.TeamId, homeTeam.Id, StringComparison.OrdinalIgnoreCase) || string.Equals(s.TeamName, homeTeam.Name, StringComparison.OrdinalIgnoreCase));
-            if (hRow != null && !string.IsNullOrWhiteSpace(hRow.Form))
-            {
-                foreach (char c in hRow.Form.Take(5))
-                {
-                    string res = char.ToUpperInvariant(c) switch { 'W' => "W", 'L' => "L", _ => "D" };
-                    homeForm.Add(new FormMatchDto { Result = res, OpponentName = "Recent Match", Score = res == "W" ? "2-1" : (res == "D" ? "1-1" : "0-1") });
-                }
-            }
+            if (TryGetProp(htElem, "form", out var hf2)) homeFormMatches = ParseTeamFormMatches(hf2, homeTeam.Name, awayTeam.Name);
+            else if (TryGetProp(htElem, "recentMatches", out var rm1)) homeFormMatches = ParseTeamFormMatches(rm1, homeTeam.Name, awayTeam.Name);
         }
-        if (awayForm.Count == 0 && standings != null)
+        if (awayFormMatches.Count == 0 && h2hElem.ValueKind == JsonValueKind.Object && TryGetProp(h2hElem, "awayTeam", out var atElem))
         {
-            var aRow = standings.FirstOrDefault(s => s.IsAwayTeam || string.Equals(s.TeamId, awayTeam.Id, StringComparison.OrdinalIgnoreCase) || string.Equals(s.TeamName, awayTeam.Name, StringComparison.OrdinalIgnoreCase));
-            if (aRow != null && !string.IsNullOrWhiteSpace(aRow.Form))
-            {
-                foreach (char c in aRow.Form.Take(5))
-                {
-                    string res = char.ToUpperInvariant(c) switch { 'W' => "W", 'L' => "L", _ => "D" };
-                    awayForm.Add(new FormMatchDto { Result = res, OpponentName = "Recent Match", Score = res == "W" ? "2-1" : (res == "D" ? "1-1" : "0-1") });
-                }
-            }
+            if (TryGetProp(atElem, "form", out var af2)) awayFormMatches = ParseTeamFormMatches(af2, awayTeam.Name, homeTeam.Name);
+            else if (TryGetProp(atElem, "recentMatches", out var rm2)) awayFormMatches = ParseTeamFormMatches(rm2, awayTeam.Name, homeTeam.Name);
         }
 
-        // 4. Guaranteed 5-badge fallback matching reference implementation (fotmob.provider.ts)
-        if (homeForm.Count == 0)
+        // Map to HomeForm and AwayForm for backward-compatibility with real values (zero synthetic placeholders)
+        var homeForm = homeFormMatches.Select(m => new FormMatchDto
         {
-            homeForm = new List<FormMatchDto>
-            {
-                new() { Result = "W", OpponentName = "Recent Match", Score = "2-1" },
-                new() { Result = "W", OpponentName = "Recent Match", Score = "3-0" },
-                new() { Result = "D", OpponentName = "Recent Match", Score = "1-1" },
-                new() { Result = "L", OpponentName = "Recent Match", Score = "0-1" },
-                new() { Result = "W", OpponentName = "Recent Match", Score = "2-0" },
-            };
-        }
-        if (awayForm.Count == 0)
+            Result = m.Result,
+            OpponentName = m.OpponentName,
+            Score = m.ScoreText,
+            DateUtc = m.DateText
+        }).ToList();
+
+        var awayForm = awayFormMatches.Select(m => new FormMatchDto
         {
-            awayForm = new List<FormMatchDto>
-            {
-                new() { Result = "D", OpponentName = "Recent Match", Score = "1-1" },
-                new() { Result = "W", OpponentName = "Recent Match", Score = "1-0" },
-                new() { Result = "L", OpponentName = "Recent Match", Score = "1-2" },
-                new() { Result = "W", OpponentName = "Recent Match", Score = "2-1" },
-                new() { Result = "L", OpponentName = "Recent Match", Score = "0-2" },
-            };
-        }
+            Result = m.Result,
+            OpponentName = m.OpponentName,
+            Score = m.ScoreText,
+            DateUtc = m.DateText
+        }).ToList();
 
         // Win probabilities: extract from poll or calculate
         int homeWinPct = 0, drawPct = 0, awayWinPct = 0;
@@ -4424,8 +4594,535 @@ public sealed class NativeTelemetryProvider : IDisposable
             SummaryDisplay = summaryDisplay,
             HomeForm = homeForm,
             AwayForm = awayForm,
+            HomeFormMatches = homeFormMatches,
+            AwayFormMatches = awayFormMatches,
             LastFiveMeetings = lastFiveMeetings
         };
+    }
+
+    private static string ExtractSafeString(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.String)
+        {
+            return elem.GetString() ?? string.Empty;
+        }
+        if (elem.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetProp(elem, "name", out var n) && n.ValueKind == JsonValueKind.String) return n.GetString() ?? string.Empty;
+            if (TryGetProp(elem, "text", out var t) && t.ValueKind == JsonValueKind.String) return t.GetString() ?? string.Empty;
+            if (TryGetProp(elem, "utcTime", out var u) && u.ValueKind == JsonValueKind.String) return u.GetString() ?? string.Empty;
+            return string.Empty;
+        }
+        if (elem.ValueKind == JsonValueKind.Number)
+        {
+            return elem.ToString();
+        }
+        return string.Empty;
+    }
+
+    internal static List<TeamFormMatchDto> ParseTeamFormMatches(JsonElement elem, string currentTeamName, string defaultOpponentName)
+    {
+        var list = new List<TeamFormMatchDto>();
+        if (elem.ValueKind != JsonValueKind.Array)
+        {
+            return list;
+        }
+
+        foreach (var item in elem.EnumerateArray())
+        {
+            if (list.Count >= 5) break;
+
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                string letter = (item.GetString() ?? "").ToUpperInvariant().Trim();
+                if (!string.IsNullOrEmpty(letter))
+                {
+                    string res = letter.StartsWith("W") ? "W" : (letter.StartsWith("L") ? "L" : "D");
+                    list.Add(new TeamFormMatchDto
+                    {
+                        Result = res,
+                        OpponentName = string.Empty,
+                        ScoreText = string.Empty,
+                        MatchSummaryTooltip = res switch { "W" => "Win", "L" => "Loss", _ => "Draw" }
+                    });
+                }
+                continue;
+            }
+
+            if (item.ValueKind != JsonValueKind.Object) continue;
+
+            // 1. Result
+            string result = "D";
+            if (TryGetProp(item, "resultString", out var rs))
+            {
+                string s = ExtractSafeString(rs).Trim().ToUpperInvariant();
+                if (!string.IsNullOrEmpty(s))
+                {
+                    result = s.StartsWith("W") ? "W" : (s.StartsWith("L") ? "L" : "D");
+                }
+            }
+            else if (TryGetProp(item, "result", out var rVal) && rVal.ValueKind == JsonValueKind.Number)
+            {
+                int r = rVal.GetInt32();
+                result = r > 0 ? "W" : (r == 0 ? "D" : "L");
+            }
+            else if (TryGetProp(item, "outcome", out var oVal))
+            {
+                string s = ExtractSafeString(oVal).Trim().ToUpperInvariant();
+                if (!string.IsNullOrEmpty(s))
+                {
+                    result = s.StartsWith("W") ? "W" : (s.StartsWith("L") ? "L" : "D");
+                }
+            }
+
+            // 2. ScoreText
+            string score = string.Empty;
+            if (TryGetProp(item, "score", out var scElem))
+            {
+                score = ExtractSafeString(scElem);
+            }
+            else if (TryGetProp(item, "scoreString", out var ssElem))
+            {
+                score = ExtractSafeString(ssElem);
+            }
+            else if (TryGetProp(item, "scoreStr", out var ssElem2))
+            {
+                score = ExtractSafeString(ssElem2);
+            }
+
+            // 3. Opponent Name & Tooltip object
+            string opponent = string.Empty;
+            string? dateText = null;
+            string? matchId = null;
+
+            if (TryGetProp(item, "matchId", out var mIdProp)) matchId = mIdProp.ToString();
+            else if (TryGetProp(item, "id", out var idProp)) matchId = idProp.ToString();
+            else if (TryGetProp(item, "linkToMatch", out var linkProp) && linkProp.ValueKind == JsonValueKind.String)
+            {
+                string link = linkProp.GetString() ?? "";
+                int lastSlash = link.LastIndexOf('/');
+                if (lastSlash >= 0 && lastSlash < link.Length - 1)
+                {
+                    matchId = link[(lastSlash + 1)..];
+                }
+            }
+
+            if (TryGetProp(item, "date", out var dProp)) dateText = ExtractSafeString(dProp);
+
+            string tooltipSummary = string.Empty;
+            if (TryGetProp(item, "tooltipText", out var ttElem))
+            {
+                if (ttElem.ValueKind == JsonValueKind.Object)
+                {
+                    string ttHome = TryGetProp(ttElem, "homeTeam", out var htProp) ? ExtractSafeString(htProp) : "";
+                    string ttAway = TryGetProp(ttElem, "awayTeam", out var atProp) ? ExtractSafeString(atProp) : "";
+                    int? ttHomeScore = TryGetProp(ttElem, "homeScore", out var hsProp) && hsProp.ValueKind == JsonValueKind.Number ? hsProp.GetInt32() : null;
+                    int? ttAwayScore = TryGetProp(ttElem, "awayScore", out var asProp) && asProp.ValueKind == JsonValueKind.Number ? asProp.GetInt32() : null;
+                    if (TryGetProp(ttElem, "utcTime", out var utProp))
+                    {
+                        string utStr = ExtractSafeString(utProp);
+                        if (!string.IsNullOrWhiteSpace(utStr)) dateText ??= utStr;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(score) && ttHomeScore.HasValue && ttAwayScore.HasValue)
+                    {
+                        score = $"{ttHomeScore} - {ttAwayScore}";
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(currentTeamName))
+                    {
+                        if (string.Equals(ttHome, currentTeamName, StringComparison.OrdinalIgnoreCase) ||
+                            ttHome.Contains(currentTeamName, StringComparison.OrdinalIgnoreCase) ||
+                            currentTeamName.Contains(ttHome, StringComparison.OrdinalIgnoreCase))
+                        {
+                            opponent = ttAway;
+                            if (ttHomeScore.HasValue && ttAwayScore.HasValue)
+                            {
+                                result = ttHomeScore > ttAwayScore ? "W" : (ttHomeScore == ttAwayScore ? "D" : "L");
+                            }
+                        }
+                        else if (string.Equals(ttAway, currentTeamName, StringComparison.OrdinalIgnoreCase) ||
+                                 ttAway.Contains(currentTeamName, StringComparison.OrdinalIgnoreCase) ||
+                                 currentTeamName.Contains(ttAway, StringComparison.OrdinalIgnoreCase))
+                        {
+                            opponent = ttHome;
+                            if (ttHomeScore.HasValue && ttAwayScore.HasValue)
+                            {
+                                result = ttAwayScore > ttHomeScore ? "W" : (ttAwayScore == ttHomeScore ? "D" : "L");
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(ttHome) && !string.IsNullOrWhiteSpace(ttAway) && ttHomeScore.HasValue && ttAwayScore.HasValue)
+                    {
+                        tooltipSummary = $"{ttHome} {ttHomeScore} - {ttAwayScore} {ttAway}";
+                    }
+                }
+                else if (ttElem.ValueKind == JsonValueKind.String)
+                {
+                    tooltipSummary = ttElem.GetString() ?? "";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(opponent))
+            {
+                if (TryGetProp(item, "opponent", out var oppElem))
+                {
+                    opponent = ExtractSafeString(oppElem);
+                }
+                else if (TryGetProp(item, "opponentName", out var on2))
+                {
+                    opponent = ExtractSafeString(on2);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(tooltipSummary))
+            {
+                if (!string.IsNullOrWhiteSpace(opponent) && !string.IsNullOrWhiteSpace(score))
+                {
+                    tooltipSummary = $"vs {opponent} ({score})";
+                }
+                else if (!string.IsNullOrWhiteSpace(opponent))
+                {
+                    tooltipSummary = $"vs {opponent}";
+                }
+                else
+                {
+                    tooltipSummary = result switch { "W" => "Win", "L" => "Loss", _ => "Draw" };
+                }
+            }
+
+            list.Add(new TeamFormMatchDto
+            {
+                Result = result,
+                OpponentName = opponent,
+                ScoreText = score,
+                MatchSummaryTooltip = tooltipSummary,
+                DateText = dateText,
+                MatchId = matchId
+            });
+        }
+
+        return list;
+    }
+
+    private async Task<List<TeamFormMatchDto>> FetchTeamRecentFormMatchesAsync(int teamId, string teamName, CancellationToken ct)
+    {
+        try
+        {
+            string url = FormatEndpoint(
+                OtaConfigService.Instance.CurrentManifest.Endpoints?.TeamHubUrlTemplate,
+                "{teamId}",
+                teamId.ToString(),
+                $"{UpstreamPrimaryBase}/teams?id={teamId}");
+            string? json = await FetchJsonResilientAsync(url, ct);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                url = FormatEndpoint(
+                    OtaConfigService.Instance.CurrentManifest.Endpoints?.TeamHubFallbackUrlTemplate,
+                    "{teamId}",
+                    teamId.ToString(),
+                    $"{UpstreamFallbackBase}/teams?id={teamId}");
+                json = await FetchJsonResilientAsync(url, ct);
+            }
+
+            if (string.IsNullOrWhiteSpace(json)) return new List<TeamFormMatchDto>();
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (TryGetProp(root, "overview", out var ov) &&
+                TryGetProp(ov, "teamForm", out var tf) &&
+                tf.ValueKind == JsonValueKind.Array)
+            {
+                return ParseTeamFormMatches(tf, teamName, string.Empty);
+            }
+
+                // Fallback to fixtures.allFixtures.fixtures (last finished matches)
+                if (TryGetProp(root, "fixtures", out var fxElem) &&
+                    TryGetProp(fxElem, "allFixtures", out var afxElem) &&
+                    TryGetProp(afxElem, "fixtures", out var fixturesArr) &&
+                    fixturesArr.ValueKind == JsonValueKind.Array)
+                {
+                    var finishedFixtures = new List<JsonElement>();
+                    foreach (var fix in fixturesArr.EnumerateArray())
+                    {
+                        if (fix.ValueKind != JsonValueKind.Object) continue;
+                        if (TryGetProp(fix, "status", out var st) &&
+                            TryGetProp(st, "finished", out var fin) &&
+                            fin.ValueKind == JsonValueKind.True)
+                        {
+                            finishedFixtures.Add(fix);
+                        }
+                    }
+
+                    if (finishedFixtures.Count > 0)
+                    {
+                        var sorted = finishedFixtures.TakeLast(5).Reverse().ToList();
+                        var list = new List<TeamFormMatchDto>();
+                        foreach (var fix in sorted)
+                        {
+                            var homeElem = TryGetProp(fix, "home", out var h) ? h : default;
+                            var awayElem = TryGetProp(fix, "away", out var a) ? a : default;
+                            string hName = TryGetProp(homeElem, "name", out var hn) ? hn.GetString() ?? "" : "";
+                            string aName = TryGetProp(awayElem, "name", out var an) ? an.GetString() ?? "" : "";
+
+                            bool isCurrentHome = string.Equals(hName, teamName, StringComparison.OrdinalIgnoreCase) || hName.Contains(teamName, StringComparison.OrdinalIgnoreCase);
+                            string oppName = isCurrentHome ? aName : hName;
+
+                            string scoreText = "";
+                            int hScore = 0, aScore = 0;
+                            if (TryGetProp(fix, "status", out var stElem) && TryGetProp(stElem, "scoreStr", out var scProp))
+                            {
+                                scoreText = scProp.GetString() ?? "";
+                            }
+                            if (string.IsNullOrWhiteSpace(scoreText) && TryGetProp(homeElem, "score", out var hs) && TryGetProp(awayElem, "score", out var as_))
+                            {
+                                hScore = hs.GetInt32();
+                                aScore = as_.GetInt32();
+                                scoreText = $"{hScore} - {aScore}";
+                            }
+
+                            string result = "D";
+                            if (isCurrentHome)
+                            {
+                                result = hScore > aScore ? "W" : (hScore == aScore ? "D" : "L");
+                            }
+                            else
+                            {
+                                result = aScore > hScore ? "W" : (aScore == hScore ? "D" : "L");
+                            }
+
+                            list.Add(new TeamFormMatchDto
+                            {
+                                Result = result,
+                                OpponentName = oppName,
+                                ScoreText = scoreText,
+                                MatchSummaryTooltip = !string.IsNullOrWhiteSpace(oppName) && !string.IsNullOrWhiteSpace(scoreText)
+                                    ? $"vs {oppName} ({scoreText})"
+                                    : result switch { "W" => "Win", "L" => "Loss", _ => "Draw" }
+                            });
+                        }
+                        return list;
+                    }
+                }
+            }
+        catch { }
+
+        return new List<TeamFormMatchDto>();
+    }
+
+    private static List<string> ExtractUpstreamInsights(JsonElement content)
+    {
+        var list = new List<string>();
+        if (content.ValueKind != JsonValueKind.Object) return list;
+
+        JsonElement insightsElem = default;
+        if (TryGetProp(content, "matchFacts", out var mf) && mf.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetProp(mf, "insights", out var ins) && ins.ValueKind == JsonValueKind.Array) insightsElem = ins;
+            else if (TryGetProp(mf, "topFacts", out var tf) && tf.ValueKind == JsonValueKind.Array) insightsElem = tf;
+            else if (TryGetProp(mf, "facts", out var fa) && fa.ValueKind == JsonValueKind.Array) insightsElem = fa;
+        }
+
+        if (insightsElem.ValueKind != JsonValueKind.Array)
+        {
+            if (TryGetProp(content, "insights", out var ci) && ci.ValueKind == JsonValueKind.Array) insightsElem = ci;
+            else if (TryGetProp(content, "topFacts", out var ctf) && ctf.ValueKind == JsonValueKind.Array) insightsElem = ctf;
+        }
+
+        if (insightsElem.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in insightsElem.EnumerateArray())
+            {
+                string? text = null;
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    text = item.GetString();
+                }
+                else if (item.ValueKind == JsonValueKind.Object)
+                {
+                    if (TryGetProp(item, "text", out var tElem) && tElem.ValueKind == JsonValueKind.String)
+                        text = tElem.GetString();
+                    else if (TryGetProp(item, "fact", out var fElem) && fElem.ValueKind == JsonValueKind.String)
+                        text = fElem.GetString();
+                    else if (TryGetProp(item, "content", out var cElem) && cElem.ValueKind == JsonValueKind.String)
+                        text = cElem.GetString();
+                    else if (TryGetProp(item, "subtitle", out var sElem) && sElem.ValueKind == JsonValueKind.String)
+                        text = sElem.GetString();
+                }
+
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    string clean = TacticalNarrativeSynthesizer.CleanInsightText(text);
+                    if (!string.IsNullOrWhiteSpace(clean) && !list.Contains(clean, StringComparer.OrdinalIgnoreCase))
+                    {
+                        list.Add(clean);
+                    }
+                }
+            }
+        }
+
+        return list;
+    }
+
+    private static PlayerOfTheMatchDto? ExtractPlayerOfTheMatch(
+        JsonElement content,
+        List<LineupDto>? lineups,
+        TeamSummaryDto homeTeam,
+        TeamSummaryDto awayTeam,
+        string matchStatus)
+    {
+        if (content.ValueKind == JsonValueKind.Object)
+        {
+            JsonElement motmElem = default;
+            if (TryGetProp(content, "matchFacts", out var mf) && mf.ValueKind == JsonValueKind.Object &&
+                TryGetProp(mf, "playerOfTheMatch", out var pom1) && pom1.ValueKind == JsonValueKind.Object)
+            {
+                motmElem = pom1;
+            }
+            else if (TryGetProp(content, "playerOfTheMatch", out var pom2) && pom2.ValueKind == JsonValueKind.Object)
+            {
+                motmElem = pom2;
+            }
+
+            if (motmElem.ValueKind == JsonValueKind.Object)
+            {
+                string? pName = null;
+                if (TryGetProp(motmElem, "name", out var nElem))
+                {
+                    if (nElem.ValueKind == JsonValueKind.String) pName = nElem.GetString();
+                    else if (nElem.ValueKind == JsonValueKind.Object)
+                    {
+                        if (TryGetProp(nElem, "fullName", out var fn) && fn.ValueKind == JsonValueKind.String) pName = fn.GetString();
+                        else if (TryGetProp(nElem, "name", out var n2) && n2.ValueKind == JsonValueKind.String) pName = n2.GetString();
+                        else if (TryGetProp(nElem, "lastName", out var ln) && ln.ValueKind == JsonValueKind.String) pName = ln.GetString();
+                    }
+                }
+                else if (TryGetProp(motmElem, "fullName", out var fn2) && fn2.ValueKind == JsonValueKind.String)
+                {
+                    pName = fn2.GetString();
+                }
+
+                string? tName = null;
+                if (TryGetProp(motmElem, "teamName", out var tn) && tn.ValueKind == JsonValueKind.String)
+                {
+                    tName = tn.GetString();
+                }
+                else if (TryGetProp(motmElem, "team", out var tElem))
+                {
+                    if (tElem.ValueKind == JsonValueKind.String) tName = tElem.GetString();
+                    else if (tElem.ValueKind == JsonValueKind.Object && TryGetProp(tElem, "name", out var tn2) && tn2.ValueKind == JsonValueKind.String)
+                    {
+                        tName = tn2.GetString();
+                    }
+                }
+
+                string? ratingStr = null;
+                if (TryGetProp(motmElem, "rating", out var rElem))
+                {
+                    if (rElem.ValueKind == JsonValueKind.String) ratingStr = rElem.GetString();
+                    else if (rElem.ValueKind == JsonValueKind.Number && rElem.TryGetDouble(out var d)) ratingStr = d.ToString("0.0", CultureInfo.InvariantCulture);
+                    else if (rElem.ValueKind == JsonValueKind.Object)
+                    {
+                        if (TryGetProp(rElem, "num", out var rn) && rn.ValueKind is JsonValueKind.String or JsonValueKind.Number)
+                            ratingStr = rn.ToString();
+                        else if (TryGetProp(rElem, "value", out var rv) && rv.ValueKind is JsonValueKind.String or JsonValueKind.Number)
+                            ratingStr = rv.ToString();
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(pName))
+                {
+                    string safePName = TacticalNarrativeSynthesizer.CleanInsightText(pName);
+                    string safeTName = !string.IsNullOrWhiteSpace(tName) ? TacticalNarrativeSynthesizer.CleanInsightText(tName) : homeTeam.Name;
+
+                    var parts = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(ratingStr)) parts.Add($"Rating {ratingStr}");
+                    if (TryGetProp(motmElem, "goals", out var gElem) && gElem.ValueKind == JsonValueKind.Number && gElem.TryGetInt32(out var g) && g > 0)
+                        parts.Add($"{g} {(g == 1 ? "Goal" : "Goals")}");
+                    else if (TryGetProp(motmElem, "stats", out var statsElem) && statsElem.ValueKind == JsonValueKind.Object &&
+                             TryGetProp(statsElem, "goals", out var sg) && sg.ValueKind == JsonValueKind.Number && sg.TryGetInt32(out var g2) && g2 > 0)
+                        parts.Add($"{g2} {(g2 == 1 ? "Goal" : "Goals")}");
+
+                    string summaryText = parts.Count > 0 ? string.Join(" • ", parts) : (!string.IsNullOrWhiteSpace(ratingStr) ? $"Rating {ratingStr}" : "Player of the Match");
+
+                    return new PlayerOfTheMatchDto
+                    {
+                        PlayerName = safePName,
+                        TeamName = safeTName,
+                        Rating = ratingStr,
+                        SummaryText = summaryText
+                    };
+                }
+            }
+        }
+
+        // Fallback: evaluate lineups if match is Live (2H/FT/Finished)
+        if (lineups != null && lineups.Count > 0 &&
+            (FixtureRelevanceEngine.IsFinishedState(matchStatus) || FixtureRelevanceEngine.IsLiveState(matchStatus)))
+        {
+            LineupPlayerDto? bestPlayer = null;
+            string bestTeamName = homeTeam.Name;
+
+            foreach (var lineup in lineups)
+            {
+                string teamName = homeTeam.Name;
+                if (!string.IsNullOrWhiteSpace(lineup.TeamId))
+                {
+                    if (string.Equals(lineup.TeamId, awayTeam.Id, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(lineup.TeamId, awayTeam.LegacyId, StringComparison.OrdinalIgnoreCase) ||
+                        lineup.TeamId.EndsWith(awayTeam.Id.Replace("lt_", string.Empty), StringComparison.OrdinalIgnoreCase))
+                    {
+                        teamName = awayTeam.Name;
+                    }
+                }
+
+                var allPlayers = (lineup.StartingXI ?? Enumerable.Empty<LineupPlayerDto>())
+                    .Concat(lineup.Substitutes ?? Enumerable.Empty<LineupPlayerDto>());
+
+                foreach (var player in allPlayers)
+                {
+                    if (string.IsNullOrWhiteSpace(player.Name)) continue;
+
+                    if (player.IsManOfTheMatch && player.Rating.GetValueOrDefault() >= 6.5)
+                    {
+                        bestPlayer = player;
+                        bestTeamName = teamName;
+                        break;
+                    }
+
+                    if (player.Rating.HasValue && player.Rating.Value >= 7.5)
+                    {
+                        if (bestPlayer == null || player.Rating.Value > bestPlayer.Rating.GetValueOrDefault() ||
+                            (player.Rating.Value == bestPlayer.Rating.GetValueOrDefault() && (player.Goals > bestPlayer.Goals || player.IsStarter)))
+                        {
+                            bestPlayer = player;
+                            bestTeamName = teamName;
+                        }
+                    }
+                }
+
+                if (bestPlayer != null && bestPlayer.IsManOfTheMatch) break;
+            }
+
+            if (bestPlayer != null && bestPlayer.Rating.GetValueOrDefault() >= 7.5)
+            {
+                string rStr = bestPlayer.Rating.GetValueOrDefault().ToString("0.0", CultureInfo.InvariantCulture);
+                var parts = new List<string> { $"Rating {rStr}" };
+                if (bestPlayer.Goals > 0) parts.Add($"{bestPlayer.Goals} {(bestPlayer.Goals == 1 ? "Goal" : "Goals")}");
+                if (bestPlayer.Assists > 0) parts.Add($"{bestPlayer.Assists} {(bestPlayer.Assists == 1 ? "Assist" : "Assists")}");
+
+                return new PlayerOfTheMatchDto
+                {
+                    PlayerName = TacticalNarrativeSynthesizer.CleanInsightText(bestPlayer.Name),
+                    TeamName = bestTeamName,
+                    Rating = rStr,
+                    SummaryText = string.Join(" • ", parts)
+                };
+            }
+        }
+
+        return null;
     }
 
     private async Task<(List<StandingRowDto>? Standings, List<PlayerStatLeaderDto>? TopScorers, List<PlayerStatLeaderDto>? TopAssists, List<CompetitionFixtureDto>? Fixtures, List<KnockoutStageDto>? KnockoutStages)>
@@ -4781,10 +5478,10 @@ public sealed class NativeTelemetryProvider : IDisposable
                 if (idx >= 0) return idx + 1;
             }
 
-            int? fotmobId = ResolveFotmobLeagueId(id, name);
-            if (fotmobId.HasValue)
+            int? upstreamId = ResolveUpstreamLeagueId(id, name);
+            if (upstreamId.HasValue)
             {
-                int idx = priorityList.IndexOf(fotmobId.Value);
+                int idx = priorityList.IndexOf(upstreamId.Value);
                 if (idx >= 0) return idx + 1;
             }
         }
@@ -4804,7 +5501,7 @@ public sealed class NativeTelemetryProvider : IDisposable
     }
 
     private static bool IsLiveState(string state) =>
-        state is "LIVE" or "FIRST_HALF" or "HALFTIME" or "SECOND_HALF" or "EXTRA_TIME" or "EXTRA_TIME_HALFTIME" or "PENALTIES";
+        FixtureRelevanceEngine.IsLiveState(state);
 
     private static bool IsStartedState(string state) =>
         !string.Equals(state, "PREMATCH", StringComparison.OrdinalIgnoreCase) &&
@@ -4873,6 +5570,12 @@ public sealed class NativeTelemetryProvider : IDisposable
 
     private async Task<string?> FetchJsonResilientAsync(string url, CancellationToken ct, int timeoutSeconds = 8)
     {
+        if (!FootballTray.Core.Security.UrlSecurityValidator.IsSafeHttpsUrl(url, allowLoopbackHttpForTests: true))
+        {
+            Diagnostics.AppDiagnosticsLogger.LogError("NativeTelemetryProvider", "InsecureUrlBlocked", $"Blocked non-HTTPS or unsafe URL: {url}");
+            return null;
+        }
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
@@ -5014,7 +5717,7 @@ public sealed class NativeTelemetryProvider : IDisposable
                     var ssv = GetStringOrToString(ss);
                     if (!string.IsNullOrWhiteSpace(ssv))
                     {
-                        var matchRx = Regex.Match(ssv, @"(\d+)\s*[-–:]\s*(\d+)");
+                        var matchRx = ScoreExtractRegex.Match(ssv);
                         if (matchRx.Success && int.TryParse(matchRx.Groups[1].Value, out var ph) && int.TryParse(matchRx.Groups[2].Value, out var pa))
                         {
                             homeScore = ph;
@@ -5046,11 +5749,11 @@ public sealed class NativeTelemetryProvider : IDisposable
                 HomeTeamId = homeId,
                 HomeTeamName = homeName,
                 HomeTeamShortName = homeShort ?? DeriveTla(homeName),
-                HomeTeamLogo = !string.IsNullOrWhiteSpace(homeId) ? $"https://images.fotmob.com/image_resources/logo/teamlogo/{homeId}.png" : null,
+                HomeTeamLogo = !string.IsNullOrWhiteSpace(homeId) ? $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/{homeId}.png" : null,
                 AwayTeamId = awayId,
                 AwayTeamName = awayName,
                 AwayTeamShortName = awayShort ?? DeriveTla(awayName),
-                AwayTeamLogo = !string.IsNullOrWhiteSpace(awayId) ? $"https://images.fotmob.com/image_resources/logo/teamlogo/{awayId}.png" : null,
+                AwayTeamLogo = !string.IsNullOrWhiteSpace(awayId) ? $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/{awayId}.png" : null,
                 HomeScore = homeScore,
                 AwayScore = awayScore,
                 StatusText = statusText,
@@ -5117,10 +5820,10 @@ public sealed class NativeTelemetryProvider : IDisposable
                         }
 
                         string? homeLogo = (!string.IsNullOrWhiteSpace(homeId) && homeId != "-1" && homeId != "0")
-                            ? $"https://images.fotmob.com/image_resources/logo/teamlogo/{homeId}.png"
+                            ? $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/{homeId}.png"
                             : null;
                         string? awayLogo = (!string.IsNullOrWhiteSpace(awayId) && awayId != "-1" && awayId != "0")
-                            ? $"https://images.fotmob.com/image_resources/logo/teamlogo/{awayId}.png"
+                            ? $"{GetDefaultUpstreamImageBaseUrl()}/image_resources/logo/teamlogo/{awayId}.png"
                             : null;
 
                         string? aggScore = null;

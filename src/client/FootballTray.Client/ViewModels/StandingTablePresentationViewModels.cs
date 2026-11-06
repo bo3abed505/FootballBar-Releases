@@ -388,7 +388,7 @@ public sealed class CompetitionFixtureViewModel : INotifyPropertyChanged
 
         return new TrayMatchDto
         {
-            Id = !string.IsNullOrWhiteSpace(Id) ? (Id.StartsWith("fotmob_") ? Id : $"fotmob_{Id}") : $"fixture_{Guid.NewGuid():N}",
+            Id = !string.IsNullOrWhiteSpace(Id) ? (Id.StartsWith("lt_") ? Id : $"lt_{Services.Preferences.CanonicalEntityIds.StripLegacyProviderPrefix(Id)}") : $"fixture_{Guid.NewGuid():N}",
             LegacyId = Id,
             Competition = !string.IsNullOrWhiteSpace(CompetitionId) ? new CompetitionDto
             {

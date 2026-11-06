@@ -21,7 +21,7 @@ namespace FootballTray.Client.Services.Telemetry;
 /// </summary>
 public sealed class OtaConfigService : IDisposable
 {
-    public const string DefaultManifestUrl = "https://github.com/bo3abed505/FootballTray-Releases/releases/latest/download/ota-telemetry-manifest.json";
+    public const string DefaultManifestUrl = "https://github.com/bo3abed505/FootballBar-Releases/releases/latest/download/ota-telemetry-manifest.json";
 
     private static readonly Lazy<OtaConfigService> _lazyInstance = new(() => new OtaConfigService());
     public static OtaConfigService Instance => _lazyInstance.Value;
@@ -114,7 +114,7 @@ public sealed class OtaConfigService : IDisposable
             {
                 Timeout = TimeSpan.FromSeconds(10)
             };
-            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FootballTray-Client/1.3.0");
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FootballTray-Client/1.3.1");
             _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json");
             _disposeClient = true;
         }
@@ -135,6 +135,7 @@ public sealed class OtaConfigService : IDisposable
             else
             {
                 _currentManifest = cachedRecord.Manifest;
+                SanitizeAndValidateManifest(_currentManifest);
                 _currentETag = cachedRecord.ETag;
                 _lastCheckedAt = cachedRecord.LastCheckedAt;
                 AppLogger.Info("OTA", "CacheLoaded", $"Loaded cached OTA telemetry manifest v{_currentManifest.ManifestVersion} (ETag: {_currentETag ?? "none"}).");
@@ -145,7 +146,7 @@ public sealed class OtaConfigService : IDisposable
             _currentManifest = defaultManifest;
             _currentETag = null;
             _lastCheckedAt = null;
-            AppLogger.Info("OTA", "DefaultLoaded", "No cached OTA telemetry manifest found. Initialized with compiled default manifest v1.3.0.");
+            AppLogger.Info("OTA", "DefaultLoaded", "No cached OTA telemetry manifest found. Initialized with compiled default manifest v1.3.1.");
         }
     }
 
@@ -245,6 +246,8 @@ public sealed class OtaConfigService : IDisposable
                     AppDiagnosticsLogger.LogError("OtaConfigService", "InvalidManifest", "Received empty or malformed OTA telemetry manifest.");
                     return false;
                 }
+
+                SanitizeAndValidateManifest(manifest);
 
                 string? newEtag = res.Headers.ETag?.Tag ?? res.Headers.ETag?.ToString();
                 var now = DateTimeOffset.UtcNow;
@@ -357,24 +360,24 @@ public sealed class OtaConfigService : IDisposable
         return new OtaTelemetryManifestDto
         {
             SchemaVersion = "1.0",
-            ManifestVersion = "1.3.0",
+            ManifestVersion = "1.3.1",
             UpdatedAt = DateTimeOffset.UtcNow,
             RoutingMode = "auto",
             CloudBaseUrl = null,
             UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             Endpoints = new OtaTelemetryEndpointsDto
             {
-                MatchesByDateUrlTemplate = "https://www.fotmob.com/api/data/matches?date={date}",
-                MatchesByDateFallbackUrlTemplate = "https://www.fotmob.com/api/matches?date={date}",
-                MatchDetailsUrlTemplate = "https://www.fotmob.com/api/data/matchDetails?matchId={matchId}",
-                MatchDetailsFallbackUrlTemplate = "https://www.fotmob.com/api/matchDetails?matchId={matchId}",
-                LeagueHubUrlTemplate = "https://www.fotmob.com/api/data/leagues?id={leagueId}",
-                LeagueHubFallbackUrlTemplate = "https://www.fotmob.com/api/leagues?id={leagueId}",
-                TeamHubUrlTemplate = "https://www.fotmob.com/api/data/teams?id={teamId}",
-                TeamHubFallbackUrlTemplate = "https://www.fotmob.com/api/teams?id={teamId}",
-                SearchSuggestUrlTemplate = "https://www.fotmob.com/api/search/suggest?term={term}",
-                TeamLogoUrlTemplate = "https://images.fotmob.com/image_resources/logo/teamlogo/{teamId}.png",
-                LeagueLogoUrlTemplate = "https://images.fotmob.com/image_resources/logo/leaguelogo/dark/{leagueId}.png"
+                MatchesByDateUrlTemplate = "/api/data/matches?date={date}",
+                MatchesByDateFallbackUrlTemplate = "/api/matches?date={date}",
+                MatchDetailsUrlTemplate = "/api/data/matchDetails?matchId={matchId}",
+                MatchDetailsFallbackUrlTemplate = "/api/matchDetails?matchId={matchId}",
+                LeagueHubUrlTemplate = "/api/data/leagues?id={leagueId}",
+                LeagueHubFallbackUrlTemplate = "/api/leagues?id={leagueId}",
+                TeamHubUrlTemplate = "/api/data/teams?id={teamId}",
+                TeamHubFallbackUrlTemplate = "/api/teams?id={teamId}",
+                SearchSuggestUrlTemplate = "/api/search/suggest?term={term}",
+                TeamLogoUrlTemplate = "/image_resources/logo/teamlogo/{teamId}.png",
+                LeagueLogoUrlTemplate = "/image_resources/logo/leaguelogo/dark/{leagueId}.png"
             },
             CompetitionOverrides = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
             {
@@ -486,6 +489,49 @@ public sealed class OtaConfigService : IDisposable
                 61, 57, 71, 268, 112, 130, 48, 40
             }
         };
+    }
+
+    private static void SanitizeAndValidateManifest(OtaTelemetryManifestDto manifest)
+    {
+        if (!string.IsNullOrWhiteSpace(manifest.CloudBaseUrl))
+        {
+            if (!FootballTray.Core.Security.UrlSecurityValidator.IsSafeHttpsUrl(manifest.CloudBaseUrl, allowLoopbackHttpForTests: true))
+            {
+                AppDiagnosticsLogger.LogError("OtaConfigService", "InsecureCloudBaseUrl", $"Insecure or invalid cloudBaseUrl rejected: {manifest.CloudBaseUrl}");
+                manifest.CloudBaseUrl = null;
+            }
+        }
+
+        var defaultEndpoints = new OtaTelemetryEndpointsDto();
+        var ep = manifest.Endpoints;
+        if (ep != null)
+        {
+            ep.MatchesByDateUrlTemplate = ValidateEndpointTemplate(ep.MatchesByDateUrlTemplate, defaultEndpoints.MatchesByDateUrlTemplate);
+            ep.MatchesByDateFallbackUrlTemplate = ValidateEndpointTemplate(ep.MatchesByDateFallbackUrlTemplate, defaultEndpoints.MatchesByDateFallbackUrlTemplate);
+            ep.MatchDetailsUrlTemplate = ValidateEndpointTemplate(ep.MatchDetailsUrlTemplate, defaultEndpoints.MatchDetailsUrlTemplate);
+            ep.MatchDetailsFallbackUrlTemplate = ValidateEndpointTemplate(ep.MatchDetailsFallbackUrlTemplate, defaultEndpoints.MatchDetailsFallbackUrlTemplate);
+            ep.LeagueHubUrlTemplate = ValidateEndpointTemplate(ep.LeagueHubUrlTemplate, defaultEndpoints.LeagueHubUrlTemplate);
+            ep.LeagueHubFallbackUrlTemplate = ValidateEndpointTemplate(ep.LeagueHubFallbackUrlTemplate, defaultEndpoints.LeagueHubFallbackUrlTemplate);
+            ep.TeamHubUrlTemplate = ValidateEndpointTemplate(ep.TeamHubUrlTemplate, defaultEndpoints.TeamHubUrlTemplate);
+            ep.TeamHubFallbackUrlTemplate = ValidateEndpointTemplate(ep.TeamHubFallbackUrlTemplate, defaultEndpoints.TeamHubFallbackUrlTemplate);
+            ep.SearchSuggestUrlTemplate = ValidateEndpointTemplate(ep.SearchSuggestUrlTemplate, defaultEndpoints.SearchSuggestUrlTemplate);
+            ep.TeamLogoUrlTemplate = ValidateEndpointTemplate(ep.TeamLogoUrlTemplate, defaultEndpoints.TeamLogoUrlTemplate);
+            ep.LeagueLogoUrlTemplate = ValidateEndpointTemplate(ep.LeagueLogoUrlTemplate, defaultEndpoints.LeagueLogoUrlTemplate);
+        }
+    }
+
+    private static string ValidateEndpointTemplate(string? template, string defaultFallback)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return defaultFallback;
+        if (template.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            template.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!FootballTray.Core.Security.UrlSecurityValidator.IsSafeHttpsUrl(template, allowLoopbackHttpForTests: true))
+            {
+                return defaultFallback;
+            }
+        }
+        return template;
     }
 
     public void Dispose()

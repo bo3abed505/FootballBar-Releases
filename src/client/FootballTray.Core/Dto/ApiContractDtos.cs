@@ -451,6 +451,37 @@ public class MatchDetailDto
 
     [JsonPropertyName("trust")]
     public V2TrustMetadataDto? Trust { get; set; }
+
+    [JsonPropertyName("tacticalRecapBadge")]
+    public string? TacticalRecapBadge { get; set; }
+
+    [JsonPropertyName("tacticalRecapSummary")]
+    public string? TacticalRecapSummary { get; set; }
+
+    [JsonPropertyName("keyMatchInsights")]
+    public List<string> KeyMatchInsights { get; set; } = new();
+
+    [JsonPropertyName("playerOfTheMatch")]
+    public PlayerOfTheMatchDto? PlayerOfTheMatch { get; set; }
+}
+
+public class PlayerOfTheMatchDto
+{
+    [JsonPropertyName("playerName")]
+    public string PlayerName { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamName")]
+    public string TeamName { get; set; } = string.Empty;
+
+    [JsonPropertyName("rating")]
+    public string? Rating { get; set; }
+
+    [JsonPropertyName("summaryText")]
+    public string? SummaryText { get; set; }
+}
+
+public class MatchCenterDto : MatchDetailDto
+{
 }
 
 public class CoachDto
@@ -631,6 +662,27 @@ public class FormMatchDto
     public string? DateUtc { get; set; }
 }
 
+public class TeamFormMatchDto
+{
+    [JsonPropertyName("result")]
+    public string Result { get; set; } = "D"; // "W", "D", "L"
+
+    [JsonPropertyName("opponentName")]
+    public string OpponentName { get; set; } = string.Empty;
+
+    [JsonPropertyName("scoreText")]
+    public string ScoreText { get; set; } = string.Empty;
+
+    [JsonPropertyName("matchSummaryTooltip")]
+    public string MatchSummaryTooltip { get; set; } = string.Empty;
+
+    [JsonPropertyName("dateText")]
+    public string? DateText { get; set; }
+
+    [JsonPropertyName("matchId")]
+    public string? MatchId { get; set; }
+}
+
 public class H2HAndPredictionsDto
 {
     [JsonPropertyName("homeWins")]
@@ -650,6 +702,12 @@ public class H2HAndPredictionsDto
 
     [JsonPropertyName("awayForm")]
     public List<FormMatchDto> AwayForm { get; set; } = new();
+
+    [JsonPropertyName("homeFormMatches")]
+    public List<TeamFormMatchDto> HomeFormMatches { get; set; } = new();
+
+    [JsonPropertyName("awayFormMatches")]
+    public List<TeamFormMatchDto> AwayFormMatches { get; set; } = new();
 
     [JsonPropertyName("homeWinProbabilityPct")]
     public int HomeWinProbabilityPct { get; set; }

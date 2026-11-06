@@ -19,7 +19,7 @@ namespace FootballTray.Client.Services.Updates;
 /// </summary>
 public sealed class UpdateDiscoveryService : IUpdateDiscoveryService
 {
-    public const string DefaultFeedUrl = "https://github.com/bo3abed505/FootballTray-Releases/releases/latest/download/release-manifest.json";
+    public const string DefaultFeedUrl = "https://github.com/bo3abed505/FootballBar-Releases/releases/latest/download/release-manifest.json";
     public const string FeedUrlEnvironmentVariable = "FOOTBALLTRAY_UPDATE_FEED_URL";
     public const int MaxAutomaticRedirections = 5;
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
@@ -51,7 +51,7 @@ public sealed class UpdateDiscoveryService : IUpdateDiscoveryService
     public static string ResolveFeedUrl()
     {
         string? envUrl = Environment.GetEnvironmentVariable(FeedUrlEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(envUrl))
+        if (!string.IsNullOrWhiteSpace(envUrl) && FootballTray.Core.Security.UrlSecurityValidator.IsSafeHttpsUrl(envUrl.Trim(), allowLoopbackHttpForTests: true))
         {
             return envUrl.Trim();
         }
@@ -132,6 +132,19 @@ public sealed class UpdateDiscoveryService : IUpdateDiscoveryService
 
     private async Task<UpdateCheckResult> ExecuteCheckCoreAsync()
     {
+        if (FootballTray.Core.AppRuntimeEnvironment.IsPackagedMsix)
+        {
+            CurrentState = UpdateCheckState.UpToDate;
+            LastCheckAttempt = DateTimeOffset.UtcNow;
+            LastFailureReason = null;
+            return UpdateCheckResult.UpToDate(
+                CurrentVersion,
+                CurrentVersion,
+                "Updates managed by Microsoft Store",
+                null,
+                LastCheckAttempt.Value);
+        }
+
         var previousState = CurrentState;
         CurrentState = UpdateCheckState.Checking;
         LastCheckAttempt = DateTimeOffset.UtcNow;
@@ -144,8 +157,8 @@ public sealed class UpdateDiscoveryService : IUpdateDiscoveryService
         try
         {
             // Validate Feed URL: must be absolute HTTPS
-            if (!Uri.TryCreate(FeedUrl, UriKind.Absolute, out var feedUri) ||
-                !string.Equals(feedUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            if (!FootballTray.Core.Security.UrlSecurityValidator.IsSafeHttpsUrl(FeedUrl, allowLoopbackHttpForTests: false) ||
+                !Uri.TryCreate(FeedUrl, UriKind.Absolute, out var feedUri))
             {
                 return FailCheck("Update feed URL must be an absolute HTTPS URI.", LastCheckAttempt.Value);
             }

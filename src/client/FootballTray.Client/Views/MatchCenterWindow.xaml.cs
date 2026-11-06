@@ -17,6 +17,7 @@ public sealed partial class MatchCenterWindow : Window
     public ObservableCollection<MatchTimelineItem> TimelineItems => ViewModel.TimelineItems;
 
     private readonly FootballApiClient _apiClient = new();
+    private readonly System.Threading.CancellationTokenSource _windowLifetimeCts = new();
     private string? _lastEtag;
     private DispatcherTimer? _liveRefreshTimer;
     private bool _isRefreshing;
@@ -535,6 +536,12 @@ public sealed partial class MatchCenterWindow : Window
     {
         Closed -= OnWindowClosed;
         StopLiveRefreshTimer();
+        try
+        {
+            _windowLifetimeCts.Cancel();
+            _windowLifetimeCts.Dispose();
+        }
+        catch { }
         _apiClient.Dispose();
 
         if (HomeTeamLogo != null)

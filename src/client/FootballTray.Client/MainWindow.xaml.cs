@@ -41,7 +41,7 @@ public sealed partial class MainWindow : Window
 
         string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         AppWindow.SetIcon(iconPath);
-        AppWindow.Title = "Footballtray";
+        AppWindow.Title = "FootballBar";
 
         var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _subclassProc = WindowSubclass;
@@ -58,10 +58,6 @@ public sealed partial class MainWindow : Window
 
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
-
-        // Silent Startup: Ensure MainWindow starts hidden until opened via tray or card
-        ShowWindow(hWnd, 0);
-        AppWindow.Hide();
     }
 
     public void Navigate(Type sourcePageType, object? parameter = null)

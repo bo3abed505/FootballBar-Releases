@@ -97,7 +97,17 @@ public sealed partial class SettingsPage : Page
             RunAtStartupToggle.IsOn = ViewModel.IsRunAtStartupEnabled;
 
             // 4. Updates & Diagnostics
-            UpdateCurrentVersionText.Text = $"Current: {ViewModel.CurrentVersionText}";
+            if (FootballTray.Core.AppRuntimeEnvironment.IsPackagedMsix)
+            {
+                UpdateCurrentVersionText.Text = $"Current: {ViewModel.CurrentVersionText} (Microsoft Store)";
+                CheckForUpdatesButton.Visibility = Visibility.Collapsed;
+                UpdateAvailablePanel.Visibility = Visibility.Collapsed;
+                UpdateStatusText.Text = "Updates managed by Microsoft Store";
+                UpdateStatusText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                UpdateCurrentVersionText.Text = $"Current: {ViewModel.CurrentVersionText}";
             CheckForUpdatesButton.IsEnabled = ViewModel.CanCheckForUpdates;
             CheckForUpdatesButton.Content = ViewModel.IsCheckingForUpdates ? "Checking..." : "Check for updates";
 
@@ -153,6 +163,8 @@ public sealed partial class SettingsPage : Page
             {
                 UpdateAvailablePanel.Visibility = Visibility.Collapsed;
                 InstallUpdateButton.Visibility = Visibility.Collapsed;
+            }
+
             }
 
             // Health Readout
@@ -372,6 +384,7 @@ public sealed partial class SettingsPage : Page
 
     private async void OnCheckForUpdatesClicked(object sender, RoutedEventArgs e)
     {
+        if (FootballTray.Core.AppRuntimeEnvironment.IsPackagedMsix) return;
         if (ViewModel != null)
         {
             await ViewModel.CheckForUpdatesAsync();
